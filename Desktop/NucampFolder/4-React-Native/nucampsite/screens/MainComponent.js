@@ -5,6 +5,8 @@ import DirectoryScreen from './DirectoryScreen';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import HomeScreen from './HomeScreen';
+import AboutScreen from './AboutScreen';
+import ContactScreen from './ContactScreen';
 
 const Drawer = createDrawerNavigator();
 
@@ -49,6 +51,34 @@ const DirectoryNavigator = () => {
     );
 };
 
+const AboutScreenNavigator = () => {
+    const Stack = createStackNavigator();
+    return (
+        <Stack.Navigator screenOptions={screenOptions}>
+            <Stack.Screen
+                name='About'
+                component={AboutScreen}
+                options={{ title: 'About' }}
+            />
+        </Stack.Navigator>
+    );
+};
+
+const ContactScreenNavigator = () => {
+    const Stack = createStackNavigator();
+    return (
+        <Stack.Navigator screenOptions={screenOptions}>
+            <Stack.Screen
+                name='Contact'
+                component={ContactScreen}
+                options={{ title: 'Contact' }}
+            />
+        </Stack.Navigator>
+    );
+};
+
+
+
 const Main = () => {
     return (
         <View
@@ -72,6 +102,18 @@ const Main = () => {
                     component={DirectoryNavigator}
                     options={{ title: 'Directory' }}
                 />
+              <Drawer.Screen
+                    name='About'
+                    component={AboutScreenNavigator}
+                    options={{ title: 'About' }}
+                />
+                <Drawer.Screen
+                    name='Contact'
+                    component={ContactScreenNavigator}
+                    options={{ title: 'Contact' }}
+                />
+
+
             </Drawer.Navigator>
         </View>
     );

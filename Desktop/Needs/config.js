@@ -5,7 +5,7 @@ const LOCAL_IP = '192.168.6.89';
 const USE_RAILWAY = true; // set false to develop locally
 
 const RAILWAY_NODE  = 'https://needs-v1-9-4-26-production.up.railway.app';
-const RAILWAY_FLASK = ''; // fill in after Flask service is deployed
+const RAILWAY_FLASK = 'https://llama-go-production.up.railway.app';
 
 export const NODE_API = USE_RAILWAY
   ? RAILWAY_NODE

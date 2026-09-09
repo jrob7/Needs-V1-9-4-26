@@ -1,7 +1,7 @@
 // Screens/FundraiserDetail.js
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity } from 'react-native';
-import { Video } from 'expo-av';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import FundraiserTransactionComplete from './FundraiserTransactionComplete';
 
 export default function FundraiserDetail({ route, navigation }) {
@@ -23,7 +23,7 @@ export default function FundraiserDetail({ route, navigation }) {
 
         {!!media?.uri && (
           media.type === 'video' ? (
-            <Video source={{ uri: media.uri }} style={styles.media} useNativeControls resizeMode="cover" />
+            <NeedsVideoPlayer uri={media.uri} style={styles.media} contentFit="cover" />
           ) : (
             <Image source={{ uri: media.uri }} style={styles.media} />
           )

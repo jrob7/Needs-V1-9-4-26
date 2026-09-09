@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { View, Text, Image, StyleSheet, ScrollView, TouchableOpacity, Animated, Easing } from 'react-native';
 import { UserContext } from '../server/CurrentUser';
-import { Video } from 'expo-av';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useNavigation } from '@react-navigation/native';
 
 const CurrentProfileView = () => {
@@ -75,12 +75,7 @@ const CurrentProfileView = () => {
       <View style={styles.aboutSection}>
         <Text style={styles.sectionTitle}>About:</Text>
         {introMedia && (
-          <Video
-            source={{ uri: introMedia }}
-            style={styles.media}
-            useNativeControls
-            resizeMode="contain"
-          />
+          <NeedsVideoPlayer uri={introMedia} style={styles.media} contentFit="contain" />
         )}
         <Text style={styles.aboutText}>This is a sample user profile description.</Text>
       </View>

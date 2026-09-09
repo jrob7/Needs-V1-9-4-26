@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { Video } from 'expo-av';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 
 import { NODE_API } from '../config';
 import { IS_WEB } from '../webLayout';
@@ -177,7 +177,7 @@ export default function InfoRequestBubble({ message, isMine, recipientId, onAnsw
 
       <Text style={styles.questionText}>Video (Optional)</Text>
       {video ? (
-        <Video source={{ uri: video.uri }} style={styles.mediaPreview} useNativeControls resizeMode="cover" />
+        <NeedsVideoPlayer uri={video.uri} style={styles.mediaPreview} contentFit="cover" />
       ) : (
         <TouchableOpacity style={styles.uploadBtn} onPress={pickVideo}>
           <Ionicons name="videocam-outline" size={IS_WEB ? 21 : 16} color="#2563EB" />

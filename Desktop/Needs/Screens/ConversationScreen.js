@@ -6,7 +6,7 @@ import {
   Platform, Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Video } from 'expo-av';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { UserContext } from '../server/CurrentUser';
 import InfoRequestBubble from './InfoRequestBubble';
@@ -74,7 +74,7 @@ const InfoAnswerCard = ({ item, isMine, onSendQuote }) => {
       ))}
       {photoUri && <Image source={{ uri: photoUri }} style={styles.infoAnswerMedia} />}
       {videoUri && (
-        <Video source={{ uri: videoUri }} style={styles.infoAnswerMedia} useNativeControls resizeMode="cover" />
+        <NeedsVideoPlayer uri={videoUri} style={styles.infoAnswerMedia} contentFit="cover" />
       )}
       {!isMine && onSendQuote && (
         <TouchableOpacity style={styles.sendQuoteBtn} onPress={onSendQuote}>

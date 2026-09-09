@@ -16,7 +16,8 @@ import {
   Alert,
 } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
-import { Video, Audio } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { setAudioModeAsync } from 'expo-audio';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { UserContext } from '../server/CurrentUser';
@@ -111,7 +112,7 @@ export default function NeedInquiryView() {
 
   useEffect(() => {
     (async () => {
-      await Audio.setAudioModeAsync({
+      await setAudioModeAsync({
         playsInSilentModeIOS: true,
         allowsRecordingIOS: false,
         shouldDuckAndroid: true,
@@ -247,22 +248,22 @@ export default function NeedInquiryView() {
     '| needs:', filteredNeeds.length,
     '| fundraisers:', filteredFr.length);
 
-  const stopAllVideos = async () => {
-    for (let vid of activeVideos) {
-      try { await vid.pauseAsync(); await vid.setIsMutedAsync(true); } catch {}
+  const stopAllVideos = () => {
+    for (let player of activeVideos) {
+      try { player.pause(); player.muted = true; } catch {}
     }
     activeVideos.clear();
   };
 
   const openNeed = async (item) => {
-    await stopAllVideos();
+    stopAllVideos();
     isActiveScreen.current = false;
     setActiveIndex(-1);
     navigation.navigate('SingleItemView', { item, fromNeedInquiry: true });
   };
 
   const openFundraiser = async (item) => {
-    await stopAllVideos();
+    stopAllVideos();
     isActiveScreen.current = false;
     setActiveIndex(-1);
     let createdByName = '';
@@ -1164,22 +1165,24 @@ const mStyles = StyleSheet.create({
 });
 
 function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, media, compact, onPress, isActive, onLayout, creatorName, creatorPic, onViewCreator, rightSlot }) {
-  const videoRef = useRef(null);
   const isVideo = media?.type === 'video' || (media?.uri || '').toLowerCase().endsWith('.mp4');
+  const player = useVideoPlayer(isVideo ? (media?.uri ?? null) : null, p => {
+    p.loop = true;
+    p.muted = true;
+  });
 
   useEffect(() => {
-    if (videoRef.current) {
-      if (isActive) {
-        activeVideos.add(videoRef.current);
-        videoRef.current.playAsync().catch(() => {});
-        videoRef.current.setIsMutedAsync(false);
-      } else {
-        videoRef.current.pauseAsync().catch(() => {});
-        videoRef.current.setIsMutedAsync(true);
-        activeVideos.delete(videoRef.current);
-      }
+    if (!player || !isVideo) return;
+    if (isActive) {
+      activeVideos.add(player);
+      try { player.play(); } catch {}
+      player.muted = false;
+    } else {
+      try { player.pause(); } catch {}
+      player.muted = true;
+      activeVideos.delete(player);
     }
-  }, [isActive]);
+  }, [isActive, player, isVideo]);
 
   // ── Web layout: text left, image right ───────────────────────────────────
   if (IS_WEB) {
@@ -1241,10 +1244,12 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
         {!!infoLine && <Text style={styles.info}>{infoLine}</Text>}
         {!!media?.uri && (
           isVideo ? (
-            <Video ref={videoRef} source={{ uri: media.uri }}
+            <VideoView
+              player={player}
               style={[styles.media, compact && styles.mediaCompact]}
-              resizeMode="cover" isLooping useNativeControls={false}
-              playsInSilentModeIOS shouldPlay={isActive} isMuted={!isActive} />
+              contentFit="cover"
+              nativeControls={false}
+            />
           ) : (
             <Image source={{ uri: media.uri }} style={[styles.media, compact && styles.mediaCompact]} />
           )

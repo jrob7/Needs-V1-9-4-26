@@ -1,10 +1,9 @@
 // components/Card.js
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet } from 'react-native';
-import { Video } from 'expo-av';
+import { VideoView, useVideoPlayer } from 'expo-video';
 
-// shared video registry so we can pause on navigation
-export const activeVideos = new Set();
+export const activeVideoPlayers = new Set();
 
 export default function Card({
   badgeLabel,
@@ -19,21 +18,24 @@ export default function Card({
   isActive,
   onLayout,
 }) {
-  const videoRef = useRef(null);
   const isVideo = media?.type === 'video' || (media?.uri || '').toLowerCase().endsWith('.mp4');
+  const player = useVideoPlayer(isVideo ? (media?.uri ?? null) : null, p => {
+    p.loop = true;
+    p.muted = true;
+  });
 
   useEffect(() => {
-    if (!videoRef.current) return;
+    if (!player || !isVideo) return;
     if (isActive) {
-      activeVideos.add(videoRef.current);
-      videoRef.current.playAsync().catch(() => {});
-      videoRef.current.setIsMutedAsync(false);
+      activeVideoPlayers.add(player);
+      try { player.play(); } catch {}
+      player.muted = false;
     } else {
-      videoRef.current.pauseAsync().catch(() => {});
-      videoRef.current.setIsMutedAsync(true);
-      activeVideos.delete(videoRef.current);
+      try { player.pause(); } catch {}
+      player.muted = true;
+      activeVideoPlayers.delete(player);
     }
-  }, [isActive]);
+  }, [isActive, player, isVideo]);
 
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.9} onLayout={onLayout} style={{ width:'100%', marginBottom:12 }}>
@@ -51,14 +53,11 @@ export default function Card({
 
         {!!media?.uri && (
           isVideo ? (
-            <Video
-              ref={videoRef}
-              source={{ uri: media.uri }}
-              resizeMode="cover"
-              isLooping
-              shouldPlay={isActive}
-              isMuted={!isActive}
+            <VideoView
+              player={player}
               style={[styles.media, compact && styles.mediaCompact]}
+              contentFit="cover"
+              nativeControls={false}
             />
           ) : (
             <Image source={{ uri: media.uri }} style={[styles.media, compact && styles.mediaCompact]} />
@@ -76,12 +75,12 @@ const styles = StyleSheet.create({
   borderRadius: 18,
   padding: 16,
   borderWidth: 1,
-  borderColor: '#E5E7EB', // << NEW FLOATING BORDER
+  borderColor: '#E5E7EB',
   shadowColor: '#000',
-  shadowOpacity: 0.08,    // << very slight
+  shadowOpacity: 0.08,
   shadowOffset: { width: 0, height: 4 },
   shadowRadius: 10,
-  elevation: 4,           // android shadow
+  elevation: 4,
 },
   cardCompact: { padding: 12 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

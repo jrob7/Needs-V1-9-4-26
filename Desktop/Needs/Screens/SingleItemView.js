@@ -3,7 +3,7 @@ import React, { useLayoutEffect, useEffect, useState } from 'react';
 import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Video } from 'expo-av';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 
 import { NODE_API } from '../config';
 import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
@@ -139,12 +139,7 @@ const SingleItemView = ({ route }) => {
           <>
             <View style={styles.divider} />
             {normalized.mediaUri.toLowerCase().endsWith('.mp4') || normalized.mediaUri.toLowerCase().endsWith('.mov') ? (
-              <Video
-                source={{ uri: normalized.mediaUri }}
-                style={styles.media}
-                useNativeControls
-                resizeMode="cover"
-              />
+              <NeedsVideoPlayer uri={normalized.mediaUri} style={styles.media} contentFit="cover" />
             ) : (
               <Image source={{ uri: normalized.mediaUri }} style={styles.media} />
             )}

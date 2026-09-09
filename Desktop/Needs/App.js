@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { Audio } from 'expo-av';
+import { setAudioModeAsync } from 'expo-audio';
 import * as Notifications from 'expo-notifications';
 import TabNavigation from './Screens/TabNavigation';
 import { UserProvider, UserContext } from './server/CurrentUser';
@@ -122,7 +122,7 @@ export default function App() {
   useEffect(() => {
     const enableAudio = async () => {
       try {
-        await Audio.setAudioModeAsync({
+        await setAudioModeAsync({
           playsInSilentModeIOS: true,
           allowsRecordingIOS: false,
           shouldDuckAndroid: true,

@@ -24,7 +24,7 @@ import Svg, { Rect, G } from 'react-native-svg';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { Video } from 'expo-av';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CreateNewUser from './CreateNewUser';
@@ -1127,7 +1127,7 @@ export default function SearchScreen() {
                   <Image source={{ uri: msg.media.uri }} style={IS_WEB ? { width: 130, height: 130, marginTop: 13 } : { width: 100, height: 100, marginTop: 10 }} />
                 )}
                 {msg.media?.type === 'video' && (
-                  <Video source={{ uri: msg.media.uri }} style={IS_WEB ? { width: 208, height: 130, marginTop: 13 } : { width: 160, height: 100, marginTop: 10 }} useNativeControls resizeMode="cover" />
+                  <NeedsVideoPlayer uri={msg.media.uri} style={IS_WEB ? { width: 208, height: 130, marginTop: 13 } : { width: 160, height: 100, marginTop: 10 }} contentFit="cover" />
                 )}
               </View>
             )}
@@ -1185,7 +1185,7 @@ export default function SearchScreen() {
                   {media.type === 'image' ? (
                     <Image source={{ uri: media.uri }} style={styles.thumbnail} />
                   ) : (
-                    <Video source={{ uri: media.uri }} style={styles.thumbnail} useNativeControls resizeMode="cover" />
+                    <NeedsVideoPlayer uri={media.uri} style={styles.thumbnail} contentFit="cover" />
                   )}
                 </View>
                 <TouchableOpacity onPress={() => setMedia(null)} style={{ marginLeft: 8, padding: 4 }} hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}>

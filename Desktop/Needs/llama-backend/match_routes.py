@@ -845,8 +845,11 @@ def find_matches():
         detected_category = classify_service_category(query)
 
         # Coverage gate first, then keyword score (no distance ranking for services)
+        # Only apply location gate if we actually have a city/state/zip to check —
+        # if reverse geocoding failed (all empty), skip the gate to avoid blocking everyone.
+        has_location_text = bool(user_city or user_state or user_zip)
         def final_score_service(d):
-            if has_coords or user_city:
+            if has_location_text:
                 if not service_covers_location(d, user_city, user_state, user_zip):
                     return -1
             return score_service(d, query_words, detected_category)

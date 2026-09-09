@@ -130,7 +130,21 @@ User: "{prompt}"
 """
     return generate_response(formatted_prompt)
 
-def extract_search_params(ai_response):
+def normalize_urgency(text):
+    t = text.lower()
+    if any(w in t for w in ['asap', 'immediately', 'right now', 'as soon as possible', 'urgently', 'urgent']):
+        return 'ASAP'
+    if 'today' in t:
+        return 'Today'
+    if 'this week' in t or 'few days' in t:
+        return 'This Week'
+    if 'this month' in t or 'few weeks' in t:
+        return 'This Month'
+    if any(w in t for w in ['flexible', 'anytime', 'no rush', 'whenever']):
+        return 'Flexible'
+    return 'Flexible'
+
+def extract_search_params(ai_response, original_query=None):
     if "---" in ai_response:
         ai_response = ai_response.split("---")[-1].strip()
     if "[end of text]" in ai_response:
@@ -146,21 +160,20 @@ def extract_search_params(ai_response):
 
     if not match:
         return {
-            "searchText": ai_response.strip()[:120],
-            "urgency": "Unknown",
+            "searchText": original_query or ai_response.strip()[:120],
+            "urgency": "Flexible",
             "bidprice": 0
         }
 
-    item = match.group(1).strip()
-    urgency = match.group(2).strip()
+    urgency_raw = match.group(2).strip()
     price_text = match.group(3).strip()
 
     num_match = re.search(r"(\d+)", price_text)
     bidprice = int(num_match.group(1)) if num_match else 0
 
     return {
-        "searchText": item,
-        "urgency": urgency,
+        "searchText": original_query or match.group(1).strip(),
+        "urgency": normalize_urgency(urgency_raw),
         "bidprice": bidprice
     }
 
@@ -184,11 +197,11 @@ def search():
         })
 
     if looks_like_enhanced_text(user_query):
-        extracted_data = extract_search_params(user_query)
+        extracted_data = extract_search_params(user_query, original_query=user_query)
         summary = user_query
     else:
         ai_response = query_mistral(user_query)
-        extracted_data = extract_search_params(ai_response)
+        extracted_data = extract_search_params(ai_response, original_query=user_query)
         summary = ai_response
 
     try:

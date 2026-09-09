@@ -396,10 +396,10 @@ export default function NeedInquiryView() {
             })}
             <View style={{ height: 96 }} />
           </ScrollView>
-          <TouchableOpacity style={styles.fab} activeOpacity={0.9}
+          {/* <TouchableOpacity style={styles.fab} activeOpacity={0.9}
             onPress={() => navigation.navigate('UploadTypeSelector')}>
             <Text style={styles.fabText}>+ Upload</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </>
       ) : (
         <NeedsMapView

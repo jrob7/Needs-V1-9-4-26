@@ -2,7 +2,7 @@
 
 def build_service_prompt(labels, user_text=""):
     # TEXT-ONLY MODE — user typed their own request, no image.
-    # Rewrite/clarify what they said; do not invent new facts.
+    # Only fix grammar/spelling — never add, infer, or invent any detail.
     if user_text and not labels:
         return f"""
 You are cleaning up a service-based need request for a community help app.
@@ -11,13 +11,11 @@ User's original request:
 {user_text}
 
 TASK:
-Restructure and clarify the request above into a single, natural, legible request to hire a service. Infer the most likely service category (e.g., plumbing, electrical, automotive repair, hair/nail salon, legal, tutoring, pet grooming, elder care, etc.) from what they wrote.
-
-Do NOT invent or add any facts, prices, measurements, brands, or details the user did not mention. If they gave a price or urgency, keep it as given. If they did not, leave it out rather than making one up.
+Fix grammar and spelling ONLY. Do NOT add any service type, detail, price, urgency, measurement, brand, or any information the user did not explicitly write. Keep every fact exactly as the user stated it — just make the sentence grammatically correct and natural.
 
 Do NOT list bullets.
 Do NOT add headers.
-Just return the rewritten request text.
+Just return the corrected request text.
 [end]
 """
 

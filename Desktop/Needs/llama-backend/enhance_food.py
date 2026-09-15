@@ -3,30 +3,30 @@
 def build_food_prompt(labels: str, user_text: str) -> str:
     """
     Short prompt for food/restaurant-style requests.
+    Only fixes grammar/spelling — never adds cuisine, cravings, or any detail
+    the user did not explicitly state.
     """
 
     # HYBRID MODE (image + user text)
     if user_text:
         return f"""
-Write a short, natural food order request (1-2 sentences) for a person craving the dish or cuisine described below.
-Mention the dish or cuisine and optionally include urgency (e.g., "right now", "tonight"). Do NOT mention any price, budget, or dollar amount.
+You are cleaning up a food request for a community app.
 
-Do NOT invent specific facts that are not in the keywords or user text above — no made-up restaurant names, dish ingredients, or details you were not given. Keep it general enough to cover the craving without stating specifics you were not given.
+User's original request:
+{user_text}
 
-Keywords: {labels}
-User: {user_text}
+TASK:
+Fix grammar and spelling ONLY. Do NOT add any food type, cuisine, craving, adjective, or detail that the user did not write. Do NOT mention any price or dollar amount. If the user did not name a food or cuisine, do not invent one.
 
-Write the final request clearly and naturally.
+Return ONLY the corrected sentence. No explanation.
 """.strip()
 
-    # IMAGE-ONLY MODE
+    # IMAGE-ONLY MODE (labels from image recognition, no user text)
     return f"""
-Write a short, natural food order request (1-2 sentences) as if you are a real person craving the dish or cuisine shown in the keywords.
-Optionally include urgency (e.g., "right now", "tonight"). Do NOT mention any price, budget, or dollar amount.
-
-Do NOT invent specific facts that are not in the keywords above — no made-up restaurant names, dish ingredients, or details you were not given. Keep it general enough to cover the craving without stating specifics you were not given.
+Write a short, natural food request (1 sentence) based only on what is shown in these image keywords.
+Do NOT invent restaurant names, ingredients, or any detail not in the keywords. Do NOT mention price or dollar amount.
 
 Keywords: {labels}
 
-Write the final request clearly and naturally.
+Return ONLY the request sentence.
 """.strip()

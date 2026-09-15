@@ -478,12 +478,14 @@ export default function SearchScreen() {
         return;
       }
 
-      // Routing-readiness check — only for service requests, only once per
-      // request (skipReadinessCheck is set when resuming after the user has
-      // already answered the one allowed clarification question).
-      if (needType === 'service' && !skipReadinessCheck) {
+      // Routing-readiness check — once per request (skipReadinessCheck is set
+      // when resuming after the user has already answered the clarification).
+      if (!skipReadinessCheck) {
         try {
-          const readyRes = await axios.post(`${FLASK_API}/ai/checkServiceReadiness`, { query: finalText });
+          const readinessUrl = needType === 'food'
+            ? `${FLASK_API}/ai/checkFoodReadiness`
+            : `${FLASK_API}/ai/checkServiceReadiness`;
+          const readyRes = await axios.post(readinessUrl, { query: finalText });
           if (readyRes.data?.ready === false && readyRes.data?.question) {
             setConversation((prev) => prev.filter((m) => !m.aiThinking));
             pushAI(readyRes.data.question);

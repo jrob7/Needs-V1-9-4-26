@@ -739,6 +739,45 @@ def extract_food_context_route():
     return jsonify(ctx)
 
 
+@match_bp.route("/checkFoodReadiness", methods=["POST"])
+def check_food_readiness_route():
+    """Returns {ready, question}. If the food query is too generic (no specific
+    cuisine or food type), asks one follow-up question to narrow it down."""
+    body  = request.get_json(silent=True) or {}
+    query = (body.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "query required"}), 400
+
+    lower = query.lower()
+
+    # Specific cuisine / food-type words that make a query ready without follow-up
+    SPECIFIC_FOOD_WORDS = {
+        "thai", "mexican", "italian", "chinese", "japanese", "sushi", "ramen",
+        "korean", "indian", "mediterranean", "greek", "vietnamese", "pho",
+        "american", "bbq", "barbecue", "southern", "soul food", "cajun",
+        "french", "spanish", "peruvian", "ethiopian", "african", "caribbean",
+        "hawaiian", "filipino", "taiwanese", "dim sum", "hot pot",
+        "pizza", "pasta", "burger", "burgers", "taco", "tacos", "sandwich",
+        "salad", "steak", "seafood", "sushi", "ramen", "noodle", "noodles",
+        "wings", "fried chicken", "chicken", "ribs", "burritos", "burrito",
+        "shawarma", "falafel", "gyro", "poke", "dumplings", "soup",
+        "vegan", "vegetarian", "halal", "kosher", "gluten free", "organic",
+        "breakfast", "brunch", "coffee", "boba", "dessert", "ice cream",
+        "donuts", "pastry", "bakery", "deli", "sub", "sandwich",
+    }
+
+    has_specific = any(w in lower for w in SPECIFIC_FOOD_WORDS)
+
+    if has_specific:
+        return jsonify({"ready": True, "question": None})
+
+    # Generic-only query — ask for the cuisine or food type
+    return jsonify({
+        "ready": False,
+        "question": "What kind of food are you in the mood for? (e.g. Thai, Mexican, pizza, sushi, burgers…)"
+    })
+
+
 @match_bp.route("/checkServiceReadiness", methods=["POST"])
 def check_service_readiness_route():
     body  = request.get_json(silent=True) or {}

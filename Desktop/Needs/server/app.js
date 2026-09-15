@@ -45,7 +45,13 @@ const requireAuth = (req, res, next) => {
 const io = new SocketIOServer(httpServer, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.)/.test(origin)) {
+      if (
+        !origin ||
+        /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.)/.test(origin) ||
+        /\.up\.railway\.app$/.test(origin) ||
+        /\.exp\.direct$/.test(origin) ||
+        /\.expo\.dev$/.test(origin)
+      ) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed'));
@@ -105,8 +111,14 @@ async function geocodeAddress(addressText) {
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow native apps (no origin), any localhost port, and LAN IP for dev devices
-    if (!origin || /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.)/.test(origin)) {
+    // Allow native apps (no origin header), localhost, LAN IPs, Railway deployments, and Expo tunnel
+    if (
+      !origin ||
+      /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.)/.test(origin) ||
+      /\.up\.railway\.app$/.test(origin) ||
+      /\.exp\.direct$/.test(origin) ||
+      /\.expo\.dev$/.test(origin)
+    ) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));

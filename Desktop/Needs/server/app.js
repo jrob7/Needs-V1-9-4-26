@@ -15,6 +15,7 @@ const httpServer = http.createServer(app);
 const port = process.env.PORT || 3000;
 // 🔥 REQUIRED FOR IMAGE HYDRATION
 const NODE_API = process.env.NODE_API || "http://localhost:3000";
+const FLASK_API = process.env.FLASK_API || "http://localhost:5001";
 const fundraisersCol = () => client.db('Need').collection('Fundraisers');
 const path = require('path');
 
@@ -197,7 +198,7 @@ client.connect()
           try {
               console.log(`📡 Sending Query to Flask: ${query}`);
       
-              const aiResponse = await fetch('http://127.0.0.1:5001/ask', { 
+              const aiResponse = await fetch(`${FLASK_API}/ask`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ query }),

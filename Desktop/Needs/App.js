@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { setAudioModeAsync } from 'expo-audio';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import TabNavigation from './Screens/TabNavigation';
 import { UserProvider, UserContext } from './server/CurrentUser';
 import { AuthModalProvider } from './Screens/AuthModalContext';
@@ -13,8 +14,10 @@ import { requestNotificationPermissions } from './utils/appointmentReminders';
 import AppointmentFollowUpModal from './Screens/AppointmentFollowUpModal';
 import RestaurantFollowUpModal from './Screens/RestaurantFollowUpModal';
 
-// Push notifications are native-only — not supported on web
-if (Platform.OS !== 'web') {
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
+
+// Push notifications are native-only and not supported in Expo Go (SDK 53+)
+if (Platform.OS !== 'web' && !isExpoGo) {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert:  true,
@@ -42,6 +45,7 @@ function NotificationHandler() {
   useEffect(() => {
     if (Platform.OS === 'web') return;
 
+    if (isExpoGo) return;
     requestNotificationPermissions().catch(() => {});
 
     const openFollowUp = (data) => {

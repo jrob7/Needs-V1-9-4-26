@@ -3,13 +3,20 @@
 // the top of App.js so Expo registers it before any notification can fire.
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 const REMINDER_MINS_BEFORE = 2;
 const FOLLOWUP_MINS_AFTER  = 2;
 
+// Remote push notifications were removed from Expo Go in SDK 53.
+// Local scheduled notifications still work, but anything that triggers
+// the push token listener will crash. Skip notification setup in Expo Go.
+const isExpoGo = Constants.executionEnvironment === 'storeClient';
+
 // ── Request permission ────────────────────────────────────────────────────────
 export async function requestNotificationPermissions() {
   if (Platform.OS === 'web') return false;
+  if (isExpoGo) return false;
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('appointment-reminders', {
       name: 'Appointment Reminders',

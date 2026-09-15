@@ -1504,7 +1504,7 @@ app.get('/uploadedItemsAll', async (req, res) => {
         if (/^img_\d+\.jpg$/i.test(first)) {
           media = {
             type: "image",
-            uri: `http://localhost:3000/uploads/${first}`,
+            uri: `${NODE_API}/uploads/${first}`,
           };
         }
 

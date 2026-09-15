@@ -234,13 +234,15 @@ const AccountTabContent = () => {
           body: result.assets[0].base64,
         });
         const { imageUrl } = await uploadRes.json();
-        await fetch(`${NODE_API}/updateUserMedia`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: globalUserId, type: 'profilePicture', mediaPath: imageUrl }),
-        });
         const fullUrl = imageUrl.startsWith('http')
           ? imageUrl
-          : `${NODE_API}/uploads/${imageUrl}`;
+          : /^[0-9a-f]{24}$/i.test(imageUrl)
+            ? `${NODE_API}/images/${imageUrl}`
+            : `${NODE_API}/uploads/${imageUrl}`;
+        await fetch(`${NODE_API}/updateUserMedia`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: globalUserId, type: 'profilePicture', mediaPath: fullUrl }),
+        });
         setUserDetails(prev => ({ ...prev, profilePicture: fullUrl }));
         Alert.alert('✅', 'Profile photo updated!');
       } catch (e) { Alert.alert('Error', 'Upload failed.'); }
@@ -263,7 +265,11 @@ const AccountTabContent = () => {
   const rawAvatar  = userDetails?.profilePicture || userDetails?.profileImageUrl
     || (isBusiness ? (businessDoc?.logoUrl || businessDoc?.profileImageUrl) : null);
   const avatarUri  = rawAvatar
-    ? (rawAvatar.startsWith('http') ? rawAvatar : `${NODE_API}/uploads/${rawAvatar}`)
+    ? (rawAvatar.startsWith('http')
+        ? rawAvatar
+        : /^[0-9a-f]{24}$/i.test(rawAvatar)
+          ? `${NODE_API}/images/${rawAvatar}`
+          : `${NODE_API}/uploads/${rawAvatar}`)
     : null;
   const avatarInitials = isBusiness
     ? (businessName ? businessName[0].toUpperCase() : '?')

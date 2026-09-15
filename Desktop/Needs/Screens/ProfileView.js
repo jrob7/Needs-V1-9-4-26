@@ -21,7 +21,10 @@ const calcOverall = (r, resp, rec) =>
 
 const resolveImg = (uri) => {
   if (!uri) return null;
-  return uri.startsWith('http') ? uri : `${NODE_API}/uploads/${uri}`;
+  if (uri.startsWith('http')) return uri;
+  // GridFS ObjectId (24 hex chars) → served from /images/
+  if (/^[0-9a-f]{24}$/i.test(uri)) return `${NODE_API}/images/${uri}`;
+  return `${NODE_API}/uploads/${uri}`;
 };
 
 const StarRow = ({ rating }) => {
@@ -254,11 +257,11 @@ const ProfileView = () => {
           body: result.assets[0].base64,
         });
         const { imageUrl } = await up.json();
+        const fullUrl = resolveImg(imageUrl);
         await fetch(`${NODE_API}/updateUserMedia`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, type: 'profilePicture', mediaPath: imageUrl }),
+          body: JSON.stringify({ userId, type: 'profilePicture', mediaPath: fullUrl }),
         });
-        const fullUrl = imageUrl.startsWith('http') ? imageUrl : `${NODE_API}/uploads/${imageUrl}`;
         const updated = { ...user, profilePicture: fullUrl };
         setUser(updated);
         if (ctx?.setUserProfile) ctx.setUserProfile(updated);

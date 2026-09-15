@@ -30,7 +30,15 @@ const CurrentProfileView = () => {
 
         if (result.name) setName(result.name);
         if (result.trustScore) setTrustScore(result.trustScore);
-        if (result.profilePicture) setProfilePicture(result.profilePicture);
+        if (result.profilePicture) {
+          const pic = result.profilePicture;
+          const resolved = pic.startsWith('http')
+            ? pic
+            : /^[0-9a-f]{24}$/i.test(pic)
+              ? `${NODE_API}/images/${pic}`
+              : `${NODE_API}/uploads/${pic}`;
+          setProfilePicture(resolved);
+        }
         if (result.introMedia) setIntroMedia(result.introMedia);
         if (result.filledNeeds !== undefined) setFilledNeeds(result.filledNeeds);
       } catch (error) {

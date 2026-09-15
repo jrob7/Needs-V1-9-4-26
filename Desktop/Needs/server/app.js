@@ -1844,7 +1844,13 @@ app.get('/getConversations', requireAuth, async (req, res) => {
           const u = await database.collection('Users').findOne({ _id: otherOid });
           if (u) {
             const rawPic = u.profilePicture || u.profileImageUrl || null;
-            const resolvedPic = rawPic ? (rawPic.startsWith('http') ? rawPic : `${NODE_API}/uploads/${rawPic.replace(/^\/?(uploads\/)?/, '')}`) : null;
+            const resolvedPic = rawPic
+              ? (rawPic.startsWith('http')
+                  ? rawPic
+                  : /^[0-9a-f]{24}$/i.test(rawPic)
+                    ? `${NODE_API}/images/${rawPic}`
+                    : `${NODE_API}/uploads/${rawPic.replace(/^\/?(uploads\/)?/, '')}`)
+              : null;
             const displayName = await resolveDisplayName(u);
             other = { _id: u._id.toString(), name: displayName, profilePicture: resolvedPic, firstName: u.firstName || '', lastName: u.lastName || '' };
           }

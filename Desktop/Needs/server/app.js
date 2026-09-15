@@ -744,22 +744,29 @@ app.patch('/needRequests/:id/archive', requireAuth, async (req, res) => {
        
           app.post('/updateUserMedia', async (req, res) => {
             const { userId, type, mediaPath } = req.body;
-          
+
             if (!userId || !type || !mediaPath) {
               return res.status(400).json({ error: 'Missing required fields' });
             }
-          
+
             try {
-              // Determine the correct collection based on the media type
-              const collection = type === 'profileImage' ? 'LocalImages' : 'LocalVideos';
-          
-              // Update or insert the document in the correct collection
+              const isProfilePic = type === 'profileImage' || type === 'profilePicture';
+              const collection = isProfilePic ? 'LocalImages' : 'LocalVideos';
+
               await database.collection(collection).updateOne(
-                { userId }, // Match by userId
-                { $set: { mediaPath, uploadedAt: new Date() } }, // Update mediaPath and timestamp
-                { upsert: true } // Create a new document if it doesn't exist
+                { userId },
+                { $set: { mediaPath, uploadedAt: new Date() } },
+                { upsert: true }
               );
-          
+
+              // Keep Users.profilePicture in sync so all screens show the latest photo
+              if (isProfilePic && ObjectId.isValid(userId)) {
+                await database.collection('Users').updateOne(
+                  { _id: new ObjectId(userId) },
+                  { $set: { profilePicture: mediaPath } }
+                );
+              }
+
               res.json({ success: true });
             } catch (error) {
               console.error('Error updating user media:', error);

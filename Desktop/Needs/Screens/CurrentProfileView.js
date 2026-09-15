@@ -3,6 +3,7 @@ import { View, Text, Image, StyleSheet, ScrollView, TouchableOpacity, Animated, 
 import { UserContext } from '../server/CurrentUser';
 import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useNavigation } from '@react-navigation/native';
+import { NODE_API } from '../config';
 
 const CurrentProfileView = () => {
    const navigation = useNavigation(); // Get navigation object
@@ -24,7 +25,7 @@ const CurrentProfileView = () => {
       if (!globalUserId) return;
 
       try {
-        const response = await fetch(`http://localhost:3000/getUserProfile?userId=${globalUserId}`);
+        const response = await fetch(`${NODE_API}/getUserProfile?userId=${globalUserId}`);
         const result = await response.json();
 
         if (result.name) setName(result.name);

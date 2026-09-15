@@ -1,6 +1,7 @@
 import React, { useState, useContext } from 'react';
 import {
   View, Text, TextInput, StyleSheet, Alert, TouchableOpacity, Modal, Image, ActivityIndicator,
+  KeyboardAvoidingView, ScrollView, Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
@@ -405,54 +406,58 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
             </>)}
 
             {/* ── Individual details step ── */}
-            {step === 'individualDetails' && (<>
-              <Text style={styles.title}>Your Details</Text>
-              <Text style={styles.subtitle}>Fill in your personal information</Text>
+            {step === 'individualDetails' && (
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '100%' }}>
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                  <Text style={styles.title}>Your Details</Text>
+                  <Text style={styles.subtitle}>Fill in your personal information</Text>
 
-              {/* Profile picture picker */}
-              <TouchableOpacity style={styles.avatarWrap} onPress={pickProfilePic} activeOpacity={0.8}>
-                {profilePicUri ? (
-                  <Image source={{ uri: profilePicUri }} style={styles.avatarImg} />
-                ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <Ionicons name="person-outline" size={38} color="#93C5FD" />
+                  {/* Profile picture picker */}
+                  <TouchableOpacity style={styles.avatarWrap} onPress={pickProfilePic} activeOpacity={0.8}>
+                    {profilePicUri ? (
+                      <Image source={{ uri: profilePicUri }} style={styles.avatarImg} />
+                    ) : (
+                      <View style={styles.avatarPlaceholder}>
+                        <Ionicons name="person-outline" size={38} color="#93C5FD" />
+                      </View>
+                    )}
+                    <View style={styles.avatarCameraBadge}>
+                      {profilePicUploading
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Ionicons name="camera" size={14} color="#fff" />}
+                    </View>
+                  </TouchableOpacity>
+
+                  <View style={styles.inputWrap}>
+                    <Ionicons name="person-outline" size={18} color="#2563EB" style={styles.inputIcon} />
+                    <TextInput style={styles.signInInput} placeholder="First Name" placeholderTextColor="#9CA3AF" value={firstName} onChangeText={setFirstName} />
                   </View>
-                )}
-                <View style={styles.avatarCameraBadge}>
-                  {profilePicUploading
-                    ? <ActivityIndicator size="small" color="#fff" />
-                    : <Ionicons name="camera" size={14} color="#fff" />}
-                </View>
-              </TouchableOpacity>
+                  <View style={styles.inputWrap}>
+                    <Ionicons name="person-outline" size={18} color="#2563EB" style={styles.inputIcon} />
+                    <TextInput style={styles.signInInput} placeholder="Last Name" placeholderTextColor="#9CA3AF" value={lastName} onChangeText={setLastName} />
+                  </View>
+                  <View style={styles.inputWrap}>
+                    <Ionicons name="call-outline" size={18} color="#2563EB" style={styles.inputIcon} />
+                    <TextInput style={styles.signInInput} placeholder="Phone Number" placeholderTextColor="#9CA3AF" keyboardType="phone-pad" value={phoneNumber} onChangeText={setPhoneNumber} />
+                  </View>
+                  <View style={styles.inputWrap}>
+                    <Ionicons name="home-outline" size={18} color="#2563EB" style={styles.inputIcon} />
+                    <TextInput style={styles.signInInput} placeholder="Street Address" placeholderTextColor="#9CA3AF" value={streetAddress} onChangeText={setStreetAddress} />
+                  </View>
+                  <View style={styles.inputWrap}>
+                    <Ionicons name="location-outline" size={18} color="#2563EB" style={styles.inputIcon} />
+                    <TextInput style={styles.signInInput} placeholder="Zipcode" placeholderTextColor="#9CA3AF" keyboardType="numeric" value={zipcode} onChangeText={setZipcode} />
+                  </View>
 
-              <View style={styles.inputWrap}>
-                <Ionicons name="person-outline" size={18} color="#2563EB" style={styles.inputIcon} />
-                <TextInput style={styles.signInInput} placeholder="First Name" placeholderTextColor="#9CA3AF" value={firstName} onChangeText={setFirstName} />
-              </View>
-              <View style={styles.inputWrap}>
-                <Ionicons name="person-outline" size={18} color="#2563EB" style={styles.inputIcon} />
-                <TextInput style={styles.signInInput} placeholder="Last Name" placeholderTextColor="#9CA3AF" value={lastName} onChangeText={setLastName} />
-              </View>
-              <View style={styles.inputWrap}>
-                <Ionicons name="call-outline" size={18} color="#2563EB" style={styles.inputIcon} />
-                <TextInput style={styles.signInInput} placeholder="Phone Number" placeholderTextColor="#9CA3AF" keyboardType="phone-pad" value={phoneNumber} onChangeText={setPhoneNumber} />
-              </View>
-              <View style={styles.inputWrap}>
-                <Ionicons name="home-outline" size={18} color="#2563EB" style={styles.inputIcon} />
-                <TextInput style={styles.signInInput} placeholder="Street Address" placeholderTextColor="#9CA3AF" value={streetAddress} onChangeText={setStreetAddress} />
-              </View>
-              <View style={styles.inputWrap}>
-                <Ionicons name="location-outline" size={18} color="#2563EB" style={styles.inputIcon} />
-                <TextInput style={styles.signInInput} placeholder="Zipcode" placeholderTextColor="#9CA3AF" keyboardType="numeric" value={zipcode} onChangeText={setZipcode} />
-              </View>
-
-              <TouchableOpacity style={[styles.signInButton, { marginTop: 6 }]} onPress={handleSubmit}>
-                <Text style={styles.signInButtonText}>Create Account</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStep('form')} style={styles.cancelWrap}>
-                <Text style={styles.cancelText}>← Back</Text>
-              </TouchableOpacity>
-            </>)}
+                  <TouchableOpacity style={[styles.signInButton, { marginTop: 6 }]} onPress={handleSubmit}>
+                    <Text style={styles.signInButtonText}>Create Account</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setStep('form')} style={styles.cancelWrap}>
+                    <Text style={styles.cancelText}>← Back</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </KeyboardAvoidingView>
+            )}
 
           </View>
         </View>

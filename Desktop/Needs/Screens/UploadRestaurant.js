@@ -45,8 +45,6 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
   const [phone, setPhone]           = useState(existingDoc?.phone || '');
 
   // ── Hours & Wait ────────────────────────────────────────────
-  const [waitMin, setWaitMin]     = useState(existingDoc?.waitMin != null ? String(existingDoc.waitMin) : '');
-  const [waitMax, setWaitMax]     = useState(existingDoc?.waitMax != null ? String(existingDoc.waitMax) : '');
   const [hoursOpen, setHoursOpen] = useState(existingDoc?.hoursOpen || '');
 
   // ── Top Dishes (up to 3) ────────────────────────────────────
@@ -200,8 +198,6 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
         type: 'restaurant',
         name, tagline, cuisine, priceRange, address, zipcode,
         phone: phone.trim() || null,
-        waitMin: waitMin ? Number(waitMin) : null,
-        waitMax: waitMax ? Number(waitMax) : null,
         hoursOpen,
         coverImageUrl: coverUrl,
         menuUrl,
@@ -341,17 +337,6 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
         </View>
       </SectionCard>
 
-      {/* ── Wait Time ── */}
-      <SectionCard title="Wait Time">
-        <View style={styles.row}>
-          <View style={{ flex: 1, marginRight: 8 }}>
-            <Field label="Min (minutes)" value={waitMin} onChangeText={setWaitMin} placeholder="5" keyboardType="numeric" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Field label="Max (minutes)" value={waitMax} onChangeText={setWaitMax} placeholder="20" keyboardType="numeric" />
-          </View>
-        </View>
-      </SectionCard>
 
       {/* ── Top 3 Dishes ── */}
       <SectionCard title="Top 3 Dishes">

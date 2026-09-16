@@ -122,13 +122,11 @@ function RestaurantCard({ doc, colors, onPress }) {
 
         {/* Stats row */}
         <View style={styles.statsRow}>
-          {(doc.waitMin || doc.waitMax) && (
+          {doc.hoursOpen && (
             <View style={styles.statBox}>
               <Ionicons name="time-outline" size={16} color="#6B7280" />
-              <Text style={styles.statVal}>
-                {doc.waitMin}–{doc.waitMax} min
-              </Text>
-              <Text style={[styles.statSub, { color: colors.accent }]}>wait time</Text>
+              <Text style={styles.statVal} numberOfLines={1}>{doc.hoursOpen}</Text>
+              <Text style={[styles.statSub, { color: colors.accent }]}>hours</Text>
             </View>
           )}
         </View>
@@ -540,33 +538,13 @@ export function RestaurantDetail({ doc, colors, onClose }) {
           </View>
         )}
 
-        {/* Wait / Busy / Speed stats */}
-        {(doc.waitMin || doc.waitMax) && (
+        {/* Hours */}
+        {doc.hoursOpen && (
           <View style={styles.statsGrid}>
-            <View style={styles.statGridBox}>
-              <Text style={styles.statGridVal}>{doc.waitMin} min</Text>
-              <Text style={styles.statGridLbl}>Current wait</Text>
-              <Text style={[styles.statGridSub, { color: colors.accent }]}>Busy right now</Text>
-            </View>
-            <View style={styles.statGridBox}>
-              <Text style={styles.statGridVal}>High</Text>
-              <Text style={styles.statGridLbl}>Busy level</Text>
-              <View style={styles.busyBar}>
-                {[1,2,3,4,5].map(n => (
-                  <View key={n} style={[styles.busySegment,
-                    { backgroundColor: n <= 3 ? colors.accent : '#E5E7EB' }]} />
-                ))}
-              </View>
-            </View>
-            <View style={styles.statGridBox}>
-              <Text style={styles.statGridVal}>Moderate</Text>
-              <Text style={styles.statGridLbl}>Service speed</Text>
-              <View style={styles.busyBar}>
-                {[1,2,3,4,5].map(n => (
-                  <View key={n} style={[styles.busySegment,
-                    { backgroundColor: n <= 2 ? '#F59E0B' : '#E5E7EB' }]} />
-                ))}
-              </View>
+            <View style={[styles.statGridBox, { flex: 1, alignItems: 'flex-start', paddingHorizontal: IS_WEB ? 16 : 12 }]}>
+              <Ionicons name="time-outline" size={IS_WEB ? 20 : 16} color="#6B7280" />
+              <Text style={[styles.statGridVal, { marginTop: IS_WEB ? 6 : 4, textAlign: 'left' }]}>{doc.hoursOpen}</Text>
+              <Text style={styles.statGridLbl}>Hours</Text>
             </View>
           </View>
         )}

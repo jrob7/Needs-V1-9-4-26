@@ -62,6 +62,7 @@ const placeholder = (type) =>
 const resolveImage = (url, type) => {
   if (!url) return placeholder(type);
   if (url.startsWith('http')) return url;
+  if (/^[0-9a-f]{24}$/i.test(url)) return `${NODE_API}/images/${url}`;
   return `${NODE_API}/uploads/${url}`;
 };
 

@@ -3,6 +3,7 @@ import { View, StyleSheet, Text, Dimensions } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
+import { NODE_API } from '../config';
 import ZoomableTimeline from './ZoomableTimeline';
 import { IS_WEB } from '../webLayout';
 
@@ -43,7 +44,7 @@ route?.params?.isNeedFlow === true ||
   // ✅ Fetch profile picture
   useEffect(() => {
     if (!currentUserId) return;
-    fetch(`http://localhost:3000/getUserProfile?userId=${currentUserId}`)
+    fetch(`${NODE_API}/getUserProfile?userId=${currentUserId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data?.profilePicture) {
@@ -58,7 +59,7 @@ route?.params?.isNeedFlow === true ||
     try {
       console.log('🔍 Fetching transparency data for fundraiserId:', fundraiserId);
       const res = await fetch(
-        `http://localhost:3000/fundraiser-transparency?fundraiserId=${fundraiserId}&userId=${currentUserId}`
+        `${NODE_API}/fundraiser-transparency?fundraiserId=${fundraiserId}&userId=${currentUserId}`
       );
       if (!res.ok) throw new Error('Failed to fetch transparency data');
       const data = await res.json();
@@ -76,20 +77,20 @@ route?.params?.isNeedFlow === true ||
     (async () => {
       try {
         console.log('🔍 Fetching transaction history for user:', currentUserId);
-        const r = await authFetch('http://localhost:3000/transactions');
+        const r = await authFetch('${NODE_API}/transactions');
         if (!r.ok) return;
         const raw = await r.json();
 
         const enriched = await Promise.all(
           raw.map(async (tx) => {
             const [fromP, toP] = await Promise.all([
-              tryJson(`http://localhost:3000/getUserProfile?userId=${tx.fromUserId}`),
-              tryJson(`http://localhost:3000/getUserProfile?userId=${tx.toUserId}`),
+              tryJson(`${NODE_API}/getUserProfile?userId=${tx.fromUserId}`),
+              tryJson(`${NODE_API}/getUserProfile?userId=${tx.toUserId}`),
             ]);
 
             let needTitle = tx.needTitle;
             if (!needTitle && tx.needId) {
-              const byId = await tryJson(`http://localhost:3000/getNeedById?needId=${tx.needId}`);
+              const byId = await tryJson(`${NODE_API}/getNeedById?needId=${tx.needId}`);
               needTitle = byId?.searchText || byId?.title || byId?.description || 'Untitled';
             }
 
@@ -113,7 +114,7 @@ route?.params?.isNeedFlow === true ||
 
           if (latestFundraiser?.needId) {
             const need = await tryJson(
-              `http://localhost:3000/getNeedById?needId=${latestFundraiser.needId}`
+              `${NODE_API}/getNeedById?needId=${latestFundraiser.needId}`
             );
             if (need) {
               console.log('🧩 Full need from getNeedById:', need);

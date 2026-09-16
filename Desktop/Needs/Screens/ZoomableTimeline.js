@@ -19,6 +19,7 @@ import Svg, {
   Rect,
 } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
+import { NODE_API } from '../config';
 
 const { height: H, width: W } = Dimensions.get('window');
 
@@ -140,8 +141,8 @@ export default function ZoomableTimeline({
     const fetchTransactions = async () => {
       try {
         const [fundRes, needRes] = await Promise.all([
-          fetch('http://localhost:3000/fundraiser-transactions'),
-          fetch('http://localhost:3000/need-transactions')
+          fetch('${NODE_API}/fundraiser-transactions'),
+          fetch('${NODE_API}/need-transactions')
         ]);
   
         const fundData = await fundRes.json();
@@ -174,7 +175,7 @@ export default function ZoomableTimeline({
     const fetchFundraiser = async () => {
       try {
         const resp = await fetch(
-          `http://localhost:3000/fundraiserById?fundraiserId=${fundraiserId}`
+          `${NODE_API}/fundraiserById?fundraiserId=${fundraiserId}`
         );
         const fundraiser = await resp.json();
         setFundraiserImage(fundraiser?.media?.uri || null);

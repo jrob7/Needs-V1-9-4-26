@@ -3,9 +3,10 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, TextInput, Button, TouchableOpacity } from 'react-native';
 import axios from 'axios';
 import { useNavigation } from '@react-navigation/native';
+import { NODE_API, FLASK_API } from '../config';
 
-const FLASK_URL = 'http://localhost:5001/search';      // your Flask app.py
-const NODE_API_BASE = 'http://localhost:3000';         // your Node API base
+const FLASK_URL = `${FLASK_API}/search`;
+const NODE_API_BASE = NODE_API;
 
 export default function SearchChatbot() {
   const navigation = useNavigation();

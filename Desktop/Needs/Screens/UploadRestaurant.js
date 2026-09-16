@@ -10,9 +10,14 @@ import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
+import { NODE_API } from '../config';
 
-const BASE_URL = 'http://localhost:3000';
-const resolveImg = (raw) => (!raw ? null : raw.startsWith('http') ? raw : `${BASE_URL}/uploads/${raw}`);
+const resolveImg = (raw) => {
+  if (!raw) return null;
+  if (raw.startsWith('http')) return raw;
+  if (/^[0-9a-f]{24}$/i.test(raw)) return `${NODE_API}/images/${raw}`;
+  return `${NODE_API}/uploads/${raw}`;
+};
 
 const PRICE_RANGES = ['$', '$$', '$$$', '$$$$'];
 const CUISINES = ['Mexican', 'American', 'Italian', 'Japanese', 'Chinese', 'Thai', 'Indian', 'Mediterranean', 'Korean', 'Other'];

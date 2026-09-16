@@ -18,6 +18,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { authFetch } from '../server/api';
+import { NODE_API } from '../config';
 
 const NODE_SIZE = 77;
 const ITEM_SIZE = 60;
@@ -50,7 +51,7 @@ export default function FillNeedTransaction({ visible = true, onClose, route, na
   const progress = useSharedValue(0);
 
   // Base URL for your local backend
-  const BASE_URL = 'http://localhost:3000';
+  const BASE_URL = NODE_API;
 
   useEffect(() => {
     console.log("🧩 Need Item:", needItem);

@@ -11,8 +11,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
 
-import { NODE_API as BASE_URL } from '../config';
-const resolveImg = (raw) => (!raw ? null : raw.startsWith('http') ? raw : `${BASE_URL}/uploads/${raw}`);
+import { NODE_API } from '../config';
+const resolveImg = (raw) => {
+  if (!raw) return null;
+  if (raw.startsWith('http')) return raw;
+  if (/^[0-9a-f]{24}$/i.test(raw)) return `${NODE_API}/images/${raw}`;
+  return `${NODE_API}/uploads/${raw}`;
+};
 
 const ORG_TYPES = ['Church', 'Nonprofit', 'Food Bank', 'Shelter', 'Community Group', 'Government/Public Program', 'Other'];
 const COST_OPTIONS = ['Free', 'Reduced Cost', 'Sliding Scale', 'Other'];

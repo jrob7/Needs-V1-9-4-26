@@ -10,6 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
+import { NODE_API } from '../config';
 
 const SERVICE_CATEGORY_GROUPS = [
   { group: 'Home Services',         items: ['Plumber', 'Electrician', 'HVAC', 'Handyman', 'Cleaner', 'Landscaper', 'Painter', 'Carpentry', 'Moving'] },
@@ -24,7 +25,12 @@ const SERVICE_CATEGORY_GROUPS = [
 
 const AVAILABILITY = ['', 'Next Day', 'Within a Week', 'Flexible'];
 
-const resolveImg = (raw) => (raw?.startsWith('http') ? raw : `http://localhost:3000/uploads/${raw}`);
+const resolveImg = (raw) => {
+  if (!raw) return null;
+  if (raw.startsWith('http')) return raw;
+  if (/^[0-9a-f]{24}$/i.test(raw)) return `${NODE_API}/images/${raw}`;
+  return `${NODE_API}/uploads/${raw}`;
+};
 
 export default function UploadService({ route, navigation, onSubmitSuccess, onBack, pendingAccount } = {}) {
   const { userId, setUserId, setAccountType, setBusinessType } = useContext(UserContext);
@@ -118,7 +124,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
       // not when the earlier account-info step was filled in. Create the
       // account and the listing together, back-to-back.
       if (pendingAccount) {
-        const userRes = await fetch('http://localhost:3000/createUser', {
+        const userRes = await fetch('${NODE_API}/createUser', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -150,7 +156,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
         portfolioImages.map(async (img) => {
           if (img.raw) return img.raw;
           if (!img.base64) return null;
-          const res = await fetch('http://localhost:3000/uploadImage', {
+          const res = await fetch(`${NODE_API}/uploadImage`, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain' },
             body: img.base64,
@@ -184,7 +190,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
         portfolioImageUrls: portfolioUrls.filter(Boolean),
       };
 
-      const url    = editMode ? `http://localhost:3000/services/${existingDoc._id}` : 'http://localhost:3000/createService';
+      const url    = editMode ? `${NODE_API}/services/${existingDoc._id}` : '${NODE_API}/createService';
       const method = editMode ? 'PUT' : 'POST';
       const resp = await authFetch(url, {
         method,

@@ -20,6 +20,7 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { authFetch } from '../server/api';
+import { NODE_API } from '../config';
 
 const NODE_SIZE = 72;
 const DOT_SIZE = 30;
@@ -79,7 +80,7 @@ export default function FundraiserTransactionComplete({
         return;
       }
 
-      const response = await authFetch('http://localhost:3000/fundraiserContribution', {
+      const response = await authFetch('${NODE_API}/fundraiserContribution', {
         method: 'POST',
         body: JSON.stringify({
           fundraiserId,

@@ -513,13 +513,16 @@ export function RestaurantDetail({ doc, colors, onClose }) {
               }
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
-              {doc.topDishes.slice(0, 3).map((dish, i) => (
+              {doc.topDishes.slice(0, 3).map((dish, i) => {
+                const dishUri = resolveImage(dish.imageUrl, 'food');
+                console.log(`🍽️ dish[${i}] imageUrl="${dish.imageUrl}" → "${dishUri}"`);
+                return (
                 <View key={i} style={styles.dishCard}>
                   <View style={[styles.dishRankBadge, { backgroundColor: colors.accent }]}>
                     <Text style={styles.dishRankText}>{i + 1}</Text>
                   </View>
                   <Image
-                    source={{ uri: resolveImage(dish.imageUrl, 'food') }}
+                    source={{ uri: dishUri }}
                     style={styles.dishImg}
                     resizeMode="cover"
                   />
@@ -532,7 +535,7 @@ export function RestaurantDetail({ doc, colors, onClose }) {
                     </View>
                   )}
                 </View>
-              ))}
+              );})}
             </ScrollView>
           </View>
         )}

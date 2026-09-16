@@ -121,15 +121,12 @@ function RestaurantCard({ doc, colors, onPress }) {
         </View>
 
         {/* Stats row */}
-        <View style={styles.statsRow}>
-          {doc.hoursOpen && (
-            <View style={styles.statBox}>
-              <Ionicons name="time-outline" size={16} color="#6B7280" />
-              <Text style={styles.statVal} numberOfLines={1}>{doc.hoursOpen}</Text>
-              <Text style={[styles.statSub, { color: colors.accent }]}>hours</Text>
-            </View>
-          )}
-        </View>
+        {doc.hoursOpen && (
+          <View style={styles.hoursChip}>
+            <Ionicons name="time-outline" size={13} color="#6B7280" />
+            <Text style={styles.hoursChipText} numberOfLines={1}>{doc.hoursOpen}</Text>
+          </View>
+        )}
 
         {/* Top pick */}
         {topDish && (
@@ -540,12 +537,12 @@ export function RestaurantDetail({ doc, colors, onClose }) {
 
         {/* Hours */}
         {doc.hoursOpen && (
-          <View style={styles.statsGrid}>
-            <View style={[styles.statGridBox, { flex: 1, alignItems: 'flex-start', paddingHorizontal: IS_WEB ? 16 : 12 }]}>
-              <Ionicons name="time-outline" size={IS_WEB ? 20 : 16} color="#6B7280" />
-              <Text style={[styles.statGridVal, { marginTop: IS_WEB ? 6 : 4, textAlign: 'left' }]}>{doc.hoursOpen}</Text>
-              <Text style={styles.statGridLbl}>Hours</Text>
+          <View style={styles.hoursBlock}>
+            <View style={styles.hoursIconRow}>
+              <Ionicons name="time-outline" size={IS_WEB ? 18 : 14} color="#6B7280" />
+              <Text style={styles.hoursLabel}>Hours</Text>
             </View>
+            <Text style={styles.hoursValue}>{doc.hoursOpen}</Text>
           </View>
         )}
 
@@ -1096,6 +1093,25 @@ const styles = StyleSheet.create({
   dishLike: { fontSize: IS_WEB ? 14 : 11, fontWeight: '700' },
 
   // Stats grid
+  // Hours — list card chip
+  hoursChip: {
+    flexDirection: 'row', alignItems: 'center', alignSelf: 'center',
+    gap: IS_WEB ? 6 : 4, marginBottom: IS_WEB ? 13 : 10,
+    backgroundColor: '#F3F4F6', borderRadius: 20,
+    paddingHorizontal: IS_WEB ? 12 : 9, paddingVertical: IS_WEB ? 5 : 4,
+  },
+  hoursChipText: { fontSize: IS_WEB ? 13 : 11, color: '#374151', fontWeight: '500' },
+
+  // Hours — detail view block
+  hoursBlock: {
+    alignItems: 'center', marginTop: IS_WEB ? 21 : 16,
+    backgroundColor: '#F9FAFB', borderRadius: IS_WEB ? 18 : 14,
+    paddingVertical: IS_WEB ? 18 : 14, paddingHorizontal: IS_WEB ? 20 : 16,
+  },
+  hoursIconRow: { flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 6 : 5, marginBottom: IS_WEB ? 6 : 4 },
+  hoursLabel: { fontSize: IS_WEB ? 13 : 10, color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  hoursValue: { fontSize: IS_WEB ? 17 : 14, fontWeight: '700', color: '#111', textAlign: 'center' },
+
   statsGrid: {
     flexDirection: 'row', gap: IS_WEB ? 10 : 8, marginTop: IS_WEB ? 21 : 16,
     backgroundColor: '#F9FAFB', borderRadius: IS_WEB ? 18 : 14, padding: IS_WEB ? 16 : 12,

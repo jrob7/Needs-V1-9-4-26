@@ -1050,7 +1050,8 @@ export default function SearchScreen() {
         return;
       }
 
-      if (enhancedDescription && enhancedDescription.toLowerCase() !== originalText.toLowerCase()) {
+      const normalizeText = s => s.toLowerCase().trim().replace(/[.,!?;:\s]+$/, '').trim();
+      if (enhancedDescription && normalizeText(enhancedDescription) !== normalizeText(originalText)) {
         pushAI(`Here's an improved version of your description.\n\n"${enhancedDescription}"\n\nUse enhanced version? Yes or No?`);
         setPendingOriginalText(originalText); setPendingEnhancedText(enhancedDescription);
         setPendingMedia(attachedMedia); setAwaitingEnhancementChoice(true);

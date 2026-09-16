@@ -548,7 +548,7 @@ export function RestaurantDetail({ doc, colors, onClose }) {
               const time = parts.slice(1).join(' ');
               return (
                 <View key={i} style={[styles.hoursRow, i < arr.length - 1 && styles.hoursRowBorder]}>
-                  <Text style={styles.hoursDay}>{day}</Text>
+                  <Text style={styles.hoursDay}>{day}{time ? '  ·  ' : ''}</Text>
                   {time ? <Text style={styles.hoursTime}>{time}</Text> : null}
                 </View>
               );
@@ -1121,12 +1121,12 @@ const styles = StyleSheet.create({
   hoursIconRow: { flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 6 : 5, marginBottom: IS_WEB ? 10 : 8 },
   hoursLabel: { fontSize: IS_WEB ? 13 : 10, color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   hoursRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    width: '100%', paddingVertical: IS_WEB ? 8 : 6,
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    gap: IS_WEB ? 10 : 8, width: '100%', paddingVertical: IS_WEB ? 8 : 6,
   },
   hoursRowBorder: { borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  hoursDay:  { fontSize: IS_WEB ? 15 : 13, fontWeight: '600', color: '#374151' },
-  hoursTime: { fontSize: IS_WEB ? 15 : 13, fontWeight: '500', color: '#111' },
+  hoursDay:  { fontSize: IS_WEB ? 15 : 13, fontWeight: '800', color: '#F97316' },
+  hoursTime: { fontSize: IS_WEB ? 15 : 13, fontWeight: '800', color: '#F97316' },
 
   statsGrid: {
     flexDirection: 'row', gap: IS_WEB ? 10 : 8, marginTop: IS_WEB ? 21 : 16,

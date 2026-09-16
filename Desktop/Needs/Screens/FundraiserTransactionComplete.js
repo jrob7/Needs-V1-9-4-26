@@ -80,7 +80,7 @@ export default function FundraiserTransactionComplete({
         return;
       }
 
-      const response = await authFetch('${NODE_API}/fundraiserContribution', {
+      const response = await authFetch(`${NODE_API}/fundraiserContribution`, {
         method: 'POST',
         body: JSON.stringify({
           fundraiserId,

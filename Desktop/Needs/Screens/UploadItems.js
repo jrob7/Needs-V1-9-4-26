@@ -85,7 +85,7 @@ const UploadItems = () => {
         if (!labels) return;
   
         // ✅ Step 2: Send labels → Flask → Mistral (LLM)
-        const enhanceRes = await fetch("${FLASK_API}/enhanceImageDescription", {
+        const enhanceRes = await fetch(`${FLASK_API}/enhanceImageDescription`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ labels }),
@@ -122,7 +122,7 @@ const UploadItems = () => {
       // Upload images -> get URLs/IDs back
       const imageUploadPromises = images.map(async (image) => {
         if (!image.base64) throw new Error('No base64 data available');
-        const response = await fetch('${NODE_API}/uploadImage', {
+        const response = await fetch(`${NODE_API}/uploadImage`, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain' },
           body: image.base64,
@@ -135,7 +135,7 @@ const UploadItems = () => {
       const imageUrls = await Promise.all(imageUploadPromises);
 
       // Create the Need/Item (now includes userId)
-      const resp = await authFetch('${NODE_API}/createNeedInquiry', {
+      const resp = await authFetch(`${NODE_API}/createNeedInquiry`, {
         method: 'POST',
         body: JSON.stringify({
           title,

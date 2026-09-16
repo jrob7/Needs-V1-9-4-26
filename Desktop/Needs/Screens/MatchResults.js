@@ -542,7 +542,17 @@ export function RestaurantDetail({ doc, colors, onClose }) {
               <Ionicons name="time-outline" size={IS_WEB ? 18 : 14} color="#6B7280" />
               <Text style={styles.hoursLabel}>Hours</Text>
             </View>
-            <Text style={styles.hoursValue}>{doc.hoursOpen}</Text>
+            {doc.hoursOpen.split(',').map((entry, i, arr) => {
+              const parts = entry.trim().split(/\s+(?=\d|[0-9])/);
+              const day  = parts[0] || entry.trim();
+              const time = parts.slice(1).join(' ');
+              return (
+                <View key={i} style={[styles.hoursRow, i < arr.length - 1 && styles.hoursRowBorder]}>
+                  <Text style={styles.hoursDay}>{day}</Text>
+                  {time ? <Text style={styles.hoursTime}>{time}</Text> : null}
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -1108,9 +1118,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB', borderRadius: IS_WEB ? 18 : 14,
     paddingVertical: IS_WEB ? 18 : 14, paddingHorizontal: IS_WEB ? 20 : 16,
   },
-  hoursIconRow: { flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 6 : 5, marginBottom: IS_WEB ? 6 : 4 },
+  hoursIconRow: { flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 6 : 5, marginBottom: IS_WEB ? 10 : 8 },
   hoursLabel: { fontSize: IS_WEB ? 13 : 10, color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  hoursValue: { fontSize: IS_WEB ? 17 : 14, fontWeight: '700', color: '#111', textAlign: 'center' },
+  hoursRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    width: '100%', paddingVertical: IS_WEB ? 8 : 6,
+  },
+  hoursRowBorder: { borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  hoursDay:  { fontSize: IS_WEB ? 15 : 13, fontWeight: '600', color: '#374151' },
+  hoursTime: { fontSize: IS_WEB ? 15 : 13, fontWeight: '500', color: '#111' },
 
   statsGrid: {
     flexDirection: 'row', gap: IS_WEB ? 10 : 8, marginTop: IS_WEB ? 21 : 16,

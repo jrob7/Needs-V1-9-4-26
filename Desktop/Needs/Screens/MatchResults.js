@@ -53,10 +53,25 @@ const OFFER_COLORS = {
 import { NODE_API } from '../config';
 import { webContainer, IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 
+const FOOD_PLACEHOLDER = 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&q=80';
+
 const placeholder = (type) =>
   type === 'food'
-    ? 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&q=80'
+    ? FOOD_PLACEHOLDER
     : 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&q=80';
+
+// Image with automatic fallback to placeholder on load error
+function FallbackImage({ uri, style, resizeMode = 'cover' }) {
+  const [src, setSrc] = useState(uri);
+  return (
+    <Image
+      source={{ uri: src }}
+      style={style}
+      resizeMode={resizeMode}
+      onError={() => { if (src !== FOOD_PLACEHOLDER) setSrc(FOOD_PLACEHOLDER); }}
+    />
+  );
+}
 
 // Converts stored filename (img_xxx.jpg) to full URL
 const resolveImage = (url, type) => {
@@ -448,9 +463,6 @@ export function RestaurantDetail({ doc, colors, onClose }) {
   const [offerModalVisible, setOfferModal]  = useState(false);
   const [visitModalVisible, setVisitModal]  = useState(false);
 
-  // Debug: log what topDishes look like when detail opens
-  console.log('🏪 RestaurantDetail doc.topDishes:', JSON.stringify(doc?.topDishes?.slice(0,3)));
-
   return (
     <>
     <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
@@ -513,18 +525,12 @@ export function RestaurantDetail({ doc, colors, onClose }) {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
               {doc.topDishes.slice(0, 3).map((dish, i) => {
                 const dishUri = resolveImage(dish.imageUrl, 'food');
-                console.log(`🍽️ dish[${i}] imageUrl="${dish.imageUrl}" → "${dishUri}"`);
                 return (
                 <View key={i} style={styles.dishCard}>
                   <View style={[styles.dishRankBadge, { backgroundColor: colors.accent }]}>
                     <Text style={styles.dishRankText}>{i + 1}</Text>
                   </View>
-                  <Image
-                    source={{ uri: dishUri }}
-                    style={styles.dishImg}
-                    resizeMode="cover"
-                    onError={e => console.log(`🍽️ dish[${i}] LOAD ERROR:`, e.nativeEvent?.error, 'uri:', dishUri)}
-                  />
+                  <FallbackImage uri={dishUri} style={styles.dishImg} />
                   <Text style={styles.dishName} numberOfLines={1}>{dish.name}</Text>
                   <Text style={styles.dishDesc} numberOfLines={2}>{dish.description}</Text>
                   {dish.likePercent != null && (
@@ -650,13 +656,7 @@ export function RestaurantDetail({ doc, colors, onClose }) {
 
         {/* Visit Rewards */}
         <View style={styles.visitCard}>
-          <Image
-            source={require('../assets/NeedCoin.png')}
-            style={styles.visitCoinImg}
-            resizeMode="contain"
-            onError={e => console.log('🪙 NeedCoin LOAD ERROR:', e.nativeEvent?.error)}
-            onLoad={() => console.log('🪙 NeedCoin loaded OK')}
-          />
+          <Image source={require('../assets/NeedCoin.png')} style={styles.visitCoinImg} resizeMode="contain" />
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={styles.visitTitle}>Visit Rewards</Text>
             <Text style={styles.visitDesc}>Check in at the restaurant and earn NeedCoins for your visit.</Text>

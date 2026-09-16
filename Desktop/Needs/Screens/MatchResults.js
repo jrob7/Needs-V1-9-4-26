@@ -448,6 +448,9 @@ export function RestaurantDetail({ doc, colors, onClose }) {
   const [offerModalVisible, setOfferModal]  = useState(false);
   const [visitModalVisible, setVisitModal]  = useState(false);
 
+  // Debug: log what topDishes look like when detail opens
+  console.log('🏪 RestaurantDetail doc.topDishes:', JSON.stringify(doc?.topDishes?.slice(0,3)));
+
   return (
     <>
     <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
@@ -520,6 +523,7 @@ export function RestaurantDetail({ doc, colors, onClose }) {
                     source={{ uri: dishUri }}
                     style={styles.dishImg}
                     resizeMode="cover"
+                    onError={e => console.log(`🍽️ dish[${i}] LOAD ERROR:`, e.nativeEvent?.error, 'uri:', dishUri)}
                   />
                   <Text style={styles.dishName} numberOfLines={1}>{dish.name}</Text>
                   <Text style={styles.dishDesc} numberOfLines={2}>{dish.description}</Text>
@@ -646,7 +650,13 @@ export function RestaurantDetail({ doc, colors, onClose }) {
 
         {/* Visit Rewards */}
         <View style={styles.visitCard}>
-          <Image source={require('../assets/NeedCoin.png')} style={styles.visitCoinImg} resizeMode="contain" />
+          <Image
+            source={require('../assets/NeedCoin.png')}
+            style={styles.visitCoinImg}
+            resizeMode="contain"
+            onError={e => console.log('🪙 NeedCoin LOAD ERROR:', e.nativeEvent?.error)}
+            onLoad={() => console.log('🪙 NeedCoin loaded OK')}
+          />
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={styles.visitTitle}>Visit Rewards</Text>
             <Text style={styles.visitDesc}>Check in at the restaurant and earn NeedCoins for your visit.</Text>

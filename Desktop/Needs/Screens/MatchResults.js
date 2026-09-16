@@ -918,11 +918,8 @@ export default function MatchResults() {
         </TouchableOpacity>
         <View style={styles.headerSearch}>
           <Ionicons name="search" size={15} color="#9CA3AF" style={{ marginRight: 6 }} />
-          <Text style={styles.headerQuery} numberOfLines={1}>{query}</Text>
+          <Text style={styles.headerQuery} numberOfLines={1}>"{query}"</Text>
         </View>
-        <TouchableOpacity style={styles.headerFilter}>
-          <Ionicons name="options-outline" size={20} color="#111" />
-        </TouchableOpacity>
       </View>
 
       {/* Results count */}

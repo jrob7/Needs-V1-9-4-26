@@ -111,12 +111,17 @@ def classify_domain_with_llm(labels: str, user_text: str) -> str:
     """
     combined = f"{labels} {user_text}".strip()
     classification_prompt = (
-        f'Classify this request with a single word — FOOD, SERVICE, or UNCLEAR.\n'
-        f'FOOD = wanting to eat, craving a meal, hungry, restaurant, any specific food or drink.\n'
-        f'SERVICE = needing work done (repair, cleaning, moving, automotive, home improvement, etc.).\n'
-        f'UNCLEAR = fundraiser, donation, community help, nonprofit, or anything unrelated to food or a paid service.\n\n'
+        f'Classify this request with one word: FOOD, SERVICE, or UNCLEAR.\n\n'
+        f'FOOD — person is hungry or wants to find/order food or a meal:\n'
+        f'  - Any expression of hunger counts: "I\'m starving", "haven\'t eaten",\n'
+        f'    "I\'m hungry", "I need something to eat", "feed me"\n'
+        f'  - Craving or requesting any food, dish, drink, or restaurant\n\n'
+        f'SERVICE — person needs a skilled professional to do work:\n'
+        f'  - Repair, cleaning, moving, electrical, plumbing, auto, landscaping, etc.\n\n'
+        f'UNCLEAR — food assistance / food bank / food pantry (nonprofit need),\n'
+        f'  fundraiser, donation, or anything not clearly food or a paid service.\n\n'
         f'Request: "{combined}"\n\n'
-        f'Answer:'
+        f'Answer with one word only:'
     )
     try:
         raw = generate_response(classification_prompt).strip().upper()

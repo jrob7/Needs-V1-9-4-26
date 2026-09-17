@@ -63,11 +63,40 @@ def is_service_description(labels: str, user_text: str) -> bool:
 
 # Words that strongly suggest a FOOD/RESTAURANT-type need
 FOOD_HINT_WORDS = [
-    "food", "eat", "hungry", "restaurant", "taco", "burger", "pizza", "sushi",
-    "ramen", "salad", "sandwich", "wings", "bbq", "brunch", "breakfast", "lunch",
-    "dinner", "dessert", "coffee", "boba", "seafood", "steak", "vegan", "halal",
-    "kosher", "gluten", "menu", "dish", "cuisine", "chef", "dine", "takeout",
-    "delivery", "spicy", "sweet", "craving", "meal", "drink", "bar", "cafe"
+    # General
+    "food", "eat", "eating", "hungry", "hunger", "craving", "meal", "meals",
+    "restaurant", "dine", "dining", "takeout", "delivery", "menu", "dish", "cuisine",
+    "chef", "order", "ordered", "want to eat", "something to eat", "place to eat",
+    # Mexican
+    "taco", "tacos", "burrito", "burritos", "enchilada", "enchiladas", "quesadilla",
+    "guacamole", "salsa", "nachos", "tamale", "tamales", "torta", "mexican",
+    # American / Fast Food
+    "burger", "burgers", "cheeseburger", "fries", "french fries", "hot dog",
+    "chicken nuggets", "nuggets", "wings", "sandwich", "sub", "wrap", "bbq",
+    "ribs", "brisket", "pulled pork", "steak", "steakhouse",
+    # Italian / Pizza
+    "pizza", "pasta", "lasagna", "spaghetti", "fettuccine", "alfredo",
+    "ravioli", "risotto", "calzone", "stromboli", "italian",
+    # Asian
+    "sushi", "ramen", "pho", "udon", "soba", "tempura", "teriyaki", "hibachi",
+    "dim sum", "dumplings", "fried rice", "lo mein", "pad thai", "spring roll",
+    "orange chicken", "chinese", "japanese", "thai", "vietnamese", "korean",
+    "bibimbap", "bulgogi", "boba", "bubble tea",
+    # Seafood
+    "seafood", "fish", "shrimp", "lobster", "crab", "salmon", "tuna", "oyster",
+    "clam", "scallop", "calamari",
+    # Breakfast / Brunch
+    "breakfast", "brunch", "pancakes", "waffles", "omelette", "eggs benedict",
+    "avocado toast", "french toast", "bagel", "crepe",
+    # Salads / Healthy
+    "salad", "vegan", "vegetarian", "halal", "kosher", "gluten", "keto",
+    "smoothie", "acai", "bowl",
+    # Drinks / Desserts
+    "coffee", "latte", "espresso", "cafe", "dessert", "ice cream", "gelato",
+    "cake", "pastry", "donut", "cookie", "bar", "drink", "juice", "tea",
+    # Catch-all phrases
+    "spicy", "sweet", "savory", "comfort food", "soul food", "street food",
+    "lunch", "dinner", "snack", "appetizer",
 ]
 
 

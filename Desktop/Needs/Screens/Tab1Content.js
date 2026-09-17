@@ -1180,7 +1180,7 @@ export default function SearchScreen() {
       <View style={styles.searchContainer}>
         <View style={styles.searchRow}>
           <TouchableOpacity style={styles.imageButton} onPress={handleMediaPick}>
-            <Image source={require('../assets/Camer Button 2.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 72, height: 72 }]} />
+            <Image source={require('../assets/Camer Button 2.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
 
           <View style={styles.previewHolder}>
@@ -1201,12 +1201,12 @@ export default function SearchScreen() {
           </View>
 
           <TouchableOpacity style={styles.arrowButton} onPress={() => sendQuery()}>
-            <Image source={require('../assets/Up Arrow Button 2.png')} style={[styles.arrowButtonImage, IS_WEB && { width: 72, height: 72 }]} />
+            <Image source={require('../assets/Up Arrow Button 2.png')} style={[styles.arrowButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
         </View>
 
         <TextInput
-          style={[styles.searchInput, IS_WEB && { minHeight: 52, maxHeight: 130, padding: 13, paddingHorizontal: 22, fontSize: 22 }]}
+          style={[styles.searchInput, IS_WEB && { minHeight: 47, maxHeight: 130, padding: 12, paddingHorizontal: 20, fontSize: 20 }]}
           placeholder={
             mode === 'fundraiser'
               ? fundStep === 1 ? 'Describe your fundraiser & target (e.g., "Playground rebuild $2500")'
@@ -1273,12 +1273,12 @@ const styles = StyleSheet.create({
   // View Results button inside AI bubble
   viewResultsBtn: {
     flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 7 : 5,
-    marginTop: IS_WEB ? 10 : 8, paddingVertical: IS_WEB ? 8 : 6, paddingHorizontal: IS_WEB ? 16 : 12,
+    marginTop: IS_WEB ? 9 : 8, paddingVertical: IS_WEB ? 7 : 6, paddingHorizontal: IS_WEB ? 14 : 12,
     backgroundColor: '#EFF6FF', borderRadius: 20,
     borderWidth: 1.5, borderColor: '#BFDBFE',
     alignSelf: 'flex-start',
   },
-  viewResultsTxt: { fontSize: IS_WEB ? 17 : 13, color: '#2563EB', fontWeight: '700' },
+  viewResultsTxt: { fontSize: IS_WEB ? 15 : 13, color: '#2563EB', fontWeight: '700' },
 
   dot: { width: IS_WEB ? 8 : 6, height: IS_WEB ? 8 : 6, borderRadius: IS_WEB ? 4 : 3, backgroundColor: '#888' },
 
@@ -1315,12 +1315,12 @@ const styles = StyleSheet.create({
     marginTop: IS_WEB ? 13 : 10, marginBottom: IS_WEB ? 8 : 6,
   },
   helpCategoryBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 8 : 6,
+    flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 7 : 6,
     backgroundColor: '#EFF6FF', borderRadius: 20,
     borderWidth: 1.5, borderColor: '#BFDBFE',
-    paddingVertical: IS_WEB ? 10 : 8, paddingHorizontal: IS_WEB ? 16 : 12,
+    paddingVertical: IS_WEB ? 9 : 8, paddingHorizontal: IS_WEB ? 14 : 12,
   },
-  helpCategoryEmoji: { fontSize: IS_WEB ? 21 : 16 },
-  helpCategoryLabel: { fontSize: IS_WEB ? 17 : 13, fontWeight: '700', color: '#1D4ED8' },
-  helpOrText: { fontSize: IS_WEB ? 18 : 14, fontWeight: '400', color: '#000', marginTop: IS_WEB ? 13 : 10 },
+  helpCategoryEmoji: { fontSize: IS_WEB ? 19 : 16 },
+  helpCategoryLabel: { fontSize: IS_WEB ? 15 : 13, fontWeight: '700', color: '#1D4ED8' },
+  helpOrText: { fontSize: IS_WEB ? 16 : 14, fontWeight: '400', color: '#000', marginTop: IS_WEB ? 12 : 10 },
 });

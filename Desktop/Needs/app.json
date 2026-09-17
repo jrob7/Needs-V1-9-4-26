@@ -24,7 +24,9 @@
           "color": "#2563EB",
           "iosDisplayInForeground": true
         }
-      ]
+      ],
+      "expo-video",
+      "expo-audio"
     ]
   }
 }

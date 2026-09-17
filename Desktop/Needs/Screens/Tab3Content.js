@@ -305,10 +305,6 @@ const AccountTabContent = () => {
           source={require('/Users/joshhurst/Desktop/Needs/assets/NeedsLogo.png')}
           style={styles.logo} resizeMode="contain"
         />
-        <TouchableOpacity style={styles.notifWrap}>
-          <Ionicons name="notifications-outline" size={IS_WEB ? 29 : 22} color="#1E3A5F" />
-          <View style={styles.notifDot} />
-        </TouchableOpacity>
       </View>
 
       {/* ── PROFILE CARD ─────────────────────────────────────────────── */}

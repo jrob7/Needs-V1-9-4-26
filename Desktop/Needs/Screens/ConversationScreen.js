@@ -534,13 +534,9 @@ const ConversationScreen = () => {
             multiline
             maxLength={1000}
           />
-          {input.trim() ? (
+          {input.trim() && (
             <TouchableOpacity style={styles.sendBtn} onPress={handleSend} disabled={sending}>
               <Ionicons name="send" size={IS_WEB ? 23 : 18} color="#fff" />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.inputEmoji}>
-              <Ionicons name="mic-outline" size={IS_WEB ? 29 : 22} color="#64748B" />
             </TouchableOpacity>
           )}
         </View>

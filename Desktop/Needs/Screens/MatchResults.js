@@ -109,11 +109,6 @@ function RestaurantCard({ doc, colors, onPress }) {
         <Text style={styles.availText}>Available</Text>
       </View>
 
-      {/* Favourite button */}
-      <TouchableOpacity style={styles.favBtn}>
-        <Ionicons name="heart-outline" size={18} color="#fff" />
-      </TouchableOpacity>
-
       {/* Top dish thumbnail */}
       {topDish?.imageUrl && (
         <Image
@@ -177,10 +172,6 @@ function ServiceCard({ doc, colors, onPress }) {
       <View style={[styles.availBadge, { backgroundColor: colors.badge }]}>
         <Text style={styles.availText}>Available</Text>
       </View>
-
-      <TouchableOpacity style={styles.favBtn}>
-        <Ionicons name="heart-outline" size={18} color="#fff" />
-      </TouchableOpacity>
 
       <View style={styles.cardBody}>
         <Text style={styles.cardName}>{doc.businessName}</Text>
@@ -475,9 +466,6 @@ export function RestaurantDetail({ doc, colors, onClose }) {
         />
         <TouchableOpacity style={styles.detailBackBtn} onPress={onClose}>
           <Ionicons name="chevron-back" size={20} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.detailFavBtn}>
-          <Ionicons name="heart-outline" size={20} color="#fff" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.detailShareBtn}>
           <Ionicons name="share-outline" size={20} color="#fff" />

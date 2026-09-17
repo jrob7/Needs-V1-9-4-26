@@ -1042,11 +1042,13 @@ export default function SearchScreen() {
       }
       setConversation((prev) => prev.filter((m) => !m.aiThinking));
 
-      // Neither a service nor a restaurant request was detected — ask the user to
-      // restate it instead of forcing a guess (we only support those two for now).
+      // The AI couldn't determine food vs service — ask the user to clarify
+      // rather than dead-ending with a sorry message. Their answer is appended
+      // to the original text and the full request is re-processed once.
       if (unclear) {
-        pushAI(" Sorry, I could not complete your Need Request. Please restate it more specifically, so I can connect you with the resource? For example, describe what work you need done, or what kind of food you're craving, or upload an image or video.");
-        if (mode !== 'fundraiser') setMedia(null);
+        setPendingClarification({ finalText: originalText, media: attachedMedia });
+        setAwaitingClarification(true);
+        pushAI("I want to make sure I connect you with the right resource. Are you looking for food or a restaurant, need a service or professional, or something else? Just describe what you need.");
         return;
       }
 

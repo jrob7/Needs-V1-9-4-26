@@ -100,24 +100,43 @@ FOOD_HINT_WORDS = [
 ]
 
 
-def is_food_description(labels: str, user_text: str) -> bool:
+def classify_domain_with_llm(labels: str, user_text: str) -> str:
     """
-    Simple heuristic: if any FOOD-related keyword appears
-    in the combined text, treat the request as food-related.
+    Ask the LLM to classify the request as FOOD, SERVICE, or UNCLEAR.
+    Returns one of: 'food', 'service', 'unclear'.
+
+    Used as a fallback when keyword matching doesn't confidently detect food —
+    so that "I want a burrito", "something spicy", "I'm starving", etc. all
+    route correctly without needing an exhaustive keyword list.
     """
-    text = f"{labels} {user_text}".lower()
-    return any(word in text for word in FOOD_HINT_WORDS)
+    combined = f"{labels} {user_text}".strip()
+    classification_prompt = (
+        f'Classify this request with a single word — FOOD, SERVICE, or UNCLEAR.\n'
+        f'FOOD = wanting to eat, craving a meal, hungry, restaurant, any specific food or drink.\n'
+        f'SERVICE = needing work done (repair, cleaning, moving, automotive, home improvement, etc.).\n'
+        f'UNCLEAR = fundraiser, donation, community help, nonprofit, or anything unrelated to food or a paid service.\n\n'
+        f'Request: "{combined}"\n\n'
+        f'Answer:'
+    )
+    try:
+        raw = generate_response(classification_prompt).strip().upper()
+        if "FOOD" in raw:
+            return "food"
+        if "SERVICE" in raw:
+            return "service"
+    except Exception:
+        pass
+    return "unclear"
 
 
 @enhancer_bp.post("/enhanceNeedDescription")
 def enhance_need_description():
     """
     Unified enhancement endpoint:
-      - Auto-detect SERVICE vs FOOD (no match on either -> ask user to clarify)
-      - Build the correct prompt
-      - Run your local LLM
-      - Clean unwanted copied prompt text
-      - Return final enhanced description
+      1. Service keyword fast-path  (reliable — service words are distinctive)
+      2. Food keyword fast-path     (catches obvious cases instantly)
+      3. LLM classification fallback (catches anything the keywords miss)
+      4. Return unclear only if the LLM also can't identify food or service
     """
     body = request.get_json(silent=True) or {}
     labels = (body.get("labels") or "").strip()
@@ -126,17 +145,20 @@ def enhance_need_description():
     if not labels and not user_text:
         return jsonify({"error": "labels or userText is required"}), 400
 
-    is_service = is_service_description(labels, user_text)
-    is_food = is_food_description(labels, user_text)
+    # Step 1: service keyword fast-path
+    if is_service_description(labels, user_text):
+        domain = "service"
+    # Step 2: food keyword fast-path
+    elif any(w in f"{labels} {user_text}".lower() for w in FOOD_HINT_WORDS):
+        domain = "food"
+    # Step 3: LLM classification for anything the keywords missed
+    else:
+        domain = classify_domain_with_llm(labels, user_text)
 
-    # Neither domain detected — don't force a guess (this is what was producing
-    # unrelated "craving Thai food" text for things like "start a fundraiser").
-    # Let the caller ask the user to restate their request instead.
-    if not is_service and not is_food:
+    if domain == "unclear":
         return jsonify({"description": "", "unclear": True})
 
-    # Decide which prompt to use
-    if is_service:
+    if domain == "service":
         prompt = build_service_prompt(labels, user_text)
     else:
         prompt = build_food_prompt(labels, user_text)

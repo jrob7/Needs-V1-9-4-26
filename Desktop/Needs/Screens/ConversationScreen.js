@@ -3,8 +3,9 @@ import React, { useState, useEffect, useContext, useRef, useCallback } from 'rea
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, Image, SafeAreaView, KeyboardAvoidingView,
-  Platform, Animated,
+  Platform, Animated, Alert,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -21,6 +22,7 @@ import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 const resolveImg = (uri) => {
   if (!uri) return null;
   if (uri.startsWith('http') || uri.startsWith('data:')) return uri;
+  if (/^[0-9a-f]{24}$/i.test(uri)) return `${NODE_API}/images/${uri}`;
   return `${NODE_API}/uploads/${uri}`;
 };
 
@@ -103,6 +105,7 @@ const ConversationScreen = () => {
   const [messages, setMessages]       = useState([]);
   const [input, setInput]             = useState('');
   const [sending, setSending]         = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
   const [quoteTarget, setQuoteTarget] = useState(null);
   const flatRef         = useRef(null);
@@ -228,6 +231,48 @@ const ConversationScreen = () => {
     typingTimeout.current = setTimeout(() => {
       s.emit('stop_typing', conversationId);
     }, 2000);
+  };
+
+  // ── Pick & send a photo ──────────────────────────────────────────────────
+  const handlePickImage = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to send images.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      base64: true,
+    });
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+    try {
+      setUploadingPhoto(true);
+      const uploadRes = await fetch(`${NODE_API}/uploadImage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: result.assets[0].base64,
+      });
+      const { imageUrl } = await uploadRes.json();
+      const mediaUrl = `${NODE_API}/images/${imageUrl}`;
+      const optimistic = {
+        _id: `opt_${Date.now()}`,
+        senderId: userId,
+        text: '',
+        mediaUrl,
+        mediaType: 'image',
+        createdAt: new Date().toISOString(),
+        read: false,
+      };
+      setMessages(prev => [...prev, optimistic]);
+      await authFetch(`${NODE_API}/sendMessage`, {
+        method: 'POST',
+        body: JSON.stringify({ recipientId, text: ' ', mediaUrl, mediaType: 'image' }),
+      });
+      await fetchMessages();
+    } catch (e) {
+      console.error('Photo send error:', e);
+      Alert.alert('Error', 'Could not send photo. Please try again.');
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   // ── Send message ─────────────────────────────────────────────────────────
@@ -388,8 +433,18 @@ const ConversationScreen = () => {
       <View style={[styles.msgRow, isMine && styles.msgRowMine]}>
         {avatarCol}
 
-        <View style={[styles.msgBubble, isMine ? styles.msgBubbleMine : styles.msgBubbleOther]}>
-          <Text style={[styles.msgText, isMine && styles.msgTextMine]}>{item.text}</Text>
+        <View style={[styles.msgBubble, isMine ? styles.msgBubbleMine : styles.msgBubbleOther,
+          item.mediaUrl && item.mediaType === 'image' && styles.msgBubblePhoto]}>
+          {item.mediaUrl && item.mediaType === 'image' && (
+            <Image
+              source={{ uri: resolveImg(item.mediaUrl) }}
+              style={styles.msgPhoto}
+              resizeMode="cover"
+            />
+          )}
+          {item.text?.trim() ? (
+            <Text style={[styles.msgText, isMine && styles.msgTextMine]}>{item.text}</Text>
+          ) : null}
           {showTime && (
             <Text style={[styles.msgTime, isMine && { textAlign: 'right' }]}>
               {timeStr(item.createdAt)}
@@ -467,8 +522,8 @@ const ConversationScreen = () => {
 
         {/* ── Input bar ─────────────────────────────────────────── */}
         <View style={styles.inputBar}>
-          <TouchableOpacity style={styles.inputPlus}>
-            <Ionicons name="add" size={IS_WEB ? 34 : 26} color="#2563EB" />
+          <TouchableOpacity style={styles.inputPlus} onPress={handlePickImage} disabled={uploadingPhoto}>
+            <Ionicons name={uploadingPhoto ? 'hourglass-outline' : 'add'} size={IS_WEB ? 34 : 26} color="#2563EB" />
           </TouchableOpacity>
           <TextInput
             style={styles.input}
@@ -479,9 +534,6 @@ const ConversationScreen = () => {
             multiline
             maxLength={1000}
           />
-          <TouchableOpacity style={styles.inputEmoji}>
-            <Ionicons name="happy-outline" size={IS_WEB ? 29 : 22} color="#64748B" />
-          </TouchableOpacity>
           {input.trim() ? (
             <TouchableOpacity style={styles.sendBtn} onPress={handleSend} disabled={sending}>
               <Ionicons name="send" size={IS_WEB ? 23 : 18} color="#fff" />
@@ -554,6 +606,8 @@ const styles = StyleSheet.create({
     maxWidth: '75%', paddingHorizontal: IS_WEB ? 18 : 14, paddingVertical: IS_WEB ? 13 : 10,
     borderRadius: IS_WEB ? 23 : 18, backgroundColor: '#F1F5F9',
   },
+  msgBubblePhoto: { paddingHorizontal: 0, paddingVertical: 0, overflow: 'hidden' },
+  msgPhoto: { width: IS_WEB ? 260 : 200, height: IS_WEB ? 200 : 160, borderRadius: IS_WEB ? 23 : 18 },
   msgBubbleOther:{ borderBottomLeftRadius: 4 },
   msgBubbleMine: { backgroundColor: '#2563EB', borderBottomRightRadius: 4 },
   msgText:       { fontSize: IS_WEB ? 20 : 15, color: '#0F172A', lineHeight: IS_WEB ? 27 : 21 },

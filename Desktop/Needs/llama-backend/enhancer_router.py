@@ -26,6 +26,8 @@ SERVICE_HINT_WORDS = [
     "handyman", "cleaner", "housekeeping", "maid",
     "appliance", "dryer", "washer", "dishwasher", "refrigerator", "fridge",
     "microwave", "oven", "stove", "garbage disposal", "freezer", "ice maker",
+    "floor", "flooring", "hardwood", "carpet", "laminate", "vinyl floor", "tile floor",
+    "auto repair", "auto shop", "brake service", "diagnostic", "tune up",
     "landscaper", "landscaping", "lawn", "mow", "hedge", "yard", "garden", "sprinkler",
     "painter", "painting", "carpenter", "carpentry", "cabinet", "deck",
     "moving", "mover", "movers", "relocation",

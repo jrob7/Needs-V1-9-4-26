@@ -74,6 +74,8 @@ SERVICE_HINT_WORDS = [
     "handyman","cleaner","housekeeping","maid",
     "appliance","dryer","washer","washing machine","dishwasher","refrigerator","fridge",
     "microwave","oven","stove","garbage disposal","freezer","ice maker",
+    "floor","flooring","hardwood","carpet","laminate","vinyl floor","tile floor",
+    "auto repair","auto shop","brake service","diagnostic","tune up",
     "landscaper","landscaping","lawn","mow","hedge","yard","garden","sprinkler",
     "trim","trimming","bush","bushes","shrub","shrubs","prune","pruning","weed","mulch",
     "painter","painting","carpenter","carpentry","cabinet","deck",

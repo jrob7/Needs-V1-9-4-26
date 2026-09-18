@@ -403,18 +403,17 @@ def detect_service_category_with_count(text: str):
 SERVICE_CATEGORY_LIST = list(CATEGORY_KEYWORDS.keys())
 
 def classify_category_with_ai(text: str):
-    """Asks the LLM to pick the best-matching category directly from the
-    request text. Returns None if the model says "None" or returns something
-    that doesn't match one of the known categories."""
-    prompt = f"""
-You are a strict classifier for a local services marketplace. Read the user's request and return ONLY the single best matching category from this exact list, written exactly as shown, or return "None" if it does not clearly match any of them.
-
-Categories: {", ".join(SERVICE_CATEGORY_LIST)}
-
-Request: "{text}"
-
-Respond with ONLY the category name exactly as listed, or "None". No explanation, no punctuation, no extra words.
-""".strip()
+    """Focused category question. Returns None when no category clearly fits —
+    which is safe (no veto, pure word matching) — rather than forcing a wrong guess."""
+    category_lines = "\n".join(f"- {c}" for c in SERVICE_CATEGORY_LIST)
+    prompt = (
+        f'What service category does this request need?\n\n'
+        f'Request: "{text}"\n\n'
+        f'Pick EXACTLY ONE from this list only if you are confident it matches:\n'
+        f'{category_lines}\n\n'
+        f'IMPORTANT: If you are not confident, answer "None" — a wrong guess is worse than None.\n'
+        f'Answer with ONLY the category name as listed, or "None". No explanation.'
+    )
 
     try:
         raw = (generate_response(prompt) or "").strip()

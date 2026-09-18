@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 
 from ai_service import generate_response
-from enhancer_router import classify_domain_with_llm
+from enhancer_router import classify_domain_chain
 
 app = Flask(__name__)
 CORS(app, origins='*', allow_headers=['Content-Type', 'Authorization'],
@@ -109,18 +109,11 @@ SERVICE_HINT_WORDS = [
 
 def detect_need_type(text: str) -> str:
     t = (text or "").lower()
-    # Fast path: keyword match
+    # Fast path: keyword match (no LLM call needed)
     if any(w in t for w in SERVICE_HINT_WORDS):
         return "service"
-    # LLM fallback for anything not in the keyword list
-    domain = classify_domain_with_llm("", text)
-    if domain == "service":
-        return "service"
-    if domain == "food":
-        return "food"
-    # Default to service — a no-results service page is better than
-    # routing a repair request to restaurants
-    return "service"
+    # Chain classifier for anything not caught by keywords
+    return classify_domain_chain(text)
 
 def looks_like_enhanced_text(text: str) -> bool:
     if not text:

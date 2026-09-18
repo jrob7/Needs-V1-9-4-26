@@ -105,51 +105,64 @@ FOOD_HINT_WORDS = [
 ]
 
 
-def classify_domain_with_llm(labels: str, user_text: str) -> str:
-    """
-    Ask the LLM to classify the request as FOOD, SERVICE, or UNCLEAR.
-    Returns one of: 'food', 'service', 'unclear'.
-
-    Used as a fallback when keyword matching doesn't confidently detect food —
-    so that "I want a burrito", "something spicy", "I'm starving", etc. all
-    route correctly without needing an exhaustive keyword list.
-    """
-    combined = f"{labels} {user_text}".strip()
-    classification_prompt = (
-        f'Classify this request with one word: FOOD, SERVICE, or UNCLEAR.\n\n'
-        f'FOOD — person is hungry or wants to find/order food or a meal:\n'
-        f'  - Any expression of hunger counts: "I\'m starving", "haven\'t eaten",\n'
-        f'    "I\'m hungry", "I need something to eat", "feed me"\n'
-        f'  - Craving or requesting any food, dish, drink, or restaurant\n\n'
-        f'SERVICE — person needs a skilled professional or trade to do work:\n'
-        f'  - Trade/profession names always mean SERVICE, even as a single word:\n'
-        f'    mover, movers, cleaner, plumber, electrician, painter, mechanic,\n'
-        f'    landscaper, handyman, roofer, contractor, barber, therapist, lawyer,\n'
-        f'    accountant, tutor, babysitter, dog walker, groomer, etc.\n'
-        f'  - Repair, cleaning, moving, electrical, plumbing, auto, landscaping, etc.\n'
-        f'  - Appliance problems are ALWAYS SERVICE (not food): "fridge doesn\'t work",\n'
-        f'    "washer broken", "dryer won\'t start", "stove not heating", "oven broken",\n'
-        f'    "dishwasher leaking", "microwave not working", "fridge stopped working"\n\n'
-        f'UNCLEAR — food assistance / food bank / food pantry (nonprofit need),\n'
-        f'  fundraiser, donation, or anything not clearly food or a paid service.\n\n'
-        f'Request: "{combined}"\n\n'
-        f'Answer with one word only:'
-    )
+def _ask_yes_no(prompt: str) -> str:
+    """Ask a focused YES/NO question. Returns 'yes', 'no', or 'unknown'."""
     try:
-        raw = generate_response(classification_prompt).strip().upper()
-        # Take only the first word to avoid false matches like
-        # "This is SERVICE not FOOD" triggering "FOOD" first.
-        first_word = raw.split()[0] if raw.split() else ""
-        if first_word in ("FOOD", "SERVICE", "UNCLEAR"):
-            return first_word.lower()
-        # Fallback: scan for the first of the three labels that appears
-        import re
-        match = re.search(r'\b(SERVICE|FOOD|UNCLEAR)\b', raw)
-        if match:
-            return match.group(1).lower()
+        raw = generate_response(prompt).strip().upper()
+        first = raw.split()[0] if raw.split() else ""
+        if first == "YES": return "yes"
+        if first == "NO":  return "no"
+        if "YES" in raw:   return "yes"
+        if "NO"  in raw:   return "no"
     except Exception:
         pass
-    return "unclear"
+    return "unknown"
+
+
+def classify_domain_chain(text: str) -> str:
+    """
+    Multi-step chain classifier. Each question is short and focused so the
+    model can answer reliably without needing a wall of examples.
+    Returns 'food', 'service', or 'unclear'.
+    """
+    # Q1 — Is this about eating or finding food/restaurants?
+    q1 = _ask_yes_no(
+        f'Is this a request for food, a restaurant, or something to eat or drink?\n'
+        f'Request: "{text}"\n'
+        f'Answer YES or NO only.'
+    )
+    if q1 == "yes":
+        return "food"
+
+    # Q2 — Does this need a skilled professional or trade service?
+    q2 = _ask_yes_no(
+        f'Does this request need a skilled professional, contractor, or trade service of any kind?\n'
+        f'This includes: home repair, appliance repair, automotive, legal, financial,\n'
+        f'medical, tutoring, pet care, personal care (hair/nails/massage/barber),\n'
+        f'cleaning, landscaping, moving, roofing, flooring, pest control, locksmith, etc.\n'
+        f'Request: "{text}"\n'
+        f'Answer YES or NO only.'
+    )
+    if q2 == "yes":
+        return "service"
+
+    # Q3 — Is this a community/nonprofit need?
+    q3 = _ask_yes_no(
+        f'Is this a request for nonprofit help, community resources, a food bank,\n'
+        f'shelter, donation, or charity assistance?\n'
+        f'Request: "{text}"\n'
+        f'Answer YES or NO only.'
+    )
+    if q3 == "yes":
+        return "unclear"
+
+    # Default — if we still can't tell, lean service (safer than food)
+    return "service"
+
+
+def classify_domain_with_llm(labels: str, user_text: str) -> str:
+    """Wrapper kept for backwards compatibility — delegates to chain classifier."""
+    return classify_domain_chain(f"{labels} {user_text}".strip())
 
 
 @enhancer_bp.post("/enhanceNeedDescription")

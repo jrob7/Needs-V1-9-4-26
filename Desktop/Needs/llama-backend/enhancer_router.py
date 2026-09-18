@@ -23,6 +23,8 @@ SERVICE_HINT_WORDS = [
     "electrician", "breaker", "circuit", "fuse", "switch",
     "hvac", "furnace", "thermostat", "air conditioner", "heater", "ductwork",
     "handyman", "cleaner", "housekeeping", "maid",
+    "appliance", "dryer", "washer", "dishwasher", "refrigerator", "fridge",
+    "microwave", "oven", "stove", "garbage disposal", "freezer", "ice maker",
     "landscaper", "landscaping", "lawn", "mow", "hedge", "yard", "garden", "sprinkler",
     "painter", "painting", "carpenter", "carpentry", "cabinet", "deck",
     "moving", "mover", "movers", "relocation",

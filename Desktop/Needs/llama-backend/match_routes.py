@@ -314,7 +314,10 @@ CATEGORY_KEYWORDS = {
     "Dry Cleaner":       ["dry clean", "dry cleaner", "dry cleaning", "laundry service",
                             "clothes cleaning", "suit cleaning", "press clothes"],
     "Landscaper":        ["lawn", "mow", "landscape", "landscaping", "hedge",
-                            "tree trim", "yard", "garden", "sprinkler"],
+                            "tree trim", "yard", "garden", "sprinkler",
+                            "trim", "trimming", "bush", "bushes", "shrub", "shrubs",
+                            "prune", "pruning", "weed", "mulch", "leaf", "leaves",
+                            "grass", "sod", "aerate", "fertilize", "outdoor"],
     "Painter":           ["paint", "painting", "painter", "wall paint",
                             "exterior paint", "interior paint"],
     "Carpentry":         ["carpenter", "carpentry", "woodwork", "cabinet",
@@ -747,8 +750,10 @@ def score_service(doc: dict, query_words: list, detected_category=None) -> int:
             if word in svc_name:
                 score += 8
 
-    if detected_category and category == detected_category.lower():
-        score += 10
+    if detected_category and normalize_category(category) == normalize_category(detected_category):
+        score += 15
+        if score < 5:
+            score = 5
 
     if score <= 0:
         score = -1

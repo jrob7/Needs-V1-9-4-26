@@ -74,6 +74,7 @@ SERVICE_HINT_WORDS = [
     "appliance","dryer","washer","washing machine","dishwasher","refrigerator","fridge",
     "microwave","oven","stove","garbage disposal","freezer","ice maker",
     "landscaper","landscaping","lawn","mow","hedge","yard","garden","sprinkler",
+    "trim","trimming","bush","bushes","shrub","shrubs","prune","pruning","weed","mulch",
     "painter","painting","carpenter","carpentry","cabinet","deck",
     "moving","movers","relocation",
     # Automotive

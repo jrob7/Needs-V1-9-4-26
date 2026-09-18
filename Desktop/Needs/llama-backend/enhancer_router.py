@@ -25,7 +25,7 @@ SERVICE_HINT_WORDS = [
     "handyman", "cleaner", "housekeeping", "maid",
     "landscaper", "landscaping", "lawn", "mow", "hedge", "yard", "garden", "sprinkler",
     "painter", "painting", "carpenter", "carpentry", "cabinet", "deck",
-    "moving", "movers", "relocation",
+    "moving", "mover", "movers", "relocation",
     # Automotive
     "mechanic", "oil change", "check engine", "alternator",
     "tow", "towing", "roadside assistance", "auto body", "dent", "bumper", "collision", "fender",
@@ -116,7 +116,11 @@ def classify_domain_with_llm(labels: str, user_text: str) -> str:
         f'  - Any expression of hunger counts: "I\'m starving", "haven\'t eaten",\n'
         f'    "I\'m hungry", "I need something to eat", "feed me"\n'
         f'  - Craving or requesting any food, dish, drink, or restaurant\n\n'
-        f'SERVICE — person needs a skilled professional to do work:\n'
+        f'SERVICE — person needs a skilled professional or trade to do work:\n'
+        f'  - Trade/profession names always mean SERVICE, even as a single word:\n'
+        f'    mover, movers, cleaner, plumber, electrician, painter, mechanic,\n'
+        f'    landscaper, handyman, roofer, contractor, barber, therapist, lawyer,\n'
+        f'    accountant, tutor, babysitter, dog walker, groomer, etc.\n'
         f'  - Repair, cleaning, moving, electrical, plumbing, auto, landscaping, etc.\n\n'
         f'UNCLEAR — food assistance / food bank / food pantry (nonprofit need),\n'
         f'  fundraiser, donation, or anything not clearly food or a paid service.\n\n'

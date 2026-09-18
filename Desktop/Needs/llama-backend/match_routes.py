@@ -304,8 +304,11 @@ CATEGORY_KEYWORDS = {
     "HVAC":              ["hvac", "furnace", "thermostat", "air conditioner", "ac unit",
                             "heater", "ductwork", "ventilation"],
     "Handyman":          ["handyman", "odd job", "small repair", "general repair"],
-    "Cleaner":           ["clean", "cleaning", "carpet cleaning", "deep clean",
-                            "housekeeping", "maid"],
+    "Cleaner":           ["clean", "cleaning", "cleaner", "carpet cleaning", "deep clean",
+                            "housekeeping", "maid", "clean bathrooms", "clean house",
+                            "home cleaning", "office cleaning", "move-in cleaning"],
+    "Dry Cleaner":       ["dry clean", "dry cleaner", "dry cleaning", "laundry service",
+                            "clothes cleaning", "suit cleaning", "press clothes"],
     "Landscaper":        ["lawn", "mow", "landscape", "landscaping", "hedge",
                             "tree trim", "yard", "garden", "sprinkler"],
     "Painter":           ["paint", "painting", "painter", "wall paint",
@@ -659,15 +662,37 @@ def score_restaurant(doc: dict, query_words: list) -> int:
 
     return score
 
+# Maps keyword-classifier labels → canonical category names used in service docs
+CATEGORY_ALIASES = {
+    "cleaner":       "cleaning",
+    "dry cleaner":   "dry cleaning",
+    "painter":       "painting",
+    "landscaper":    "landscaping",
+    "plumber":       "plumbing",
+    "electrician":   "electrical",
+    "mechanic":      "auto repair",
+    "tire shop":     "auto repair",
+    "auto body":     "auto repair",
+    "towing":        "towing",
+    "barber":        "barbershop",
+    "hair salon":    "hair salon",
+    "nail salon":    "nail salon",
+    "carpentry":     "carpentry",
+}
+
+def normalize_category(cat: str) -> str:
+    """Normalize a category label so keyword-detected and doc-stored labels match."""
+    return CATEGORY_ALIASES.get(cat.lower(), cat.lower())
+
 def score_service(doc: dict, query_words: list, detected_category=None) -> int:
-    category = doc.get("category", "").lower()
+    category = normalize_category(doc.get("category", ""))
 
     # A confidently-detected trade (e.g. "Automotive" from "tire") hard-vetoes
     # providers in an unrelated trade. This has to be a hard cutoff rather than
     # a score penalty — a long, natural query can rack up enough incidental
     # word overlaps (e.g. "installation" matching "Toilet ... Installation",
     # "right" matching a tagline's "Fixed Right") to outweigh a soft penalty.
-    if detected_category and category != detected_category.lower():
+    if detected_category and category != normalize_category(detected_category):
         return -1
 
     score = 0

@@ -22,6 +22,7 @@ SERVICE_HINT_WORDS = [
     "plumber", "faucet", "drain", "toilet", "sink", "water heater", "clog",
     "electrician", "breaker", "circuit", "fuse", "switch",
     "hvac", "furnace", "thermostat", "air conditioner", "heater", "ductwork",
+    "roofer", "roofing", "roof", "shingle", "shingles", "gutter", "fascia",
     "handyman", "cleaner", "housekeeping", "maid",
     "appliance", "dryer", "washer", "dishwasher", "refrigerator", "fridge",
     "microwave", "oven", "stove", "garbage disposal", "freezer", "ice maker",

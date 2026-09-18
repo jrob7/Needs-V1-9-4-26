@@ -70,6 +70,7 @@ SERVICE_HINT_WORDS = [
     "plumber","plumbing","pipe","faucet","drain","toilet","sink","water heater","clog",
     "electrician","electrical","outlet","wiring","breaker","circuit","fuse","switch",
     "hvac","furnace","thermostat","air conditioner","heater","ductwork",
+    "roofer","roofing","roof","shingle","shingles","gutter","fascia",
     "handyman","cleaner","housekeeping","maid",
     "appliance","dryer","washer","washing machine","dishwasher","refrigerator","fridge",
     "microwave","oven","stove","garbage disposal","freezer","ice maker",

@@ -303,6 +303,9 @@ CATEGORY_KEYWORDS = {
                             "circuit", "fuse", "switch", "light fixture"],
     "HVAC":              ["hvac", "furnace", "thermostat", "air conditioner", "ac unit",
                             "heater", "ductwork", "ventilation"],
+    "Roofing":           ["roof", "roofing", "roofer", "shingle", "shingles", "gutter",
+                            "fascia", "soffit", "flashing", "roof repair", "roof leak",
+                            "roof replacement", "flat roof", "metal roof", "tile roof"],
     "Handyman":          ["handyman", "odd job", "small repair", "general repair"],
     "Appliance Repair":  ["appliance", "dryer", "washer", "washing machine", "dishwasher",
                             "refrigerator", "fridge", "microwave", "oven", "stove",
@@ -714,6 +717,7 @@ CATEGORY_ALIASES = {
     "nail salon":    "nail salon",
     "carpentry":        "carpentry",
     "appliance repair": "appliance repair",
+    "roofing":          "roofing",
 }
 
 def normalize_category(cat: str) -> str:

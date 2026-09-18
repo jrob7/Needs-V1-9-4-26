@@ -129,10 +129,16 @@ def classify_domain_with_llm(labels: str, user_text: str) -> str:
     )
     try:
         raw = generate_response(classification_prompt).strip().upper()
-        if "FOOD" in raw:
-            return "food"
-        if "SERVICE" in raw:
-            return "service"
+        # Take only the first word to avoid false matches like
+        # "This is SERVICE not FOOD" triggering "FOOD" first.
+        first_word = raw.split()[0] if raw.split() else ""
+        if first_word in ("FOOD", "SERVICE", "UNCLEAR"):
+            return first_word.lower()
+        # Fallback: scan for the first of the three labels that appears
+        import re
+        match = re.search(r'\b(SERVICE|FOOD|UNCLEAR)\b', raw)
+        if match:
+            return match.group(1).lower()
     except Exception:
         pass
     return "unclear"
@@ -154,11 +160,22 @@ def enhance_need_description():
     if not labels and not user_text:
         return jsonify({"error": "labels or userText is required"}), 400
 
+    import re as _re
+    combined_lower = f"{labels} {user_text}".lower()
+
+    def _food_matches(text):
+        for w in FOOD_HINT_WORDS:
+            # Use word-boundary match to avoid "eat" inside "heater", "bar" inside "barber"
+            pattern = r'\b' + _re.escape(w) + r'\b'
+            if _re.search(pattern, text):
+                return True
+        return False
+
     # Step 1: service keyword fast-path
     if is_service_description(labels, user_text):
         domain = "service"
-    # Step 2: food keyword fast-path
-    elif any(w in f"{labels} {user_text}".lower() for w in FOOD_HINT_WORDS):
+    # Step 2: food keyword fast-path (word-boundary safe)
+    elif _food_matches(combined_lower):
         domain = "food"
     # Step 3: LLM classification for anything the keywords missed
     else:

@@ -576,8 +576,8 @@ export default function SearchScreen() {
           const matchRes = await axios.post(`${FLASK_API}/ai/findMatches`, { query: finalText, type: 'service', ...locationParams() });
           const matches = matchRes.data?.matches || [];
           if (matches.length === 0) {
-            pushAI("No matching providers found yet — your request is live on the feed.");
-            setAwaitingDecision(true);
+            pushAI("No matching providers found yet — your request is live on the feed. Feel free to describe another need anytime.");
+            setLastCreatedNeed(null);
           } else {
             navigation.navigate('MatchResults', { matches, type: 'service', query: finalText });
             pushAI(`Found ${matches.length} service provider${matches.length > 1 ? 's' : ''} for you!`,
@@ -603,8 +603,8 @@ export default function SearchScreen() {
         const matchRes = await axios.post(`${FLASK_API}/ai/findMatches`, { query: finalText, type: 'food', ...locationParams() });
         const matches = matchRes.data?.matches || [];
         if (matches.length === 0) {
-          pushAI("No matching restaurants found yet — your request is live on the feed.");
-          setAwaitingDecision(true);
+          pushAI("No matching restaurants found yet — your request is live on the feed. Feel free to describe another need anytime.");
+          setLastCreatedNeed(null);
         } else {
           navigation.navigate('MatchResults', { matches, type: 'food', query: finalText });
           pushAI(`Found ${matches.length} restaurant${matches.length > 1 ? 's' : ''} for you!`,
@@ -1070,8 +1070,8 @@ export default function SearchScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={tabBarOffset}
+      behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'android' ? tabBarOffset + 24 : tabBarOffset}
     >
       <View style={[{ flex: 1, width: '100%', alignItems: 'center' }, webContainer, IS_WEB && { maxWidth: 1037 }]}>
       <View style={styles.headingRow}>
@@ -1084,7 +1084,7 @@ export default function SearchScreen() {
       <ScrollView
         style={[styles.chatContainer, IS_WEB && { maxHeight: screenH * 0.74 }]}
         ref={scrollViewRef}
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: Platform.OS === 'android' ? tabBarOffset + 20 : 20 }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}

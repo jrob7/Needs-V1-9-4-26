@@ -8,7 +8,15 @@
     "ios": {
       "supportsTablet": true
     },
-    "android": {},
+    "android": {
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "package": "com.jrehurst7.needs"
+    },
     "web": {
       "bundler": "metro",
       "output": "single"
@@ -27,6 +35,11 @@
       ],
       "expo-video",
       "expo-audio"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "78e9cc50-5b11-46df-ab2f-324775090cbf"
+      }
+    }
   }
 }

@@ -619,11 +619,39 @@ def generate_info_request_questions(query: str, category=None):
     return cleaned or fallback
 
 
+# Maps specific food items → cuisine category so searching "lobster" also
+# matches restaurants with cuisine="Seafood", "taquito" matches "Mexican", etc.
+FOOD_TO_CUISINE = {
+    "lobster": "seafood", "shrimp": "seafood", "crab": "seafood",
+    "oyster": "seafood", "clam": "seafood", "scallop": "seafood",
+    "salmon": "seafood", "tuna": "seafood", "calamari": "seafood",
+    "mussels": "seafood", "halibut": "seafood", "cod": "seafood",
+    "clam chowder": "seafood", "chowder": "seafood",
+    "taquito": "mexican", "taquitos": "mexican", "enchilada": "mexican",
+    "quesadilla": "mexican", "guacamole": "mexican", "tamale": "mexican",
+    "torta": "mexican", "carnitas": "mexican",
+    "ramen": "japanese", "sushi": "japanese", "tempura": "japanese",
+    "teriyaki": "japanese", "miso": "japanese", "udon": "japanese",
+    "pho": "vietnamese", "banh mi": "vietnamese",
+    "pad thai": "thai", "green curry": "thai",
+    "bibimbap": "korean", "bulgogi": "korean",
+    "dim sum": "chinese", "dumpling": "chinese", "lo mein": "chinese",
+    "tikka masala": "indian", "naan": "indian", "curry": "indian",
+    "shawarma": "mediterranean", "falafel": "mediterranean", "gyro": "greek",
+    "brisket": "bbq", "ribs": "bbq", "pulled pork": "bbq",
+    "pancake": "breakfast", "waffle": "breakfast", "omelette": "breakfast",
+    "avocado toast": "breakfast", "french toast": "breakfast",
+}
+
 def _expand_query_words(words: list) -> list:
-    """For compound food words (e.g. 'cheeseburger'), also emit the last 6-char
-    suffix so 'burger' is checked separately. Handles spelling variants like
-    'cheesburger' vs 'cheeseburger' that share the same food-type suffix."""
+    """Expand query words with cuisine aliases and compound-word suffixes."""
     expanded = list(words)
+    joined = " ".join(words)
+    # Add cuisine category if a food item maps to one
+    for item, cuisine in FOOD_TO_CUISINE.items():
+        if item in joined and cuisine not in expanded:
+            expanded.append(cuisine)
+    # For compound food words (e.g. 'cheeseburger'), emit the last 6-char suffix
     for w in words:
         if len(w) >= 8:
             suffix = w[-6:]
@@ -766,8 +794,11 @@ def extract_food_context_route():
 
 @match_bp.route("/checkFoodReadiness", methods=["POST"])
 def check_food_readiness_route():
-    """Returns {ready, question}. If the food query is too generic (no specific
-    cuisine or food type), asks one follow-up question to narrow it down."""
+    """Returns {ready, question}.
+    - Any specific food item, dish name, or ingredient → ready immediately.
+    - Truly generic queries ("I want food", "hungry") → ask one follow-up.
+    Uses keyword fast-path first, then LLM for anything not caught by keywords.
+    """
     body  = request.get_json(silent=True) or {}
     query = (body.get("query") or "").strip()
     if not query:
@@ -775,31 +806,61 @@ def check_food_readiness_route():
 
     lower = query.lower()
 
-    # Specific cuisine / food-type words that make a query ready without follow-up
+    # Fast-path: known generic phrases that always need a follow-up
+    ALWAYS_GENERIC = {"food", "eat", "hungry", "something to eat", "i want food",
+                      "i'm hungry", "feed me", "meal", "restaurant", "place to eat"}
+    if lower in ALWAYS_GENERIC:
+        return jsonify({
+            "ready": False,
+            "question": "What kind of food are you in the mood for? (e.g. lobster, tacos, sushi, pizza, burgers…)"
+        })
+
+    # Fast-path: any known specific food word → ready immediately
     SPECIFIC_FOOD_WORDS = {
-        "thai", "mexican", "italian", "chinese", "japanese", "sushi", "ramen",
-        "korean", "indian", "mediterranean", "greek", "vietnamese", "pho",
-        "american", "bbq", "barbecue", "southern", "soul food", "cajun",
-        "french", "spanish", "peruvian", "ethiopian", "african", "caribbean",
-        "hawaiian", "filipino", "taiwanese", "dim sum", "hot pot",
+        # Cuisines
+        "thai", "mexican", "italian", "chinese", "japanese", "korean", "indian",
+        "mediterranean", "greek", "vietnamese", "american", "bbq", "barbecue",
+        "southern", "soul food", "cajun", "french", "spanish", "peruvian",
+        "caribbean", "hawaiian", "filipino", "dim sum", "hot pot",
+        # Dishes & items
         "pizza", "pasta", "burger", "burgers", "taco", "tacos", "sandwich",
-        "salad", "steak", "seafood", "sushi", "ramen", "noodle", "noodles",
-        "wings", "fried chicken", "chicken", "ribs", "burritos", "burrito",
+        "salad", "steak", "sushi", "ramen", "pho", "noodle", "noodles",
+        "wings", "fried chicken", "chicken", "ribs", "burrito", "burritos",
         "shawarma", "falafel", "gyro", "poke", "dumplings", "soup",
+        "enchilada", "quesadilla", "nachos", "taquito", "taquitos",
+        "clam chowder", "chowder", "gumbo", "jambalaya",
+        # Seafood
+        "lobster", "shrimp", "crab", "salmon", "tuna", "oyster", "clam",
+        "scallop", "fish", "calamari", "mussels", "cod", "halibut", "seafood",
+        "prawns", "crawfish",
+        # Other specific items
         "vegan", "vegetarian", "halal", "kosher", "gluten free", "organic",
         "breakfast", "brunch", "coffee", "boba", "dessert", "ice cream",
-        "donuts", "pastry", "bakery", "deli", "sub", "sandwich",
+        "donuts", "pastry", "bakery", "deli", "sub", "cheesesteak",
+        "pancakes", "waffles", "omelette", "avocado toast", "french toast",
+        "latte", "espresso", "smoothie", "milkshake",
     }
-
-    has_specific = any(w in lower for w in SPECIFIC_FOOD_WORDS)
-
-    if has_specific:
+    if any(w in lower for w in SPECIFIC_FOOD_WORDS):
         return jsonify({"ready": True, "question": None})
 
-    # Generic-only query — ask for the cuisine or food type
+    # LLM fallback: ask the model if this is a specific food item or dish name
+    try:
+        prompt = (
+            f'Is "{query}" a specific food item, dish name, ingredient, or cuisine type?\n'
+            f'Answer YES if it names any food, drink, dish, or restaurant cuisine.\n'
+            f'Answer NO only if it is completely vague with no food specifics.\n'
+            f'Answer with one word only: YES or NO'
+        )
+        raw = generate_response(prompt).strip().upper()
+        first = raw.split()[0] if raw.split() else ""
+        if first == "YES" or (not first and "YES" in raw):
+            return jsonify({"ready": True, "question": None})
+    except Exception as e:
+        logging.warning(f"checkFoodReadiness LLM failed: {e}")
+
     return jsonify({
         "ready": False,
-        "question": "What kind of food are you in the mood for? (e.g. Thai, Mexican, pizza, sushi, burgers…)"
+        "question": "What kind of food are you in the mood for? (e.g. lobster, tacos, sushi, pizza, burgers…)"
     })
 
 

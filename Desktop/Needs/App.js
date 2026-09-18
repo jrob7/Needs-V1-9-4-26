@@ -5,19 +5,24 @@ import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { setAudioModeAsync } from 'expo-audio';
-import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import TabNavigation from './Screens/TabNavigation';
 import { UserProvider, UserContext } from './server/CurrentUser';
 import { AuthModalProvider } from './Screens/AuthModalContext';
-import { requestNotificationPermissions } from './utils/appointmentReminders';
 import AppointmentFollowUpModal from './Screens/AppointmentFollowUpModal';
 import RestaurantFollowUpModal from './Screens/RestaurantFollowUpModal';
 
-const isExpoGo = Constants.executionEnvironment === 'storeClient';
+const isExpoGo =
+  Constants.executionEnvironment === 'storeClient' ||
+  Constants.executionEnvironment === 'expo' ||
+  !Constants.executionEnvironment;
 
-// Push notifications are native-only and not supported in Expo Go (SDK 53+)
+// Lazy-load notifications so the import never crashes Expo Go on Android
+let Notifications = null;
+let requestNotificationPermissions = () => Promise.resolve();
 if (Platform.OS !== 'web' && !isExpoGo) {
+  Notifications = require('expo-notifications');
+  requestNotificationPermissions = require('./utils/appointmentReminders').requestNotificationPermissions;
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert:  true,
@@ -43,9 +48,8 @@ function NotificationHandler() {
 
   // ── Appointment follow-up via local push notification (native only) ──────────
   useEffect(() => {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web' || isExpoGo || !Notifications) return;
 
-    if (isExpoGo) return;
     requestNotificationPermissions().catch(() => {});
 
     const openFollowUp = (data) => {

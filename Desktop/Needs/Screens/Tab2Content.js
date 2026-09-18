@@ -16,7 +16,15 @@ import {
   Alert,
 } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import Constants from 'expo-constants';
+const _isExpoGo =
+  Constants.executionEnvironment === 'storeClient' ||
+  Constants.executionEnvironment === 'expo' ||
+  !Constants.executionEnvironment;
+import { Platform } from 'react-native';
+const _expoVideo = (Platform.OS !== 'web' && !_isExpoGo) ? require('expo-video') : {};
+const VideoView = _expoVideo.VideoView || (() => null);
+const useVideoPlayer = _expoVideo.useVideoPlayer || (() => null);
 import { setAudioModeAsync } from 'expo-audio';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -895,6 +903,7 @@ const resolveMatchImg = (url, type) => {
     ? 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&q=80'
     : 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&q=80';
   if (url.startsWith('http')) return url;
+  if (/^[0-9a-f]{24}$/i.test(url)) return `${API}/images/${url}`;
   return `${API}/uploads/${url}`;
 };
 

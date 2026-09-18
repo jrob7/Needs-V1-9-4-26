@@ -6,7 +6,15 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
+const _isExpoGo =
+  Constants.executionEnvironment === 'storeClient' ||
+  Constants.executionEnvironment === 'expo' ||
+  !Constants.executionEnvironment;
+import { Platform } from 'react-native';
+const Notifications = (Platform.OS !== 'web' && !_isExpoGo)
+  ? require('expo-notifications')
+  : { requestPermissionsAsync: async () => ({}), getPermissionsAsync: async () => ({}), scheduleNotificationAsync: async () => {}, getAllScheduledNotificationsAsync: async () => [] };
 import { UserContext } from '../server/CurrentUser';
 import RespondToLeadModal from './RespondToLeadModal';
 

@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timezone
 
 from ai_service import generate_response
+from enhancer_router import classify_domain_with_llm
 
 app = Flask(__name__)
 CORS(app, origins='*', allow_headers=['Content-Type', 'Authorization'],
@@ -70,6 +71,8 @@ SERVICE_HINT_WORDS = [
     "electrician","electrical","outlet","wiring","breaker","circuit","fuse","switch",
     "hvac","furnace","thermostat","air conditioner","heater","ductwork",
     "handyman","cleaner","housekeeping","maid",
+    "appliance","dryer","washer","washing machine","dishwasher","refrigerator","fridge",
+    "microwave","oven","stove","garbage disposal","freezer","ice maker",
     "landscaper","landscaping","lawn","mow","hedge","yard","garden","sprinkler",
     "painter","painting","carpenter","carpentry","cabinet","deck",
     "moving","movers","relocation",
@@ -102,11 +105,18 @@ SERVICE_HINT_WORDS = [
 
 def detect_need_type(text: str) -> str:
     t = (text or "").lower()
+    # Fast path: keyword match
     if any(w in t for w in SERVICE_HINT_WORDS):
         return "service"
-    # Item flow disabled for now — app is currently focused on services & restaurants.
-    # return "item"
-    return "food"
+    # LLM fallback for anything not in the keyword list
+    domain = classify_domain_with_llm("", text)
+    if domain == "service":
+        return "service"
+    if domain == "food":
+        return "food"
+    # Default to service — a no-results service page is better than
+    # routing a repair request to restaurants
+    return "service"
 
 def looks_like_enhanced_text(text: str) -> bool:
     if not text:

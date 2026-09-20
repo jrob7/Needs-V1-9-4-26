@@ -942,9 +942,15 @@ def find_matches():
         req_type = classify_request(query)
 
     STOPWORDS = {"the","and","for","with","that","this","have","want","need",
-                 "please","can","you","from","some","get","find","near","me","a"}
+                 "please","can","you","from","some","get","find","near","me","a",
+                 # Generic food/place words that add noise without targeting a cuisine
+                 "food","restaurant","restaurants","place","spot","eat","eating",
+                 "hungry","hunger","meal","meals","dining","dine","cuisine","order"}
     query_words = [w for w in re.findall(r'\b\w+\b', query.lower())
                    if len(w) >= 3 and w not in STOPWORDS]
+    # If every word was filtered (e.g. "food", "I want food"), treat as generic —
+    # score_restaurant will return -1 for all and we fall back to nearby restaurants
+    generic_food_query = len(query_words) == 0
 
     # ── FOOD ──────────────────────────────────────────────────────────────────
     if req_type == "food":
@@ -972,6 +978,13 @@ def find_matches():
                 return jsonify({"error": "DB error"}), 500
 
         def final_score_restaurant(d):
+            if generic_food_query:
+                # No specific keywords — rank by proximity only
+                if used_geo:
+                    dist = d.get("distance_miles", 0)
+                    boost = proximity_boost(dist, RESTAURANT_RADIUS_MI)
+                    return boost if boost > 0 else -1
+                return 1  # no geo, treat all equally
             kw = score_restaurant(d, query_words)
             if kw <= 0:
                 return -1

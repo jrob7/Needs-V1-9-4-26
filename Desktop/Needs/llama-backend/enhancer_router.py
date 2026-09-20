@@ -88,6 +88,7 @@ FOOD_HINT_WORDS = [
     "orange chicken", "chinese", "japanese", "thai", "vietnamese", "korean",
     "bibimbap", "bulgogi", "boba", "bubble tea",
     # Seafood
+    "bbq", "barbecue", "barbeque", "smokehouse", "brisket",
     "seafood", "fish", "shrimp", "lobster", "crab", "salmon", "tuna", "oyster",
     "clam", "scallop", "calamari",
     # Breakfast / Brunch

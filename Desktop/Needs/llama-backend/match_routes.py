@@ -654,6 +654,7 @@ FOOD_TO_CUISINE = {
     "tikka masala": "indian", "naan": "indian", "curry": "indian",
     "shawarma": "mediterranean", "falafel": "mediterranean", "gyro": "greek",
     "brisket": "bbq", "ribs": "bbq", "pulled pork": "bbq",
+    "barbecue": "bbq", "barbeque": "bbq", "smokehouse": "bbq", "smoke house": "bbq",
     "pancake": "breakfast", "waffle": "breakfast", "omelette": "breakfast",
     "avocado toast": "breakfast", "french toast": "breakfast",
 }

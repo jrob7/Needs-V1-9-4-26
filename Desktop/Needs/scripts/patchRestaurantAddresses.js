@@ -36,6 +36,8 @@ async function login(email, password) {
   return (await res.json()).token;
 }
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 async function run() {
   console.log('📍 Patching restaurant addresses to Long Beach...\n');
   for (const p of PATCHES) {
@@ -57,6 +59,7 @@ async function run() {
     } catch (e) {
       console.error(`  ❌ ${p.email}: ${e.message}`);
     }
+    await sleep(1500); // Nominatim rate limit: 1 req/s
   }
   console.log('\n✅ Done');
 }

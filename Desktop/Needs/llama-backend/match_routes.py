@@ -687,6 +687,7 @@ def score_restaurant(doc: dict, query_words: list) -> int:
         if word in name:    score += 3
         if word in tagline: score += 4
         if word in cuisine: score += 5
+        if word == cuisine: score += 20  # user searched the cuisine itself — identity match
         if word in gtk:     score += 2
 
         for dish in dishes:

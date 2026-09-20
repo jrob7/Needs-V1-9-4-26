@@ -1649,7 +1649,7 @@ app.get('/m/:slug', async (req, res) => {
 
     const dishCards = dishes.map(d => `
       <div class="dish-card">
-        ${d.imageUrl ? `<img src="${d.imageUrl}" alt="${d.name}" loading="lazy">` : ''}
+        ${d.imageUrl ? `<img src="${d.imageUrl}" alt="${d.name || ''}" loading="lazy">` : '<div class="dish-img-placeholder"></div>'}
         <span>${d.name || ''}</span>
       </div>`).join('');
 
@@ -1669,43 +1669,84 @@ app.get('/m/:slug', async (req, res) => {
   <script type="application/ld+json">${jsonLd}</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; }
-    .cover { width: 100%; height: 240px; object-fit: cover; display: block; background: #ddd; }
-    .card { background: #fff; border-radius: 16px; margin: -32px 16px 16px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); position: relative; }
-    h1 { font-size: 1.5rem; font-weight: 700; }
-    .badge { display: inline-block; background: #f0f0f0; border-radius: 20px; padding: 4px 12px; font-size: .8rem; color: #555; margin-top: 6px; }
-    .meta { margin-top: 12px; font-size: .9rem; color: #555; line-height: 1.7; }
-    .meta span { margin-right: 12px; }
-    .section { margin: 0 16px 16px; }
-    .section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #333; }
-    .dish-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
-    .dish-card { flex: 0 0 120px; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.07); text-align: center; }
-    .dish-card img { width: 100%; height: 90px; object-fit: cover; }
-    .dish-card span { display: block; font-size: .78rem; padding: 6px 4px; font-weight: 500; }
-    .gtk { background: #fff; border-radius: 12px; padding: 14px 16px; list-style: none; }
-    .gtk li { padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: .88rem; color: #444; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f2f2f2; color: #1a1a1a; }
+
+    /* ── Layout container ── */
+    .page { max-width: 900px; margin: 0 auto; padding-bottom: 48px; }
+
+    /* ── Cover ── */
+    .cover-wrap { width: 100%; height: 340px; overflow: hidden; }
+    .cover-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .cover-placeholder { width: 100%; height: 340px; background: #ddd; }
+
+    /* ── Info card ── */
+    .card { background: #fff; border-radius: 20px; margin: -36px 24px 20px; padding: 28px 32px; box-shadow: 0 4px 20px rgba(0,0,0,.09); position: relative; }
+    h1 { font-size: 2rem; font-weight: 700; letter-spacing: -.5px; }
+    .badges { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge { background: #f0f0f0; border-radius: 20px; padding: 5px 14px; font-size: .82rem; color: #555; font-weight: 500; }
+    .meta { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: .9rem; color: #666; }
+    .desc { margin-top: 14px; font-size: .95rem; color: #444; line-height: 1.65; }
+
+    /* ── Sections ── */
+    .section { margin: 0 24px 20px; }
+    .section h2 { font-size: 1.1rem; font-weight: 700; color: #1a1a1a; margin-bottom: 14px; }
+
+    /* ── Dish cards ── */
+    .dish-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+    .dish-card { background: #fff; border-radius: 14px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.07); }
+    .dish-card img { width: 100%; height: 160px; object-fit: cover; display: block; }
+    .dish-img-placeholder { width: 100%; height: 160px; background: #e8e8e8; }
+    .dish-card span { display: block; font-size: .9rem; font-weight: 600; padding: 12px 14px; color: #1a1a1a; }
+
+    /* ── Good to know ── */
+    .gtk { background: #fff; border-radius: 14px; padding: 6px 20px; list-style: none; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+    .gtk li { padding: 12px 0; border-bottom: 1px solid #f0f0f0; font-size: .92rem; color: #444; line-height: 1.5; }
     .gtk li:last-child { border-bottom: none; }
-    .gtk li::before { content: '✓  '; color: #4CAF50; font-weight: 600; }
-    .actions { display: flex; gap: 10px; margin: 0 16px 32px; }
-    .btn { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; }
+    .gtk li::before { content: '✓  '; color: #4CAF50; font-weight: 700; }
+
+    /* ── Actions ── */
+    .actions { display: flex; gap: 12px; margin: 0 24px 16px; }
+    .btn { flex: 1; padding: 16px; border-radius: 14px; border: none; font-size: 1rem; font-weight: 700; cursor: pointer; text-decoration: none; text-align: center; transition: opacity .15s; }
+    .btn:hover { opacity: .88; }
     .btn-primary { background: #1a1a1a; color: #fff; }
     .btn-secondary { background: #fff; color: #1a1a1a; border: 1.5px solid #ddd; }
-    .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }
-    .powered a { color: #aaa; text-decoration: none; }
+
+    /* ── Footer ── */
+    .powered { text-align: center; font-size: .78rem; color: #bbb; padding-bottom: 8px; }
+    .powered a { color: #bbb; text-decoration: none; }
+
+    /* ── Mobile ── */
+    @media (max-width: 600px) {
+      .cover-wrap { height: 220px; }
+      .cover-placeholder { height: 220px; }
+      .card { margin: -24px 12px 16px; padding: 20px; }
+      h1 { font-size: 1.5rem; }
+      .section { margin: 0 12px 16px; }
+      .dish-row { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+      .dish-card img { height: 110px; }
+      .dish-img-placeholder { height: 110px; }
+      .actions { margin: 0 12px 16px; }
+    }
   </style>
 </head>
 <body>
-  ${cover ? `<img class="cover" src="${cover}" alt="${name}">` : '<div class="cover"></div>'}
+<div class="page">
+  <div class="cover-wrap">
+    ${cover ? `<img src="${cover}" alt="${name}">` : '<div class="cover-placeholder"></div>'}
+  </div>
+
   <div class="card">
     <h1>${name}</h1>
-    ${cuisine ? `<span class="badge">${cuisine}</span>` : ''}
-    ${price ? `<span class="badge">${price}</span>` : ''}
+    <div class="badges">
+      ${cuisine ? `<span class="badge">${cuisine}</span>` : ''}
+      ${price   ? `<span class="badge">${price}</span>`   : ''}
+    </div>
     <div class="meta">
       ${address ? `<span>📍 ${address}</span>` : ''}
-      ${hours  ? `<span>🕐 ${hours}</span>`   : ''}
-      ${phone  ? `<span>📞 ${phone}</span>`   : ''}
+      ${hours   ? `<span>🕐 ${hours}</span>`   : ''}
+      ${phone   ? `<span>📞 ${phone}</span>`   : ''}
     </div>
-    ${desc ? `<p style="margin-top:12px;font-size:.9rem;color:#444;line-height:1.6">${desc}</p>` : ''}
+    ${desc ? `<p class="desc">${desc}</p>` : ''}
   </div>
 
   ${dishes.length ? `
@@ -1725,7 +1766,8 @@ app.get('/m/:slug', async (req, res) => {
     <a class="btn btn-secondary" href="needs://restaurant/${doc._id}">Open in Needs</a>
   </div>
 
-  <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>
+  <p class="powered">Powered by <a href="https://www.needs-module.com">Needs Module</a></p>
+</div>
 </body>
 </html>`);
   }

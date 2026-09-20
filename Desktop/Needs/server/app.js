@@ -1612,12 +1612,13 @@ app.get('/m/:slug', async (req, res) => {
   let type = 'restaurant';
   if (!doc) {
     doc = await db.collection('Services').findOne({ slug });
+
     type = 'service';
   }
   if (!doc) return res.status(404).send('<h1>Module not found</h1>');
 
-  const NODE_BASE = process.env.NODE_API || 'https://needs-v1-9-4-26-production.up.railway.app';
-  const MODULE_URL = `${NODE_BASE}/m/${slug}`;
+  const MODULE_BASE = process.env.MODULE_BASE_URL || 'https://needs-module.com';
+  const MODULE_URL = `${MODULE_BASE}/m/${slug}`;
 
   if (type === 'restaurant') {
     const name      = doc.name || '';

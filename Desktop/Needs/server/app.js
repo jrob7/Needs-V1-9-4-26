@@ -1573,10 +1573,270 @@ const resolveDisplayName = async (user) => {
   return [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Someone';
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULE SLUG UTILITY
+// ─────────────────────────────────────────────────────────────────────────────
+
+function makeSlug(text) {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 80);
+}
+
+async function ensureUniqueSlug(col, base, excludeId = null) {
+  let slug = base;
+  let n = 2;
+  while (true) {
+    const query = { slug };
+    if (excludeId) query._id = { $ne: excludeId };
+    const existing = await col.findOne(query);
+    if (!existing) return slug;
+    slug = `${base}-${n++}`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULE PAGE  GET /m/:slug
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get('/m/:slug', async (req, res) => {
+  const { slug } = req.params;
+  const db = client.db('Need');
+
+  // Search restaurants first, then services
+  let doc = await db.collection('Restaurants').findOne({ slug });
+  let type = 'restaurant';
+  if (!doc) {
+    doc = await db.collection('Services').findOne({ slug });
+    type = 'service';
+  }
+  if (!doc) return res.status(404).send('<h1>Module not found</h1>');
+
+  const NODE_BASE = process.env.NODE_API || 'https://needs-v1-9-4-26-production.up.railway.app';
+  const MODULE_URL = `${NODE_BASE}/m/${slug}`;
+
+  if (type === 'restaurant') {
+    const name      = doc.name || '';
+    const tagline   = doc.tagline || '';
+    const cuisine   = doc.cuisine || '';
+    const address   = doc.address || '';
+    const phone     = doc.phone || '';
+    const hours     = doc.hoursOpen || '';
+    const price     = doc.priceRange || '';
+    const cover     = doc.coverImageUrl || '';
+    const gtk       = (doc.goodToKnow || []);
+    const dishes    = (doc.topDishes || []);
+    const desc      = doc.description || tagline;
+
+    const jsonLd = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Restaurant",
+      "name": name,
+      "description": desc,
+      "servesCuisine": cuisine,
+      "address": address,
+      "telephone": phone,
+      "openingHours": hours,
+      "priceRange": price,
+      "image": cover,
+      "url": MODULE_URL,
+    });
+
+    const dishCards = dishes.map(d => `
+      <div class="dish-card">
+        ${d.imageUrl ? `<img src="${d.imageUrl}" alt="${d.name}" loading="lazy">` : ''}
+        <span>${d.name || ''}</span>
+      </div>`).join('');
+
+    const gtkItems = gtk.map(g => `<li>${g}</li>`).join('');
+
+    return res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${name} — Needs Module</title>
+  <meta name="description" content="${desc.replace(/"/g, '&quot;')}">
+  <meta property="og:title" content="${name}">
+  <meta property="og:description" content="${desc.replace(/"/g, '&quot;')}">
+  ${cover ? `<meta property="og:image" content="${cover}">` : ''}
+  <meta property="og:url" content="${MODULE_URL}">
+  <script type="application/ld+json">${jsonLd}</script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    .cover { width: 100%; height: 240px; object-fit: cover; display: block; background: #ddd; }
+    .card { background: #fff; border-radius: 16px; margin: -32px 16px 16px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); position: relative; }
+    h1 { font-size: 1.5rem; font-weight: 700; }
+    .badge { display: inline-block; background: #f0f0f0; border-radius: 20px; padding: 4px 12px; font-size: .8rem; color: #555; margin-top: 6px; }
+    .meta { margin-top: 12px; font-size: .9rem; color: #555; line-height: 1.7; }
+    .meta span { margin-right: 12px; }
+    .section { margin: 0 16px 16px; }
+    .section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #333; }
+    .dish-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+    .dish-card { flex: 0 0 120px; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.07); text-align: center; }
+    .dish-card img { width: 100%; height: 90px; object-fit: cover; }
+    .dish-card span { display: block; font-size: .78rem; padding: 6px 4px; font-weight: 500; }
+    .gtk { background: #fff; border-radius: 12px; padding: 14px 16px; list-style: none; }
+    .gtk li { padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: .88rem; color: #444; }
+    .gtk li:last-child { border-bottom: none; }
+    .gtk li::before { content: '✓  '; color: #4CAF50; font-weight: 600; }
+    .actions { display: flex; gap: 10px; margin: 0 16px 32px; }
+    .btn { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; }
+    .btn-primary { background: #1a1a1a; color: #fff; }
+    .btn-secondary { background: #fff; color: #1a1a1a; border: 1.5px solid #ddd; }
+    .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }
+    .powered a { color: #aaa; text-decoration: none; }
+  </style>
+</head>
+<body>
+  ${cover ? `<img class="cover" src="${cover}" alt="${name}">` : '<div class="cover"></div>'}
+  <div class="card">
+    <h1>${name}</h1>
+    ${cuisine ? `<span class="badge">${cuisine}</span>` : ''}
+    ${price ? `<span class="badge">${price}</span>` : ''}
+    <div class="meta">
+      ${address ? `<span>📍 ${address}</span>` : ''}
+      ${hours  ? `<span>🕐 ${hours}</span>`   : ''}
+      ${phone  ? `<span>📞 ${phone}</span>`   : ''}
+    </div>
+    ${desc ? `<p style="margin-top:12px;font-size:.9rem;color:#444;line-height:1.6">${desc}</p>` : ''}
+  </div>
+
+  ${dishes.length ? `
+  <div class="section">
+    <h2>Top Dishes</h2>
+    <div class="dish-row">${dishCards}</div>
+  </div>` : ''}
+
+  ${gtk.length ? `
+  <div class="section">
+    <h2>Good to Know</h2>
+    <ul class="gtk">${gtkItems}</ul>
+  </div>` : ''}
+
+  <div class="actions">
+    <a class="btn btn-primary" href="sms:${phone || ''}">Message</a>
+    <a class="btn btn-secondary" href="needs://restaurant/${doc._id}">Open in Needs</a>
+  </div>
+
+  <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>
+</body>
+</html>`);
+  }
+
+  // ── SERVICE MODULE ────────────────────────────────────────────────────────
+  const name      = doc.businessName || doc.providerName || '';
+  const tagline   = doc.tagline || '';
+  const category  = doc.category || '';
+  const area      = doc.serviceArea || doc.businessAddress || '';
+  const phone     = doc.phone || '';
+  const rate      = doc.rateMin ? `$${doc.rateMin}${doc.rateMax ? '–$' + doc.rateMax : ''}` : '';
+  const rateLabel = doc.rateType ? `${rate} / ${doc.rateType}` : rate;
+  const avail     = doc.availability || '';
+  const desc      = doc.description || tagline;
+  const licensed  = doc.licensed ? '✓ Licensed & Insured' : '';
+  const photos    = (doc.portfolioImageUrls || []).slice(0, 5);
+
+  const jsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "LocalBusiness",
+    "name": name,
+    "description": desc,
+    "areaServed": area,
+    "telephone": phone,
+    "url": MODULE_URL,
+  });
+
+  const photoCards = photos.map(url =>
+    `<img src="${url}" alt="${name}" loading="lazy" style="width:120px;height:90px;object-fit:cover;border-radius:10px;flex-shrink:0">`
+  ).join('');
+
+  return res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${name} — Needs Module</title>
+  <meta name="description" content="${desc.replace(/"/g, '&quot;')}">
+  <meta property="og:title" content="${name}">
+  <meta property="og:description" content="${desc.replace(/"/g, '&quot;')}">
+  <meta property="og:url" content="${MODULE_URL}">
+  <script type="application/ld+json">${jsonLd}</script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; }
+    .hero { background: #1a1a1a; padding: 48px 20px 60px; text-align: center; color: #fff; }
+    .hero h1 { font-size: 1.6rem; font-weight: 700; }
+    .hero p { font-size: .9rem; color: #aaa; margin-top: 6px; }
+    .badge { display: inline-block; background: rgba(255,255,255,.15); border-radius: 20px; padding: 4px 12px; font-size: .8rem; color: #fff; margin-top: 10px; }
+    .card { background: #fff; border-radius: 16px; margin: -28px 16px 16px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .row { display: flex; justify-content: space-between; font-size: .88rem; color: #555; margin-top: 10px; gap: 8px; flex-wrap: wrap; }
+    .row span { display: flex; align-items: center; gap: 4px; }
+    .section { margin: 0 16px 16px; }
+    .section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #333; }
+    .photo-row { display: flex; gap: 10px; overflow-x: auto; }
+    .desc { background: #fff; border-radius: 12px; padding: 14px 16px; font-size: .88rem; color: #444; line-height: 1.6; }
+    .actions { display: flex; gap: 10px; margin: 0 16px 32px; }
+    .btn { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; }
+    .btn-primary { background: #1a1a1a; color: #fff; }
+    .btn-secondary { background: #fff; color: #1a1a1a; border: 1.5px solid #ddd; }
+    .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }
+    .powered a { color: #aaa; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>${name}</h1>
+    <p>${tagline}</p>
+    ${category ? `<span class="badge">${category}</span>` : ''}
+    ${licensed  ? `<span class="badge">${licensed}</span>`  : ''}
+  </div>
+
+  <div class="card">
+    <div class="row">
+      ${area      ? `<span>📍 ${area}</span>`         : ''}
+      ${rateLabel ? `<span>💰 ${rateLabel}</span>`    : ''}
+      ${avail     ? `<span>🕐 ${avail}</span>`        : ''}
+      ${phone     ? `<span>📞 ${phone}</span>`        : ''}
+    </div>
+  </div>
+
+  ${desc ? `
+  <div class="section">
+    <h2>About</h2>
+    <div class="desc">${desc}</div>
+  </div>` : ''}
+
+  ${photos.length ? `
+  <div class="section">
+    <h2>Portfolio</h2>
+    <div class="photo-row">${photoCards}</div>
+  </div>` : ''}
+
+  <div class="actions">
+    <a class="btn btn-primary" href="needs://service/${doc._id}">Request on Needs</a>
+    <a class="btn btn-secondary" href="sms:${phone || ''}">Message</a>
+  </div>
+
+  <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>
+</body>
+</html>`);
+});
+
 app.post('/createRestaurant', requireAuth, async (req, res) => {
   try {
     const payload = { ...req.body, userId: req.userId, createdAt: new Date(), updatedAt: new Date() };
     if (ObjectId.isValid(payload.userId)) payload.userId = new ObjectId(payload.userId);
+    // Auto-generate slug from restaurant name
+    if (!payload.slug && payload.name) {
+      const base = makeSlug(payload.name);
+      payload.slug = await ensureUniqueSlug(database.collection('Restaurants'), base);
+    }
     const geoPoint = await geocodeAddress(payload.address);
     if (geoPoint) payload.geoPoint = geoPoint;
     const result = await database.collection('Restaurants').insertOne(payload);
@@ -1698,6 +1958,11 @@ app.post('/createService', requireAuth, async (req, res) => {
   try {
     const payload = { ...req.body, userId: req.userId, createdAt: new Date(), updatedAt: new Date() };
     if (ObjectId.isValid(payload.userId)) payload.userId = new ObjectId(payload.userId);
+    // Auto-generate slug from business name
+    if (!payload.slug && (payload.businessName || payload.providerName)) {
+      const base = makeSlug(payload.businessName || payload.providerName);
+      payload.slug = await ensureUniqueSlug(database.collection('Services'), base);
+    }
     const geoPoint = await geocodeAddress(payload.businessAddress || payload.serviceArea);
     if (geoPoint) payload.geoPoint = geoPoint;
     const result = await database.collection('Services').insertOne(payload);

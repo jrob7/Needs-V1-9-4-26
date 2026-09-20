@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useContext, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, Image, Animated,
+  Alert, Image, Animated, Share, Clipboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -426,6 +426,47 @@ const AccountTabContent = () => {
           </Section>
         )}
 
+        {isBusiness && businessDoc?.slug && (() => {
+          const moduleUrl = `https://www.needs-module.com/m/${businessDoc.slug}`;
+          return (
+            <View style={styles.moduleLinkCard}>
+              <View style={styles.moduleLinkHeader}>
+                <View style={styles.moduleLinkIconWrap}>
+                  <Ionicons name="globe-outline" size={18} color="#2563EB" />
+                </View>
+                <Text style={styles.moduleLinkTitle}>Your Module Link</Text>
+              </View>
+              <Text style={styles.moduleLinkDesc}>
+                Share this link so anyone can find your profile on the web — no app needed.
+              </Text>
+              <View style={styles.moduleLinkUrlRow}>
+                <Text style={styles.moduleLinkUrl} numberOfLines={1} ellipsizeMode="middle">
+                  {moduleUrl}
+                </Text>
+              </View>
+              <View style={styles.moduleLinkActions}>
+                <TouchableOpacity
+                  style={styles.moduleLinkBtn}
+                  onPress={() => {
+                    Clipboard.setString(moduleUrl);
+                    Alert.alert('Copied!', 'Your module link has been copied to clipboard.');
+                  }}
+                >
+                  <Ionicons name="copy-outline" size={16} color="#2563EB" />
+                  <Text style={styles.moduleLinkBtnText}>Copy</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.moduleLinkBtn}
+                  onPress={() => Share.share({ message: moduleUrl, url: moduleUrl, title: businessDoc.name || businessDoc.businessName || 'My Needs Module' })}
+                >
+                  <Ionicons name="share-outline" size={16} color="#2563EB" />
+                  <Text style={styles.moduleLinkBtnText}>Share</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })()}
+
         <Section icon="person" title="Profile" color="#475569">
           <MenuItem icon="person-outline"   label="View / Edit Profile" onPress={handleEditProfile} />
           <MenuItem icon="log-out-outline"  label="Sign Out"     onPress={handleLogout} destructive />
@@ -572,6 +613,73 @@ const styles = StyleSheet.create({
 
   // Menu
   menuWrap: { paddingHorizontal: IS_WEB ? 21 : 16, gap: IS_WEB ? 13 : 10 },
+
+  // Module Link card
+  moduleLinkCard: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: IS_WEB ? 18 : 14,
+    padding: IS_WEB ? 20 : 16,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  moduleLinkHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  moduleLinkIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moduleLinkTitle: {
+    fontSize: IS_WEB ? 15 : 14,
+    fontWeight: '700',
+    color: '#1E40AF',
+  },
+  moduleLinkDesc: {
+    fontSize: IS_WEB ? 13 : 12,
+    color: '#3B82F6',
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  moduleLinkUrlRow: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  moduleLinkUrl: {
+    fontSize: IS_WEB ? 13 : 12,
+    color: '#1E40AF',
+    fontFamily: 'monospace',
+  },
+  moduleLinkActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  moduleLinkBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#2563EB',
+    borderRadius: 10,
+    paddingVertical: 10,
+  },
+  moduleLinkBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: IS_WEB ? 14 : 13,
+  },
 
   section: {
     backgroundColor: '#fff',

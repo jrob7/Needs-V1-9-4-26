@@ -675,6 +675,14 @@ def _expand_query_words(words: list) -> list:
                 expanded.append(suffix)
     return expanded
 
+# Cuisine synonyms: if user types one of these words and the restaurant's cuisine
+# matches the key, award the identity bonus. Bypasses expansion so it always fires.
+CUISINE_SYNONYMS = {
+    "bbq":           {"barbecue", "barbeque", "smokehouse", "smoke house", "smoked meat"},
+    "mediterranean": {"med"},
+    "seafood":       {"fish and chips", "fish & chips"},
+}
+
 def score_restaurant(doc: dict, query_words: list) -> int:
     score = 0
     name    = doc.get("name", "").lower()
@@ -701,6 +709,18 @@ def score_restaurant(doc: dict, query_words: list) -> int:
                 elif like_pct >= 75: score += 1
             if word in dish_desc:
                 score += 6
+
+    # Cuisine synonym check: "barbecue" query should rank cuisine="bbq" restaurants
+    # at the same level as an exact "bbq" query — identity bonus without expansion.
+    cuisine_synonyms = CUISINE_SYNONYMS.get(cuisine, set())
+    joined_query = " ".join(query_words)
+    if joined_query in cuisine_synonyms:
+        score += 20
+    else:
+        for qw in query_words:
+            if qw in cuisine_synonyms:
+                score += 20
+                break
 
     if score == 0:
         score = -1

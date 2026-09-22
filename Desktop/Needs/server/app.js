@@ -1663,7 +1663,7 @@ app.post('/m/:slug/chat', async (req, res) => {
     res.json(data);
   } catch (err) {
     console.error('❌ /m/:slug/chat error:', err);
-    res.status(500).json({ error: 'Something went wrong' });
+    res.status(500).json({ error: err.message || String(err) });
   }
 });
 
@@ -1743,8 +1743,7 @@ function moduleChatWidget(slug, businessName) {
 <script>
 (function() {
   var slug = ${JSON.stringify(slug)};
-  var history = [];
-  var pendingQuestion = '';
+  var chatHistory = [];
 
   var box   = document.getElementById('chat-box');
   var input = document.getElementById('chat-input');
@@ -1755,7 +1754,7 @@ function moduleChatWidget(slug, businessName) {
   function addBubble(text, cls) {
     var el = document.createElement('div');
     el.className = 'bubble ' + cls;
-    el.textContent = text;
+    el.textContent = text || '';
     box.appendChild(el);
     scrollBottom();
     return el;
@@ -1827,21 +1826,21 @@ function moduleChatWidget(slug, businessName) {
     fetch('/m/' + slug + '/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, history: history }),
+      body: JSON.stringify({ message: msg, history: chatHistory }),
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       box.removeChild(typing);
-      addBubble(data.reply, 'bubble-bot');
-      history.push({ role: 'user', text: msg });
-      history.push({ role: 'bot', text: data.reply });
+      addBubble(data.reply || 'No response received.', 'bubble-bot');
+      chatHistory.push({ role: 'user', text: msg });
+      chatHistory.push({ role: 'bot', text: data.reply });
       if (data.cannotAnswer) {
         showCannotAnswerOptions(msg);
       }
     })
-    .catch(function() {
+    .catch(function(err) {
       box.removeChild(typing);
-      addBubble('Something went wrong. Please try again.', 'bubble-bot');
+      addBubble('Error: ' + (err && err.message ? err.message : 'request failed'), 'bubble-bot');
     })
     .finally(function() { btn.disabled = false; });
   }

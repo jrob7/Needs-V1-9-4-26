@@ -871,10 +871,13 @@ export default function MatchResults() {
   const navigation = useNavigation();
   const route      = useRoute();
 
-  const { matches: initMatches = [], type = 'food', query: initQuery = '' } = route.params || {};
-  const colors = C[type] || C.food;
-  const isFood      = type === 'food';
-  const isNonprofit = type === 'nonprofit';
+  const { matches: initMatches = [], type: initType = 'food', query: initQuery = '' } = route.params || {};
+
+  // currentType can change when the user re-searches a different category
+  const [currentType, setCurrentType] = useState(initType);
+  const colors      = C[currentType] || C.food;
+  const isFood      = currentType === 'food';
+  const isNonprofit = currentType === 'nonprofit';
 
   // Results + search bar state
   const [matches, setMatches]         = useState(initMatches);
@@ -927,10 +930,23 @@ export default function MatchResults() {
       { role: 'assistant', text: `Searching for "${trimmed}"…` },
     ]);
     try {
+      // Step 1: classify query to detect food/service/nonprofit (mirrors Tab1 flow)
+      let detectedType = currentType;
+      try {
+        const classifyResp = await fetch(`${FLASK_API}/search`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: trimmed }),
+        });
+        const classifyData = await classifyResp.json();
+        if (classifyData.needType) detectedType = classifyData.needType;
+      } catch { /* fallback to currentType */ }
+
+      // Step 2: find matches with the correctly classified type
       const resp = await fetch(`${FLASK_API}/ai/findMatches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: trimmed, type }),
+        body: JSON.stringify({ query: trimmed, type: detectedType }),
       });
       const data = await resp.json();
       const newMatches = data.matches || [];
@@ -938,6 +954,7 @@ export default function MatchResults() {
       setSearching(false);
       if (newMatches.length > 0) {
         setMatches(newMatches);
+        setCurrentType(detectedType);
         showIsland([
           ...userHistory,
           { role: 'assistant', text: `Found ${newMatches.length} result${newMatches.length !== 1 ? 's' : ''} for "${trimmed}" ✓` },

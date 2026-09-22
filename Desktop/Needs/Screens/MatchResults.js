@@ -8,7 +8,7 @@ import React, { useState, useRef, useContext } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Image, Modal, Animated, Dimensions, SafeAreaView,
-  Linking, Platform, Alert,
+  Linking, Platform, Alert, TextInput, ActivityIndicator, KeyboardAvoidingView,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -50,7 +50,7 @@ const OFFER_COLORS = {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-import { NODE_API } from '../config';
+import { NODE_API, FLASK_API } from '../config';
 import { webContainer, IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 
 const FOOD_PLACEHOLDER = 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&q=80';
@@ -871,34 +871,120 @@ export default function MatchResults() {
   const navigation = useNavigation();
   const route      = useRoute();
 
-  const { matches = [], type = 'food', query = '' } = route.params || {};
+  const { matches: initMatches = [], type = 'food', query: initQuery = '' } = route.params || {};
   const colors = C[type] || C.food;
-  const isFood     = type === 'food';
+  const isFood      = type === 'food';
   const isNonprofit = type === 'nonprofit';
 
+  // Results + search bar state
+  const [matches, setMatches]         = useState(initMatches);
+  const [searchText, setSearchText]   = useState(initQuery);
+  const [searching, setSearching]     = useState(false);
+
+  // Detail sheet
   const [selected, setSelected] = useState(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_H)).current;
 
+  // Dynamic Island state
+  const [islandOpen, setIslandOpen]         = useState(false);
+  const [islandMessages, setIslandMessages] = useState([]);
+  const [islandInput, setIslandInput]       = useState('');
+  const [islandLoading, setIslandLoading]   = useState(false);
+  const [pendingQuery, setPendingQuery]     = useState('');
+  const islandAnim  = useRef(new Animated.Value(0)).current;
+
   const openDetail = (doc) => {
     setSelected(doc);
-    Animated.spring(slideAnim, {
-      toValue: 0,
-      useNativeDriver: true,
-      bounciness: 4,
-    }).start();
+    Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, bounciness: 4 }).start();
+  };
+  const closeDetail = () => {
+    Animated.timing(slideAnim, { toValue: SCREEN_H, duration: 280, useNativeDriver: true })
+      .start(() => setSelected(null));
   };
 
-  const closeDetail = () => {
-    Animated.timing(slideAnim, {
-      toValue: SCREEN_H,
-      duration: 280,
-      useNativeDriver: true,
-    }).start(() => setSelected(null));
+  // ── Dynamic Island helpers ──────────────────────────────────────────────────
+  const showIsland = (msgs) => {
+    setIslandMessages(msgs);
+    setIslandOpen(true);
+    Animated.spring(islandAnim, { toValue: 1, useNativeDriver: false, bounciness: 6 }).start();
   };
+  const hideIsland = (delay = 0) => {
+    setTimeout(() => {
+      Animated.timing(islandAnim, { toValue: 0, duration: 240, useNativeDriver: false })
+        .start(() => { setIslandOpen(false); setIslandMessages([]); setIslandInput(''); });
+    }, delay);
+  };
+
+  // ── Re-search ───────────────────────────────────────────────────────────────
+  const runSearch = async (q, userHistory = []) => {
+    const trimmed = (q || '').trim();
+    if (!trimmed) return;
+    setSearching(true);
+    setIslandLoading(true);
+    setPendingQuery(trimmed);
+    showIsland([
+      ...userHistory,
+      { role: 'assistant', text: `Searching for "${trimmed}"…` },
+    ]);
+    try {
+      const resp = await fetch(`${FLASK_API}/ai/findMatches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: trimmed, type }),
+      });
+      const data = await resp.json();
+      const newMatches = data.matches || [];
+      setIslandLoading(false);
+      setSearching(false);
+      if (newMatches.length > 0) {
+        setMatches(newMatches);
+        showIsland([
+          ...userHistory,
+          { role: 'assistant', text: `Found ${newMatches.length} result${newMatches.length !== 1 ? 's' : ''} for "${trimmed}" ✓` },
+        ]);
+        hideIsland(1600);
+      } else {
+        showIsland([
+          ...userHistory,
+          { role: 'assistant', text: `No matches found for "${trimmed}". Can you give me more details or try a different search?` },
+        ]);
+      }
+    } catch {
+      setIslandLoading(false);
+      setSearching(false);
+      showIsland([
+        ...userHistory,
+        { role: 'assistant', text: 'Something went wrong. Please try again.' },
+      ]);
+    }
+  };
+
+  const handleSearchSubmit = () => {
+    const q = searchText.trim();
+    if (!q || searching) return;
+    runSearch(q);
+  };
+
+  const handleIslandReply = () => {
+    const text = islandInput.trim();
+    if (!text || islandLoading) return;
+    const updatedHistory = [
+      ...islandMessages,
+      { role: 'user', text },
+    ];
+    setIslandMessages(updatedHistory);
+    setIslandInput('');
+    runSearch(`${pendingQuery} ${text}`, updatedHistory);
+  };
+
+  // Island animated height
+  const islandMaxH = islandAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 220] });
+  const islandOpacity = islandAnim;
 
   return (
     <SafeAreaView style={styles.screen}>
       <View style={[{ flex: 1 }, webContainer]}>
+
       {/* Header */}
       <View style={[styles.header, IS_WEB && { paddingTop: WEB_HEADER_HEIGHT + 10 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBack}>
@@ -906,9 +992,78 @@ export default function MatchResults() {
         </TouchableOpacity>
         <View style={styles.headerSearch}>
           <Ionicons name="search" size={15} color="#9CA3AF" style={{ marginRight: 6 }} />
-          <Text style={styles.headerQuery} numberOfLines={1}>"{query}"</Text>
+          <TextInput
+            style={styles.headerQuery}
+            value={searchText}
+            onChangeText={setSearchText}
+            onSubmitEditing={handleSearchSubmit}
+            returnKeyType="search"
+            placeholder="Search…"
+            placeholderTextColor="#9CA3AF"
+            selectTextOnFocus
+          />
+          {searching ? (
+            <ActivityIndicator size="small" color={colors.accent} style={{ marginLeft: 6 }} />
+          ) : (
+            <TouchableOpacity onPress={handleSearchSubmit} style={styles.headerSearchBtn}>
+              <Ionicons name="arrow-forward-circle" size={24} color={colors.accent} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
+
+      {/* Dynamic Island */}
+      {islandOpen && (
+        <Animated.View style={[styles.island, { maxHeight: islandMaxH, opacity: islandOpacity }]}>
+          {/* Top bar */}
+          <View style={styles.islandTopBar}>
+            <View style={styles.islandPill} />
+            <TouchableOpacity onPress={() => hideIsland()} style={styles.islandClose}>
+              <Ionicons name="close" size={16} color="rgba(255,255,255,0.6)" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Messages */}
+          <ScrollView style={styles.islandScroll} contentContainerStyle={styles.islandScrollContent}>
+            {islandMessages.map((m, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.islandBubble,
+                  m.role === 'user' ? styles.islandBubbleUser : styles.islandBubbleBot,
+                ]}
+              >
+                <Text style={styles.islandBubbleText}>{m.text}</Text>
+              </View>
+            ))}
+            {islandLoading && (
+              <View style={[styles.islandBubble, styles.islandBubbleBot]}>
+                <ActivityIndicator size="small" color="#fff" />
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Input row (only when not loading and last message is from AI asking for more) */}
+          {!islandLoading && islandMessages.length > 0 &&
+            islandMessages[islandMessages.length - 1]?.role === 'assistant' &&
+            islandMessages[islandMessages.length - 1]?.text?.includes('?') && (
+            <View style={styles.islandInputRow}>
+              <TextInput
+                style={styles.islandInput}
+                value={islandInput}
+                onChangeText={setIslandInput}
+                placeholder="Reply…"
+                placeholderTextColor="rgba(255,255,255,0.35)"
+                onSubmitEditing={handleIslandReply}
+                returnKeyType="send"
+              />
+              <TouchableOpacity onPress={handleIslandReply} style={styles.islandSendBtn}>
+                <Ionicons name="arrow-up-circle" size={26} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          )}
+        </Animated.View>
+      )}
 
       {/* Results count */}
       <Text style={styles.resultsLabel}>
@@ -946,15 +1101,16 @@ export default function MatchResults() {
             <TouchableOpacity style={styles.modalDismiss} onPress={closeDetail} activeOpacity={1} />
             <Animated.View style={[styles.modalSheet, { transform: [{ translateY: slideAnim }] }]}>
               {isNonprofit
-                ? <NonprofitDetail  doc={selected} colors={colors} onClose={closeDetail} query={query} />
+                ? <NonprofitDetail  doc={selected} colors={colors} onClose={closeDetail} query={pendingQuery || initQuery} />
                 : isFood
                   ? <RestaurantDetail doc={selected} colors={colors} onClose={closeDetail} />
-                  : <ServiceDetail    doc={selected} colors={colors} onClose={closeDetail} query={query} />
+                  : <ServiceDetail    doc={selected} colors={colors} onClose={closeDetail} query={pendingQuery || initQuery} />
               }
             </Animated.View>
           </View>
         </Modal>
       )}
+
       </View>{/* end webContainer */}
     </SafeAreaView>
   );
@@ -977,10 +1133,50 @@ const styles = StyleSheet.create({
   headerSearch: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#F3F4F6', borderRadius: IS_WEB ? 13 : 10,
-    paddingHorizontal: IS_WEB ? 13 : 10, paddingVertical: IS_WEB ? 10 : 8,
+    paddingHorizontal: IS_WEB ? 13 : 10, paddingVertical: IS_WEB ? 6 : 4,
   },
-  headerQuery: { fontSize: IS_WEB ? 18 : 14, color: '#374151', flex: 1 },
+  headerQuery: { fontSize: IS_WEB ? 18 : 14, color: '#374151', flex: 1, paddingVertical: IS_WEB ? 4 : 4 },
+  headerSearchBtn: { padding: 2, marginLeft: 4 },
   headerFilter: { padding: IS_WEB ? 5 : 4, marginLeft: IS_WEB ? 10 : 8 },
+
+  // Dynamic Island
+  island: {
+    marginHorizontal: IS_WEB ? 18 : 12,
+    marginTop: IS_WEB ? 10 : 8,
+    backgroundColor: '#1C1C1E',
+    borderRadius: 22,
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 16, shadowOffset: { width: 0, height: 4 },
+    elevation: 12,
+  },
+  islandTopBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingTop: 10, paddingHorizontal: 14,
+  },
+  islandPill: {
+    flex: 1, height: 4, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 2, marginRight: 8,
+  },
+  islandClose: { padding: 2 },
+  islandScroll: { maxHeight: 140 },
+  islandScrollContent: { padding: 12, paddingTop: 6, gap: 6 },
+  islandBubble: {
+    borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8,
+    maxWidth: '85%', alignSelf: 'flex-start',
+  },
+  islandBubbleBot: { backgroundColor: '#3A3A3C', alignSelf: 'flex-start' },
+  islandBubbleUser: { backgroundColor: '#0A84FF', alignSelf: 'flex-end' },
+  islandBubbleText: { color: '#fff', fontSize: 13, lineHeight: 18 },
+  islandInputRow: {
+    flexDirection: 'row', alignItems: 'center',
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12, paddingVertical: 8, gap: 8,
+  },
+  islandInput: {
+    flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 18,
+    paddingHorizontal: 14, paddingVertical: 8,
+    color: '#fff', fontSize: 13,
+  },
+  islandSendBtn: { padding: 2 },
   resultsLabel: {
     fontSize: IS_WEB ? 17 : 13, color: '#6B7280', fontWeight: '500',
     paddingHorizontal: IS_WEB ? 21 : 16, paddingVertical: IS_WEB ? 13 : 10,

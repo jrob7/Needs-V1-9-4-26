@@ -118,7 +118,8 @@ app.use(cors({
       /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.)/.test(origin) ||
       /\.up\.railway\.app$/.test(origin) ||
       /\.exp\.direct$/.test(origin) ||
-      /\.expo\.dev$/.test(origin)
+      /\.expo\.dev$/.test(origin) ||
+      /needs-module\.com$/.test(origin)
     ) {
       callback(null, true);
     } else {

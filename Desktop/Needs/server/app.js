@@ -1600,6 +1600,262 @@ async function ensureUniqueSlug(col, base, excludeId = null) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MODULE CHAT  POST /m/:slug/chat
+// ─────────────────────────────────────────────────────────────────────────────
+app.post('/m/:slug/chat', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { message, history = [] } = req.body || {};
+    if (!message) return res.status(400).json({ error: 'message required' });
+
+    const db = client.db('Need');
+    let doc = await db.collection('Restaurants').findOne({ slug });
+    let type = 'restaurant';
+    if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) return res.status(404).json({ error: 'Module not found' });
+
+    // Build grounded context string from all profile fields
+    let ctx = '';
+    if (type === 'restaurant') {
+      ctx += `Name: ${doc.name || ''}\n`;
+      ctx += `Cuisine: ${doc.cuisine || ''}\n`;
+      ctx += `Address: ${doc.address || ''}\n`;
+      ctx += `Phone: ${doc.phone || ''}\n`;
+      ctx += `Hours: ${doc.hoursOpen || ''}\n`;
+      ctx += `Price Range: ${doc.priceRange || ''}\n`;
+      ctx += `Description: ${doc.description || doc.tagline || ''}\n`;
+      if ((doc.goodToKnow || []).length) {
+        ctx += `\nGood to Know:\n${doc.goodToKnow.map(g => `- ${g}`).join('\n')}\n`;
+      }
+      if ((doc.topDishes || []).length) {
+        ctx += `\nFeatured Dishes:\n${doc.topDishes.map(d => `- ${d.name}${d.description ? ': ' + d.description : ''}${d.price ? ' (' + d.price + ')' : ''}`).join('\n')}\n`;
+      }
+      if ((doc.menu || []).length) {
+        ctx += `\nFull Menu:\n`;
+        for (const section of doc.menu) {
+          ctx += `\n[${section.section}]\n`;
+          for (const item of section.items) {
+            ctx += `- ${item.name}`;
+            if (item.unit) ctx += ` (${item.unit})`;
+            if (item.price) ctx += ` — ${item.price}`;
+            if (item.description) ctx += `: ${item.description}`;
+            ctx += '\n';
+          }
+        }
+      }
+    } else {
+      ctx += `Business Name: ${doc.businessName || doc.providerName || ''}\n`;
+      ctx += `Category: ${doc.category || ''}\n`;
+      ctx += `Service Area: ${doc.serviceArea || doc.businessAddress || ''}\n`;
+      ctx += `Phone: ${doc.phone || ''}\n`;
+      ctx += `Rate: ${doc.rateMin ? '$' + doc.rateMin + (doc.rateMax ? '–$' + doc.rateMax : '') + (doc.rateType ? ' / ' + doc.rateType : '') : ''}\n`;
+      ctx += `Availability: ${doc.availability || ''}\n`;
+      ctx += `Description: ${doc.description || doc.tagline || ''}\n`;
+      if (doc.licensed) ctx += `Licensed & Insured: Yes\n`;
+      if ((doc.goodToKnow || []).length) {
+        ctx += `\nGood to Know:\n${doc.goodToKnow.map(g => `- ${g}`).join('\n')}\n`;
+      }
+    }
+
+    const flaskRes = await fetch(`${FLASK_API}/module-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context: ctx, message, history }),
+    });
+    if (!flaskRes.ok) throw new Error(`Flask error ${flaskRes.status}`);
+    const data = await flaskRes.json();
+    res.json(data);
+  } catch (err) {
+    console.error('❌ /m/:slug/chat error:', err);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+// MODULE CONTACT  POST /m/:slug/contact  — saves unanswered question + contact info
+app.post('/m/:slug/contact', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { question, name, email, phone } = req.body || {};
+    if (!question) return res.status(400).json({ error: 'question required' });
+    if (!email && !phone) return res.status(400).json({ error: 'email or phone required' });
+
+    const db = client.db('Need');
+    let doc = await db.collection('Restaurants').findOne({ slug });
+    let type = 'restaurant';
+    if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) return res.status(404).json({ error: 'Module not found' });
+
+    const businessName = type === 'restaurant' ? doc.name : (doc.businessName || doc.providerName);
+
+    await db.collection('ModuleQuestions').insertOne({
+      slug,
+      businessId: doc._id,
+      businessName,
+      type,
+      question,
+      contactName: name || null,
+      contactEmail: email || null,
+      contactPhone: phone || null,
+      createdAt: new Date(),
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ /m/:slug/contact error:', err);
+    res.status(500).json({ error: 'Something went wrong' });
+  }
+});
+
+// Shared chat widget — injected into every module page
+function moduleChatWidget(slug, businessName) {
+  return `
+<div class="chat-section" id="chat-section">
+  <h2 class="chat-heading">Ask ${businessName}</h2>
+  <div class="chat-box" id="chat-box"></div>
+  <div class="chat-input-row" id="chat-input-row">
+    <input class="chat-input" id="chat-input" type="text" placeholder="What do you need?" autocomplete="off" maxlength="300">
+    <button class="chat-send" id="chat-send" aria-label="Send">&#9658;</button>
+  </div>
+</div>
+
+<style>
+  .chat-section { margin: 0 24px 20px; }
+  .chat-heading { font-size: 1.05rem; font-weight: 700; color: #1a1a1a; margin-bottom: 12px; }
+  .chat-box { background: #fff; border-radius: 16px; padding: 14px; min-height: 80px; max-height: 320px; overflow-y: auto; box-shadow: 0 2px 10px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 10px; }
+  .chat-input-row { display: flex; gap: 8px; margin-top: 10px; }
+  .chat-input { flex: 1; border: 1.5px solid #e0e0e0; border-radius: 24px; padding: 12px 18px; font-size: .92rem; outline: none; background: #fff; color: #1a1a1a; }
+  .chat-input:focus { border-color: #1a1a1a; }
+  .chat-send { width: 44px; height: 44px; border-radius: 50%; background: #1a1a1a; color: #fff; border: none; font-size: 1rem; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .chat-send:disabled { background: #ccc; cursor: default; }
+  .bubble { max-width: 80%; padding: 10px 14px; border-radius: 14px; font-size: .88rem; line-height: 1.55; word-break: break-word; }
+  .bubble-user { background: #1a1a1a; color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bubble-bot { background: #f2f2f2; color: #1a1a1a; align-self: flex-start; border-bottom-left-radius: 4px; }
+  .bubble-typing { background: #f2f2f2; color: #999; align-self: flex-start; border-bottom-left-radius: 4px; font-style: italic; }
+  .contact-form { background: #f9f9f9; border: 1.5px solid #e8e8e8; border-radius: 14px; padding: 14px 16px; margin-top: 8px; align-self: flex-start; max-width: 90%; width: 100%; }
+  .contact-form p { font-size: .82rem; color: #555; margin-bottom: 10px; }
+  .contact-field { width: 100%; border: 1.5px solid #ddd; border-radius: 8px; padding: 9px 12px; font-size: .85rem; margin-bottom: 8px; outline: none; color: #1a1a1a; background: #fff; }
+  .contact-field:focus { border-color: #1a1a1a; }
+  .contact-submit { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: .85rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 2px; }
+  .contact-submit:disabled { background: #ccc; }
+  .contact-note { font-size: .78rem; color: #999; margin-top: 6px; text-align: center; }
+  @media (max-width: 600px) {
+    .chat-section { margin: 0 12px 16px; }
+    .bubble { max-width: 90%; }
+  }
+</style>
+
+<script>
+(function() {
+  var slug = ${JSON.stringify(slug)};
+  var history = [];
+  var pendingQuestion = '';
+
+  var box   = document.getElementById('chat-box');
+  var input = document.getElementById('chat-input');
+  var btn   = document.getElementById('chat-send');
+
+  function scrollBottom() { box.scrollTop = box.scrollHeight; }
+
+  function addBubble(text, cls) {
+    var el = document.createElement('div');
+    el.className = 'bubble ' + cls;
+    el.textContent = text;
+    box.appendChild(el);
+    scrollBottom();
+    return el;
+  }
+
+  function showCannotAnswerOptions(question) {
+    var wrap = document.createElement('div');
+    wrap.className = 'contact-form';
+    wrap.innerHTML =
+      '<p>How would you like to send your question?</p>' +
+      '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
+        '<button class="opt-btn" id="opt-guest" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Send as Guest</button>' +
+        '<button class="opt-btn" id="opt-login" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#1a1a1a;color:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Login / Sign Up</button>' +
+      '</div>' +
+      '<div id="guest-form" style="display:none;">' +
+        '<input class="contact-field" id="cf-name"  type="text"  placeholder="Your name (optional)">' +
+        '<input class="contact-field" id="cf-email" type="email" placeholder="Email address">' +
+        '<input class="contact-field" id="cf-phone" type="tel"   placeholder="Phone number">' +
+        '<button class="contact-submit" id="cf-submit">Send Question</button>' +
+        '<p class="contact-note">Email or phone required.</p>' +
+      '</div>';
+    box.appendChild(wrap);
+    scrollBottom();
+
+    document.getElementById('opt-guest').addEventListener('click', function() {
+      document.getElementById('guest-form').style.display = 'block';
+      scrollBottom();
+    });
+
+    document.getElementById('opt-login').addEventListener('click', function() {
+      window.location.href = 'needs://login';
+    });
+
+    document.getElementById('cf-submit').addEventListener('click', function() {
+      var name  = document.getElementById('cf-name').value.trim();
+      var email = document.getElementById('cf-email').value.trim();
+      var phone = document.getElementById('cf-phone').value.trim();
+      if (!email && !phone) {
+        alert('Please enter your email or phone number.');
+        return;
+      }
+      this.disabled = true;
+      this.textContent = 'Sending…';
+      fetch('/m/' + slug + '/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: question, name: name, email: email, phone: phone }),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function() {
+        wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ Question sent! The business will reach out to you.</p>';
+        scrollBottom();
+      })
+      .catch(function() {
+        wrap.innerHTML = '<p style="color:#e53e3e;">Something went wrong. Please try again.</p>';
+      });
+    });
+  }
+
+  function send() {
+    var msg = input.value.trim();
+    if (!msg) return;
+    input.value = '';
+    btn.disabled = true;
+
+    addBubble(msg, 'bubble-user');
+    var typing = addBubble('…', 'bubble-typing');
+
+    fetch('/m/' + slug + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: history }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      box.removeChild(typing);
+      addBubble(data.reply, 'bubble-bot');
+      history.push({ role: 'user', text: msg });
+      history.push({ role: 'bot', text: data.reply });
+      if (data.cannotAnswer) {
+        showCannotAnswerOptions(msg);
+      }
+    })
+    .catch(function() {
+      box.removeChild(typing);
+      addBubble('Something went wrong. Please try again.', 'bubble-bot');
+    })
+    .finally(function() { btn.disabled = false; });
+  }
+
+  btn.addEventListener('click', send);
+  input.addEventListener('keydown', function(e) { if (e.key === 'Enter') send(); });
+})();
+</script>`;
+}
+
 // MODULE PAGE  GET /m/:slug
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1761,6 +2017,8 @@ app.get('/m/:slug', async (req, res) => {
     <ul class="gtk">${gtkItems}</ul>
   </div>` : ''}
 
+  ${moduleChatWidget(slug, name)}
+
   <div class="actions">
     <a class="btn btn-primary" href="sms:${phone || ''}">Message</a>
     <a class="btn btn-secondary" href="needs://restaurant/${doc._id}">Open in Needs</a>
@@ -1861,6 +2119,9 @@ app.get('/m/:slug', async (req, res) => {
     <div class="photo-row">${photoCards}</div>
   </div>` : ''}
 
+  <style>.chat-section { margin: 0 16px 16px; }</style>
+  ${moduleChatWidget(slug, name)}
+
   <div class="actions">
     <a class="btn btn-primary" href="needs://service/${doc._id}">Request on Needs</a>
     <a class="btn btn-secondary" href="sms:${phone || ''}">Message</a>
@@ -1926,6 +2187,42 @@ app.put('/restaurants/:id', requireAuth, async (req, res) => {
     res.json({ success: true, _id: id, ...updates });
   } catch (err) {
     console.error('❌ PUT /restaurants/:id error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /restaurants/:id/uploadMenu -> store PDF in GridFS, save fileId to restaurant doc
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+app.post('/restaurants/:id/uploadMenu', requireAuth, pdfUpload.single('menu'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid restaurant id' });
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const menuBucket = new GridFSBucket(database, { bucketName: 'menus' });
+
+    const uploadStream = menuBucket.openUploadStream(req.file.originalname, {
+      contentType: req.file.mimetype,
+      metadata: { restaurantId: id, uploadedAt: new Date() },
+    });
+
+    await new Promise((resolve, reject) => {
+      const readable = Readable.from(req.file.buffer);
+      readable.pipe(uploadStream);
+      uploadStream.on('finish', resolve);
+      uploadStream.on('error', reject);
+    });
+
+    const fileId = uploadStream.id;
+
+    await database.collection('Restaurants').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { menuFileId: fileId.toString(), menuFileName: req.file.originalname, menuUpdatedAt: new Date() } }
+    );
+
+    res.json({ success: true, menuFileId: fileId.toString(), fileName: req.file.originalname });
+  } catch (err) {
+    console.error('❌ POST /restaurants/:id/uploadMenu error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

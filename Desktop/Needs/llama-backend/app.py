@@ -247,6 +247,52 @@ User: {q}
     text = query_mistral(prompt)
     return jsonify({"response": text})
 
+
+@app.post("/module-chat")
+def module_chat():
+    """
+    Grounded Q&A for module pages.
+    Body: { context: str, message: str, history: [{role, text}] }
+    Returns: { reply: str, cannotAnswer: bool }
+    """
+    body = request.get_json(silent=True) or {}
+    context = (body.get("context") or "").strip()
+    message = (body.get("message") or "").strip()
+    history = body.get("history") or []
+
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+
+    history_text = ""
+    for turn in history[-6:]:
+        role = "Customer" if turn.get("role") == "user" else "Assistant"
+        history_text += f"{role}: {turn.get('text', '')}\n"
+
+    prompt = f"""You are a helpful assistant for the following business. Answer ONLY using the information provided below. Do not make up or guess any information not explicitly stated. If the answer is not in the provided information, respond with exactly the word: CANNOT_ANSWER
+
+--- BUSINESS INFORMATION ---
+{context}
+--- END OF BUSINESS INFORMATION ---
+
+{history_text}Customer: {message}
+Assistant:"""
+
+    raw = generate_response(prompt).strip()
+
+    # Strip any echoed prompt or trailing markers
+    if "[end of text]" in raw:
+        raw = raw.split("[end of text]")[0].strip()
+    # Keep only the last paragraph if the model echoed the prompt
+    parts = [p.strip() for p in raw.split("\n\n") if p.strip()]
+    if len(parts) > 1:
+        raw = parts[-1]
+
+    cannot_answer = "CANNOT_ANSWER" in raw.upper()
+    if cannot_answer:
+        raw = "I don't have that information available. Would you like to send your question directly to this business?"
+
+    return jsonify({"reply": raw, "cannotAnswer": cannot_answer})
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
     app.run(debug=False, port=port, host='0.0.0.0')

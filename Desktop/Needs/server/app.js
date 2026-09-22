@@ -1934,10 +1934,15 @@ app.get('/m/:slug', async (req, res) => {
     /* ── Info card ── */
     .card { background: #fff; border-radius: 20px; margin: -36px 24px 20px; padding: 28px 32px; box-shadow: 0 4px 20px rgba(0,0,0,.09); position: relative; }
     h1 { font-size: 2rem; font-weight: 700; letter-spacing: -.5px; }
-    .badges { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .badges { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
     .badge { background: #f0f0f0; border-radius: 20px; padding: 5px 14px; font-size: .82rem; color: #555; font-weight: 500; }
-    .meta { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: .9rem; color: #666; }
-    .desc { margin-top: 14px; font-size: .95rem; color: #444; line-height: 1.65; }
+    .info-grid { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+    .info-row { display: flex; align-items: flex-start; gap: 12px; font-size: .92rem; color: #444; }
+    .info-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; opacity: .75; }
+    .info-label { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #999; margin-bottom: 2px; }
+    .info-value { color: #222; line-height: 1.5; }
+    .card-divider { border: none; border-top: 1px solid #f0f0f0; margin: 20px 0; }
+    .desc-block { font-size: .95rem; color: #555; line-height: 1.7; }
 
     /* ── Sections ── */
     .section { margin: 0 24px 20px; }
@@ -1971,8 +1976,9 @@ app.get('/m/:slug', async (req, res) => {
     @media (max-width: 600px) {
       .cover-wrap { height: 220px; }
       .cover-placeholder { height: 220px; }
-      .card { margin: -24px 12px 16px; padding: 20px; }
+      .card { margin: -24px 12px 16px; padding: 20px 18px; }
       h1 { font-size: 1.5rem; }
+      .info-grid { gap: 8px; }
       .section { margin: 0 12px 16px; }
       .dish-row { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
       .dish-card img { height: 110px; }
@@ -1993,12 +1999,26 @@ app.get('/m/:slug', async (req, res) => {
       ${cuisine ? `<span class="badge">${cuisine}</span>` : ''}
       ${price   ? `<span class="badge">${price}</span>`   : ''}
     </div>
-    <div class="meta">
-      ${address ? `<span>📍 ${address}</span>` : ''}
-      ${hours   ? `<span>🕐 ${hours}</span>`   : ''}
-      ${phone   ? `<span>📞 ${phone}</span>`   : ''}
+
+    <div class="info-grid">
+      ${address ? `
+      <div class="info-row">
+        <span class="info-icon">📍</span>
+        <div><div class="info-label">Address</div><div class="info-value">${address}</div></div>
+      </div>` : ''}
+      ${hours ? `
+      <div class="info-row">
+        <span class="info-icon">🕐</span>
+        <div><div class="info-label">Hours</div><div class="info-value">${hours}</div></div>
+      </div>` : ''}
+      ${phone ? `
+      <div class="info-row">
+        <span class="info-icon">📞</span>
+        <div><div class="info-label">Phone</div><div class="info-value">${phone}</div></div>
+      </div>` : ''}
     </div>
-    ${desc ? `<p class="desc">${desc}</p>` : ''}
+
+    ${desc ? `<hr class="card-divider"><p class="desc-block">${desc}</p>` : ''}
   </div>
 
   ${dishes.length ? `

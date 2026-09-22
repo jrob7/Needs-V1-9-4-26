@@ -1600,12 +1600,142 @@ async function ensureUniqueSlug(col, base, excludeId = null) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Grounded profile Q&A — no LLM, answers only from stored data
+function answerFromProfile(message, doc, type) {
+  const q = message.toLowerCase().replace(/[?!.,]/g, '');
+  const words = q.split(/\s+/);
+
+  const has = (...terms) => terms.some(t => q.includes(t));
+
+  // ── Hours ──────────────────────────────────────────────────────────────
+  if (has('hour', 'open', 'close', 'closing', 'when do you', 'what time')) {
+    const hours = doc.hoursOpen || '';
+    if (hours) return { reply: `Our hours are: ${hours}`, cannotAnswer: false };
+    return { reply: null, cannotAnswer: true };
+  }
+
+  // ── Address / Location ──────────────────────────────────────────────────
+  if (has('address', 'location', 'where are you', 'where is', 'directions', 'located')) {
+    const addr = doc.address || doc.serviceArea || doc.businessAddress || '';
+    if (addr) return { reply: `You can find us at: ${addr}`, cannotAnswer: false };
+    return { reply: null, cannotAnswer: true };
+  }
+
+  // ── Phone / Contact ─────────────────────────────────────────────────────
+  if (has('phone', 'call', 'number', 'contact', 'reach you')) {
+    const phone = doc.phone || '';
+    if (phone) return { reply: `You can reach us at: ${phone}`, cannotAnswer: false };
+    return { reply: null, cannotAnswer: true };
+  }
+
+  // ── Price range ─────────────────────────────────────────────────────────
+  if (has('price range', 'how expensive', 'cost', 'affordable', 'cheap', 'pricey') && type === 'restaurant') {
+    const pr = doc.priceRange || '';
+    if (pr) return { reply: `Our price range is ${pr}.`, cannotAnswer: false };
+    return { reply: null, cannotAnswer: true };
+  }
+
+  // ── Full menu list ──────────────────────────────────────────────────────
+  if (has('full menu', 'whole menu', 'entire menu', 'all menu', 'menu sections', 'what sections')) {
+    const menu = doc.menu || [];
+    if (menu.length) {
+      const sections = menu.map(s => `${s.section} (${s.items.length} items)`).join(', ');
+      return { reply: `Our menu includes: ${sections}. Ask me about any section or item!`, cannotAnswer: false };
+    }
+  }
+
+  // ── Specific menu item / dish lookup ───────────────────────────────────
+  if (type === 'restaurant') {
+    const allItems = [];
+    for (const section of (doc.menu || [])) {
+      for (const item of (section.items || [])) {
+        allItems.push({ section: section.section, ...item });
+      }
+    }
+    for (const dish of (doc.topDishes || [])) {
+      allItems.push({ section: 'Featured Dishes', name: dish.name, description: dish.description, price: dish.price });
+    }
+
+    // Find items that match any word in the question
+    const matches = allItems.filter(item => {
+      const itemText = (item.name + ' ' + (item.description || '')).toLowerCase();
+      return words.some(w => w.length > 3 && itemText.includes(w));
+    });
+
+    if (matches.length) {
+      // Price query
+      if (has('how much', 'price', 'cost', 'what does', 'how expensive')) {
+        const parts = matches.slice(0, 3).map(m =>
+          `${m.name}${m.unit ? ' (' + m.unit + ')' : ''} — ${m.price || 'see menu'}`
+        );
+        return { reply: `Here's what we found:\n${parts.join('\n')}`, cannotAnswer: false };
+      }
+      // Availability query (do you have / is there)
+      if (has('do you have', 'have a', 'have the', 'carry', 'serve', 'offer', 'is there', 'any')) {
+        const m = matches[0];
+        let reply = `Yes! We have the ${m.name}`;
+        if (m.description) reply += ` — ${m.description}`;
+        if (m.price) reply += `. Price: ${m.price}`;
+        if (m.unit) reply += ` (${m.unit})`;
+        reply += '.';
+        return { reply, cannotAnswer: false };
+      }
+      // General item info
+      const m = matches[0];
+      let reply = `${m.name}`;
+      if (m.unit) reply += ` (${m.unit})`;
+      if (m.price) reply += ` — ${m.price}`;
+      if (m.description) reply += `\n${m.description}`;
+      return { reply, cannotAnswer: false };
+    }
+
+    // Section lookup — "what's in the [section]" or "what do you have for [section]"
+    for (const section of (doc.menu || [])) {
+      if (q.includes(section.section.toLowerCase())) {
+        const itemList = section.items.slice(0, 6).map(i => `• ${i.name}${i.price ? ' (' + i.price + ')' : ''}`).join('\n');
+        return { reply: `${section.section}:\n${itemList}`, cannotAnswer: false };
+      }
+    }
+  }
+
+  // ── Rate / pricing (services) ───────────────────────────────────────────
+  if (type === 'service' && has('rate', 'price', 'cost', 'how much', 'charge', 'fee')) {
+    const rate = doc.rateMin ? `$${doc.rateMin}${doc.rateMax ? '–$' + doc.rateMax : ''}${doc.rateType ? ' / ' + doc.rateType : ''}` : '';
+    if (rate) return { reply: `Our rate is ${rate}.`, cannotAnswer: false };
+    return { reply: null, cannotAnswer: true };
+  }
+
+  // ── Availability (services) ─────────────────────────────────────────────
+  if (type === 'service' && has('available', 'availability', 'schedule', 'booking', 'book', 'appoint')) {
+    const avail = doc.availability || '';
+    if (avail) return { reply: `We're available: ${avail}`, cannotAnswer: false };
+    return { reply: null, cannotAnswer: true };
+  }
+
+  // ── Good to know / general info ─────────────────────────────────────────
+  if (has('info', 'tell me about', 'about you', 'good to know', 'what do', 'what should')) {
+    const gtk = (doc.goodToKnow || []);
+    const desc = doc.description || doc.tagline || '';
+    if (gtk.length || desc) {
+      let reply = desc ? desc + '\n\n' : '';
+      if (gtk.length) reply += 'Good to know:\n' + gtk.map(g => `• ${g}`).join('\n');
+      return { reply: reply.trim(), cannotAnswer: false };
+    }
+  }
+
+  // ── Fallback: cannot answer ─────────────────────────────────────────────
+  return {
+    reply: "I don't have that information available. Would you like to send your question directly to this business?",
+    cannotAnswer: true,
+  };
+}
+
 // MODULE CHAT  POST /m/:slug/chat
 // ─────────────────────────────────────────────────────────────────────────────
 app.post('/m/:slug/chat', async (req, res) => {
   try {
     const { slug } = req.params;
-    const { message, history = [] } = req.body || {};
+    const { message } = req.body || {};
     if (!message) return res.status(400).json({ error: 'message required' });
 
     const db = client.db('Need');
@@ -1614,57 +1744,8 @@ app.post('/m/:slug/chat', async (req, res) => {
     if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
     if (!doc) return res.status(404).json({ error: 'Module not found' });
 
-    // Build grounded context string from all profile fields
-    let ctx = '';
-    if (type === 'restaurant') {
-      ctx += `Name: ${doc.name || ''}\n`;
-      ctx += `Cuisine: ${doc.cuisine || ''}\n`;
-      ctx += `Address: ${doc.address || ''}\n`;
-      ctx += `Phone: ${doc.phone || ''}\n`;
-      ctx += `Hours: ${doc.hoursOpen || ''}\n`;
-      ctx += `Price Range: ${doc.priceRange || ''}\n`;
-      ctx += `Description: ${doc.description || doc.tagline || ''}\n`;
-      if ((doc.goodToKnow || []).length) {
-        ctx += `\nGood to Know:\n${doc.goodToKnow.map(g => `- ${g}`).join('\n')}\n`;
-      }
-      if ((doc.topDishes || []).length) {
-        ctx += `\nFeatured Dishes:\n${doc.topDishes.map(d => `- ${d.name}${d.description ? ': ' + d.description : ''}${d.price ? ' (' + d.price + ')' : ''}`).join('\n')}\n`;
-      }
-      if ((doc.menu || []).length) {
-        ctx += `\nFull Menu:\n`;
-        for (const section of doc.menu) {
-          ctx += `\n[${section.section}]\n`;
-          for (const item of section.items) {
-            ctx += `- ${item.name}`;
-            if (item.unit) ctx += ` (${item.unit})`;
-            if (item.price) ctx += ` — ${item.price}`;
-            if (item.description) ctx += `: ${item.description}`;
-            ctx += '\n';
-          }
-        }
-      }
-    } else {
-      ctx += `Business Name: ${doc.businessName || doc.providerName || ''}\n`;
-      ctx += `Category: ${doc.category || ''}\n`;
-      ctx += `Service Area: ${doc.serviceArea || doc.businessAddress || ''}\n`;
-      ctx += `Phone: ${doc.phone || ''}\n`;
-      ctx += `Rate: ${doc.rateMin ? '$' + doc.rateMin + (doc.rateMax ? '–$' + doc.rateMax : '') + (doc.rateType ? ' / ' + doc.rateType : '') : ''}\n`;
-      ctx += `Availability: ${doc.availability || ''}\n`;
-      ctx += `Description: ${doc.description || doc.tagline || ''}\n`;
-      if (doc.licensed) ctx += `Licensed & Insured: Yes\n`;
-      if ((doc.goodToKnow || []).length) {
-        ctx += `\nGood to Know:\n${doc.goodToKnow.map(g => `- ${g}`).join('\n')}\n`;
-      }
-    }
-
-    const flaskRes = await fetch(`${FLASK_API}/module-chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context: ctx, message, history }),
-    });
-    if (!flaskRes.ok) throw new Error(`Flask error ${flaskRes.status}`);
-    const data = await flaskRes.json();
-    res.json(data);
+    const result = answerFromProfile(message, doc, type);
+    res.json(result);
   } catch (err) {
     console.error('❌ /m/:slug/chat error:', err);
     res.status(500).json({ error: 'Something went wrong' });

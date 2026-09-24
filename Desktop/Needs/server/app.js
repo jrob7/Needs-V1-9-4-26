@@ -18,6 +18,7 @@ const NODE_API = process.env.NODE_API || "http://localhost:3000";
 const FLASK_API = process.env.FLASK_API || "https://llama-go-production.up.railway.app";
 const fundraisersCol = () => client.db('Need').collection('Fundraisers');
 const path = require('path');
+const gcal = require('./googleCalendar');
 
 
 
@@ -2581,6 +2582,89 @@ app.post('/startConversation', requireAuth, async (req, res) => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // APPOINTMENTS
+// ─────────────────────────────────────────────────────────────────────────────
+// GOOGLE CALENDAR OAUTH
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /auth/google/calendar?userId=xxx
+// Redirects the user to Google's consent screen.
+// userId is embedded in the OAuth `state` param so the callback knows who to update.
+app.get('/auth/google/calendar', requireAuth, (req, res) => {
+  const userId = req.userId;
+  const url = gcal.getAuthUrl({ userId });
+  res.redirect(url);
+});
+
+// GET /auth/google/calendar/callback
+// Google redirects here after consent. Exchanges code → tokens, stores on user doc,
+// then deep-links back to the app.
+app.get('/auth/google/calendar/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code) {
+    return res.redirect(`needsapp://calendar-error?reason=${encodeURIComponent(error || 'no_code')}`);
+  }
+  try {
+    const { userId } = JSON.parse(Buffer.from(state, 'base64').toString());
+    const tokens = await gcal.exchangeCode(code);
+    const db = client.db('Need');
+    await db.collection('Users').updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { googleCalendar: { tokens, connectedAt: new Date() } } }
+    );
+    res.redirect('needsapp://calendar-connected');
+  } catch (err) {
+    console.error('Google calendar callback error:', err?.message);
+    res.redirect('needsapp://calendar-error?reason=server_error');
+  }
+});
+
+// GET /auth/google/calendar/status — check if the authed user has connected calendar
+app.get('/auth/google/calendar/status', requireAuth, async (req, res) => {
+  try {
+    const db   = client.db('Need');
+    const user = await db.collection('Users').findOne(
+      { _id: new ObjectId(req.userId) },
+      { projection: { 'googleCalendar.connectedAt': 1 } }
+    );
+    res.json({ connected: !!user?.googleCalendar?.tokens, connectedAt: user?.googleCalendar?.connectedAt || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /auth/google/calendar — disconnect (removes stored tokens)
+app.delete('/auth/google/calendar', requireAuth, async (req, res) => {
+  try {
+    const db = client.db('Need');
+    await db.collection('Users').updateOne(
+      { _id: new ObjectId(req.userId) },
+      { $unset: { googleCalendar: '' } }
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /calendar/slots?date=YYYY-MM-DD&serviceUserId=xxx
+// Returns available 1-hour slots on the given date from the provider's calendar.
+app.get('/calendar/slots', async (req, res) => {
+  try {
+    const { date, serviceUserId } = req.query;
+    if (!date || !serviceUserId || !ObjectId.isValid(serviceUserId)) {
+      return res.status(400).json({ error: 'date and serviceUserId required' });
+    }
+    const db   = client.db('Need');
+    const user = await db.collection('Users').findOne(
+      { _id: new ObjectId(serviceUserId) },
+      { projection: { 'googleCalendar.tokens': 1 } }
+    );
+    if (!user?.googleCalendar?.tokens) {
+      return res.json({ slots: null, message: 'Provider has not connected Google Calendar' });
+    }
+    const slots = await gcal.getAvailableSlots(user.googleCalendar.tokens, new Date(date));
+    res.json({ slots });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// APPOINTMENTS
 // Schema: { serviceUserId, requesterId, conversationId, quoteMessageId,
 //           needText, businessName, price, date, time, address,
 //           status: 'proposed'|'confirmed'|'completed'|'cancelled',
@@ -2606,7 +2690,31 @@ app.post('/appointments', requireAuth, async (req, res) => {
       createdAt: new Date(), updatedAt: new Date(),
     };
     const result = await database.collection('Appointments').insertOne(doc);
-    res.json({ success: true, _id: result.insertedId.toString(), ...doc,
+    const insertedId = result.insertedId.toString();
+
+    // If the service provider has Google Calendar connected, create an event (fire-and-forget)
+    if (doc.serviceUserId) {
+      (async () => {
+        try {
+          const db   = client.db('Need');
+          const provider = await db.collection('Users').findOne(
+            { _id: doc.serviceUserId },
+            { projection: { 'googleCalendar.tokens': 1 } }
+          );
+          if (provider?.googleCalendar?.tokens) {
+            const event = await gcal.createCalendarEvent(provider.googleCalendar.tokens, doc);
+            if (event?.id) {
+              await database.collection('Appointments').updateOne(
+                { _id: result.insertedId },
+                { $set: { googleCalendarEventId: event.id, googleCalendarLink: event.htmlLink } }
+              );
+            }
+          }
+        } catch (e) { console.error('Calendar event creation error:', e?.message); }
+      })();
+    }
+
+    res.json({ success: true, _id: insertedId, ...doc,
       serviceUserId: doc.serviceUserId?.toString(), requesterId: doc.requesterId?.toString(),
       conversationId: doc.conversationId?.toString() });
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
@@ -2636,6 +2744,25 @@ app.patch('/appointments/:id', requireAuth, async (req, res) => {
     const { _id, ...updates } = req.body || {};
     updates.updatedAt = new Date();
     await database.collection('Appointments').updateOne({ _id: new ObjectId(id) }, { $set: updates });
+
+    // If cancelled and provider has a calendar event, delete it (fire-and-forget)
+    if (updates.status === 'cancelled') {
+      (async () => {
+        try {
+          const appt = await database.collection('Appointments').findOne({ _id: new ObjectId(id) });
+          if (!appt?.googleCalendarEventId || !appt?.serviceUserId) return;
+          const db = client.db('Need');
+          const provider = await db.collection('Users').findOne(
+            { _id: appt.serviceUserId },
+            { projection: { 'googleCalendar.tokens': 1 } }
+          );
+          if (provider?.googleCalendar?.tokens) {
+            await gcal.deleteCalendarEvent(provider.googleCalendar.tokens, appt.googleCalendarEventId);
+          }
+        } catch (e) { console.error('Calendar event deletion error:', e?.message); }
+      })();
+    }
+
     res.json({ success: true, _id: id, ...updates });
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });

@@ -5,8 +5,10 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
+    "scheme": "needsapp",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jrehurst7.needs"
     },
     "android": {
       "permissions": [

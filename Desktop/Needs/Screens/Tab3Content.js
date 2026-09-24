@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useContext, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, Image, Animated, Share, Clipboard,
+  Alert, Image, Animated, Share, Clipboard, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -129,8 +129,11 @@ const AccountTabContent = () => {
   const [businessDoc, setBusinessDoc]         = useState(null);
   const [offersModalVisible, setOffersModal]  = useState(false);
   const [visitModalVisible, setVisitModal]   = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarLoading, setCalendarLoading]     = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const isBusiness = ctx.accountType === 'business';
+  const isService  = isBusiness && ctx.businessType === 'service';
 
   useEffect(() => {
     Animated.timing(fade, { toValue: 1, duration: 400, useNativeDriver: true }).start();
@@ -157,7 +160,6 @@ const AccountTabContent = () => {
   };
 
   const fetchUserDetails = async () => {
-    // Use context userId first, fall back to AsyncStorage
     let id = globalUserId;
     if (!id) {
       try { id = await AsyncStorage.getItem('userId'); } catch {}
@@ -165,6 +167,42 @@ const AccountTabContent = () => {
     if (!id) { setUserDetails(null); setBusinessDoc(null); return; }
     fetchForId(id);
     fetchBusinessListing(id);
+    // Check Google Calendar connection status for service providers
+    if (ctx.accountType === 'business' && ctx.businessType === 'service') {
+      authFetch(`${NODE_API}/auth/google/calendar/status`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setCalendarConnected(!!data.connected); })
+        .catch(() => {});
+    }
+  };
+
+  const handleConnectCalendar = async () => {
+    const id = globalUserId || await AsyncStorage.getItem('userId').catch(() => null);
+    if (!id) return;
+    // Open the OAuth URL in the device browser; server redirects back via deep link
+    const url = `${NODE_API}/auth/google/calendar?token=${await AsyncStorage.getItem('authToken').catch(() => '')}`;
+    Linking.openURL(url).catch(() => Alert.alert('Error', 'Could not open browser.'));
+  };
+
+  const handleDisconnectCalendar = () => {
+    Alert.alert(
+      'Disconnect Google Calendar',
+      'Remove calendar sync? Existing appointments will not be affected.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect', style: 'destructive',
+          onPress: async () => {
+            setCalendarLoading(true);
+            try {
+              const r = await authFetch(`${NODE_API}/auth/google/calendar`, { method: 'DELETE' });
+              if (r.ok) { setCalendarConnected(false); Alert.alert('Disconnected', 'Google Calendar has been unlinked.'); }
+            } catch { Alert.alert('Error', 'Could not disconnect. Please try again.'); }
+            finally { setCalendarLoading(false); }
+          },
+        },
+      ]
+    );
   };
 
   useEffect(() => {
@@ -467,6 +505,34 @@ const AccountTabContent = () => {
           );
         })()}
 
+        {/* ── Google Calendar (service providers only) ──────────────── */}
+        {isService && (
+          <Section icon="calendar" title="Integrations" color="#059669">
+            <View style={styles.calendarRow}>
+              <View style={styles.calendarLeft}>
+                <View style={[styles.calendarIcon, calendarConnected && styles.calendarIconOn]}>
+                  <Ionicons name="logo-google" size={IS_WEB ? 22 : 17} color={calendarConnected ? '#fff' : '#059669'} />
+                </View>
+                <View>
+                  <Text style={styles.calendarLabel}>Google Calendar</Text>
+                  <Text style={styles.calendarSub}>
+                    {calendarConnected ? 'Connected — appointments sync automatically' : 'Sync confirmed appointments to your calendar'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.calendarBtn, calendarConnected && styles.calendarBtnOff]}
+                onPress={calendarConnected ? handleDisconnectCalendar : handleConnectCalendar}
+                disabled={calendarLoading}
+              >
+                <Text style={[styles.calendarBtnText, calendarConnected && styles.calendarBtnTextOff]}>
+                  {calendarLoading ? '…' : calendarConnected ? 'Disconnect' : 'Connect'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </Section>
+        )}
+
         <Section icon="person" title="Profile" color="#475569">
           <MenuItem icon="person-outline"   label="View / Edit Profile" onPress={handleEditProfile} />
           <MenuItem icon="log-out-outline"  label="Sign Out"     onPress={handleLogout} destructive />
@@ -680,6 +746,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: IS_WEB ? 14 : 13,
   },
+
+  // Google Calendar integration row
+  calendarRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: IS_WEB ? 18 : 14, paddingVertical: IS_WEB ? 16 : 13, gap: 10,
+  },
+  calendarLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: IS_WEB ? 14 : 11 },
+  calendarIcon: {
+    width: IS_WEB ? 42 : 34, height: IS_WEB ? 42 : 34, borderRadius: IS_WEB ? 21 : 17,
+    backgroundColor: '#DCFCE7', justifyContent: 'center', alignItems: 'center',
+  },
+  calendarIconOn: { backgroundColor: '#059669' },
+  calendarLabel: { fontSize: IS_WEB ? 16 : 14, fontWeight: '700', color: '#0F172A' },
+  calendarSub:   { fontSize: IS_WEB ? 13 : 11, color: '#64748B', marginTop: 2, flexShrink: 1 },
+  calendarBtn: {
+    backgroundColor: '#059669', borderRadius: IS_WEB ? 10 : 8,
+    paddingHorizontal: IS_WEB ? 16 : 13, paddingVertical: IS_WEB ? 8 : 7,
+  },
+  calendarBtnOff: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#E2E8F0' },
+  calendarBtnText:    { fontSize: IS_WEB ? 14 : 12, fontWeight: '700', color: '#fff' },
+  calendarBtnTextOff: { color: '#94A3B8' },
 
   section: {
     backgroundColor: '#fff',

@@ -13,8 +13,8 @@ import { authFetch } from '../server/api';
 import { NODE_API } from '../config';
 
 const SERVICE_CATEGORY_GROUPS = [
-  { group: 'Home Services',         items: ['Plumber', 'Electrician', 'HVAC', 'Handyman', 'Cleaner', 'Landscaper', 'Painter', 'Carpentry', 'Moving'] },
-  { group: 'Automotive',             items: ['Mechanic', 'Tire Shop', 'Auto Body', 'Towing'] },
+  { group: 'Home Services',         items: ['Plumber', 'Electrician', 'HVAC', 'Handyman', 'Cleaner', 'House Cleaning', 'Landscaper', 'Lawn Care', 'Painter', 'Carpentry', 'Moving', 'Junk Removal', 'Pest Control', 'Carpet & Upholstery Cleaning', 'Pressure Washing', 'Window Cleaning', 'Pool Service', 'Appliance Repair', 'Garage Door Service', 'Locksmith'] },
+  { group: 'Automotive',             items: ['Mechanic', 'Auto Repair', 'Auto Detailing', 'Tire Shop', 'Auto Body', 'Towing'] },
   { group: 'Personal Care',          items: ['Barber', 'Hair Salon', 'Nail Salon', 'Massage'] },
   { group: 'Professional Services',  items: ['Attorney', 'CPA', 'Tax Preparer', 'Insurance Agent', 'Real Estate Agent'] },
   { group: 'Family & Education',     items: ['Tutor', 'Daycare', 'Music Lessons', 'Elder Care'] },

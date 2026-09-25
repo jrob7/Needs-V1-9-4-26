@@ -31,13 +31,14 @@ const resolveImg = (uri) => {
 };
 
 const NOTIF_ICONS = {
-  message:     { name: 'chatbubble',        color: '#2563EB', bg: '#EFF6FF' },
-  match:       { name: 'git-network',       color: '#8B5CF6', bg: '#F5F3FF' },
-  lead:        { name: 'briefcase',         color: '#2563EB', bg: '#EFF6FF' },
-  activity:    { name: 'flash',             color: '#F59E0B', bg: '#FFFBEB' },
-  update:      { name: 'megaphone',         color: '#10B981', bg: '#ECFDF5' },
-  transaction: { name: 'cash',             color: '#10B981', bg: '#ECFDF5' },
-  default:     { name: 'notifications',    color: '#64748B', bg: '#F1F5F9' },
+  message:       { name: 'chatbubble',           color: '#2563EB', bg: '#EFF6FF' },
+  match:         { name: 'git-network',          color: '#8B5CF6', bg: '#F5F3FF' },
+  lead:          { name: 'briefcase',            color: '#2563EB', bg: '#EFF6FF' },
+  quote_request: { name: 'document-text-outline', color: '#0EA5E9', bg: '#F0F9FF' },
+  activity:      { name: 'flash',                color: '#F59E0B', bg: '#FFFBEB' },
+  update:        { name: 'megaphone',            color: '#10B981', bg: '#ECFDF5' },
+  transaction:   { name: 'cash',                color: '#10B981', bg: '#ECFDF5' },
+  default:       { name: 'notifications',        color: '#64748B', bg: '#F1F5F9' },
 };
 
 const timeLabel = (d) => {
@@ -149,6 +150,113 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
             </Text>
           </TouchableOpacity>
         </View>
+      </View>
+      {!item.read && <View style={styles.unreadDot} />}
+    </View>
+  );
+};
+
+// A quote_request — auto-generated quote sent to a business for 1-tap response.
+const QuoteRequestRow = ({ item, onConfirm, onEdit, onAsk, responding }) => {
+  const cfg = NOTIF_ICONS.quote_request;
+  const hasEstimate = item.estimateMin != null && item.estimateMax != null;
+  const [editPrice, setEditPrice] = useState('');
+  const [showEdit, setShowEdit] = useState(false);
+  const [showAsk, setShowAsk] = useState(false);
+  const [askText, setAskText] = useState('');
+
+  return (
+    <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
+      <View style={[styles.iconWrap, { backgroundColor: cfg.bg }]}>
+        <Ionicons name={cfg.name} size={W ? 26 : 20} color={cfg.color} />
+      </View>
+      <View style={styles.rowContent}>
+        <View style={styles.rowTop}>
+          <Text style={styles.rowTitle} numberOfLines={1}>{item.title || '⚡ New Quote Request'}</Text>
+          <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+        </View>
+        <Text style={styles.rowBody}>{item.body}</Text>
+        {item.subService ? (
+          <Text style={[styles.rowBody, { color: '#0EA5E9', fontWeight: '600', marginTop: 2 }]}>
+            {item.subService}
+          </Text>
+        ) : null}
+        {hasEstimate ? (
+          <Text style={[styles.rowBody, { fontWeight: '700', color: '#111827', fontSize: W ? 16 : 14, marginTop: 4 }]}>
+            Suggested: ${Math.round(item.estimateMin)}–${Math.round(item.estimateMax)}
+          </Text>
+        ) : null}
+
+        {!showEdit && !showAsk && (
+          <View style={styles.leadButtonsRow}>
+            <TouchableOpacity
+              style={[styles.respondBtn, { backgroundColor: '#10B981' }]}
+              onPress={() => onConfirm(item)}
+              disabled={responding === item._id}
+            >
+              <Text style={styles.respondBtnText}>
+                {responding === item._id ? 'Confirming…' : '✓ Confirm'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.requestInfoBtn]}
+              onPress={() => setShowEdit(true)}
+            >
+              <Text style={styles.requestInfoBtnText}>✏️ Edit Price</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.requestInfoBtn]}
+              onPress={() => setShowAsk(true)}
+            >
+              <Text style={styles.requestInfoBtnText}>💬 Ask</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {showEdit && (
+          <View style={{ marginTop: 8 }}>
+            <TextInput
+              style={[styles.rowBody, { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, marginBottom: 6 }]}
+              placeholder="Adjusted price (e.g. $130)"
+              value={editPrice}
+              onChangeText={setEditPrice}
+            />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity
+                style={[styles.respondBtn, { backgroundColor: '#2563EB' }]}
+                onPress={() => { onEdit(item, editPrice); setShowEdit(false); }}
+              >
+                <Text style={styles.respondBtnText}>Send Updated Quote</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.requestInfoBtn} onPress={() => setShowEdit(false)}>
+                <Text style={styles.requestInfoBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {showAsk && (
+          <View style={{ marginTop: 8 }}>
+            <TextInput
+              style={[styles.rowBody, { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, marginBottom: 6 }]}
+              placeholder="Your question for the customer…"
+              value={askText}
+              onChangeText={setAskText}
+              multiline
+            />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity
+                style={[styles.respondBtn, { backgroundColor: '#8B5CF6' }]}
+                onPress={() => { onAsk(item, askText); setShowAsk(false); }}
+              >
+                <Text style={styles.respondBtnText}>Send Question</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.requestInfoBtn} onPress={() => setShowAsk(false)}>
+                <Text style={styles.requestInfoBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </View>
       {!item.read && <View style={styles.unreadDot} />}
     </View>
@@ -295,6 +403,7 @@ const NotificationsScreen = () => {
   const [appointments, setAppointments] = useState([]);
   const [respondTarget, setRespondTarget] = useState(null);
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
+  const [respondingQuoteId, setRespondingQuoteId] = useState(null);
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
 
@@ -447,6 +556,26 @@ const NotificationsScreen = () => {
 
   const handleRespond = (item) => setRespondTarget(item);
 
+  const handleQuoteAction = async (item, action, extraData) => {
+    setRespondingQuoteId(item._id);
+    try {
+      await authFetch(`${NODE_API}/respondToServiceQuote`, {
+        method: 'POST',
+        body: JSON.stringify({
+          quoteId: item.quoteId?.toString() || item._id,
+          action,
+          editedPrice: extraData,
+          message: extraData,
+        }),
+      });
+      setNotifications(prev => prev.map(n => n._id === item._id ? { ...n, read: true, responded: true } : n));
+    } catch (e) {
+      Alert.alert('Error', 'Could not send response. Please try again.');
+    } finally {
+      setRespondingQuoteId(null);
+    }
+  };
+
   // Fully automated — the business just taps the button. We resolve their
   // own display name, ask the AI for the top missing-detail questions for
   // this category/request, and send the resulting interactive card straight
@@ -499,13 +628,13 @@ const NotificationsScreen = () => {
 
   const filtered = notifications.filter(n => {
     if (activeTab === 'Messages') return n.type === 'message';
-    if (activeTab === 'Matches')  return n.type === 'match' || n.type === 'lead';
+    if (activeTab === 'Matches')  return n.type === 'match' || n.type === 'lead' || n.type === 'quote_request';
     return true;
   });
 
   const unreadCount    = notifications.filter(n => !n.read).length;
   const messagesCount  = notifications.filter(n => n.type === 'message' && !n.read).length;
-  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead') && !n.read).length;
+  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request') && !n.read).length;
   const schedulerCount = appointments.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length;
   const TAB_META = {
     Messages:  { icon: 'chatbubbles-outline', count: messagesCount },
@@ -663,7 +792,15 @@ const NotificationsScreen = () => {
           renderItem={({ item }) => (
             item.type === 'lead'
               ? <LeadNotifRow item={item} onRespond={handleRespond} onRequestMoreInfo={handleRequestMoreInfo} requestingInfo={requestingInfoIds.has(item._id)} />
-              : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
+              : item.type === 'quote_request'
+                ? <QuoteRequestRow
+                    item={item}
+                    onConfirm={i => handleQuoteAction(i, 'confirm')}
+                    onEdit={(i, price) => handleQuoteAction(i, 'edit', price)}
+                    onAsk={(i, msg) => handleQuoteAction(i, 'ask', msg)}
+                    responding={respondingQuoteId}
+                  />
+                : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
           )}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
           contentContainerStyle={{ paddingBottom: 20 }}

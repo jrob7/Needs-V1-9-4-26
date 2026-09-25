@@ -428,7 +428,332 @@ export default function NeedInquiryView() {
 // ─────────────────────────────────────────────────────────────────────────────
 // HorizontalNeedRow
 // ─────────────────────────────────────────────────────────────────────────────
-function HorizontalNeedRow({ need, media, idx, isActive, isSessionNeed, autoOpenModal, onOpenNeed, onViewCreator, onLayout }) {
+// ServiceNeedCard — expressive lifecycle card for service needs in the new flow
+// ─────────────────────────────────────────────────────────────────────────────
+const STATUS_STEPS = {
+  processing:         { label: 'Processing your request…',           icon: 'time-outline',           color: '#94A3B8' },
+  finding_matches:    { label: 'Finding matching services…',         icon: 'search-outline',          color: '#F59E0B' },
+  generating_quotes:  { label: 'Generating quotes…',                 icon: 'document-text-outline',   color: '#3B82F6' },
+  quotes_ready:       { label: 'Quotes Ready',                        icon: 'checkmark-circle-outline', color: '#10B981' },
+  leads_sent:         { label: 'Providers notified',                  icon: 'notifications-outline',   color: '#8B5CF6' },
+  no_matches:         { label: 'No matches found yet',               icon: 'alert-circle-outline',    color: '#94A3B8' },
+  error:              { label: 'Something went wrong',               icon: 'warning-outline',         color: '#EF4444' },
+};
+
+function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
+  const [need, setNeed] = useState(initialNeed);
+  const [quotes, setQuotes] = useState([]);
+  const [quotesVisible, setQuotesVisible] = useState(false);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const status = need?.serviceMatchStatus || 'processing';
+  const isResolved = ['quotes_ready', 'leads_sent', 'no_matches', 'error'].includes(status);
+
+  // Poll for status updates while not yet resolved — refreshes both the
+  // NeedRequest (to get live serviceMatchStatus) and quotes
+  useEffect(() => {
+    if (isResolved || !need?._id) return;
+    const interval = setInterval(async () => {
+      try {
+        const [nRes, qRes] = await Promise.all([
+          fetch(`${API}/needRequest/${need._id}`),
+          fetch(`${API}/serviceQuotes?needId=${need._id}`),
+        ]);
+        const nData = await nRes.json();
+        const qs = await qRes.json();
+
+        // Update need status from server
+        if (nData?.serviceMatchStatus && nData.serviceMatchStatus !== need.serviceMatchStatus) {
+          setNeed(prev => ({
+            ...prev,
+            serviceMatchStatus: nData.serviceMatchStatus,
+            quoteCount: nData.quoteCount ?? prev.quoteCount,
+          }));
+        }
+
+        // Update quotes and mark ready when they arrive
+        if (Array.isArray(qs) && qs.length > 0) {
+          setQuotes(qs);
+          setNeed(prev => ({ ...prev, serviceMatchStatus: 'quotes_ready', quoteCount: qs.length }));
+          clearInterval(interval);
+        }
+
+        // Stop polling on terminal statuses
+        const latest = nData?.serviceMatchStatus;
+        if (['quotes_ready', 'leads_sent', 'no_matches', 'error'].includes(latest)) {
+          clearInterval(interval);
+        }
+      } catch (_) {}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [need?._id, isResolved]);
+
+  // Load quotes when status is quotes_ready
+  useEffect(() => {
+    if (status !== 'quotes_ready' || !need?._id || quotes.length > 0) return;
+    fetch(`${API}/serviceQuotes?needId=${need._id}`)
+      .then(r => r.json())
+      .then(qs => { if (Array.isArray(qs)) setNeed(prev => ({ ...prev, quoteCount: qs.length })); setQuotes(Array.isArray(qs) ? qs : []); })
+      .catch(() => {});
+  }, [status, need?._id]);
+
+  // Pulse animation on active statuses
+  useEffect(() => {
+    if (isResolved) { pulseAnim.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.6, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,   duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [isResolved]);
+
+  const cfg = STATUS_STEPS[status] || STATUS_STEPS.processing;
+  const quoteCount = need?.quoteCount || quotes.length;
+
+  return (
+    <View style={{ width: '100%' }} onLayout={onLayout}>
+      <View style={svcStyles.card}>
+        {/* Header row */}
+        <View style={svcStyles.headerRow}>
+          <View style={[svcStyles.iconCircle, { backgroundColor: `${cfg.color}20` }]}>
+            <Ionicons name="construct-outline" size={18} color={cfg.color} />
+          </View>
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={svcStyles.title} numberOfLines={2}>
+              {toTitle(need?.searchText || '', 8)}
+            </Text>
+            {need?.urgency ? (
+              <Text style={svcStyles.subtitle}>{need.urgency}</Text>
+            ) : null}
+          </View>
+          <View style={[svcStyles.badge, { backgroundColor: `${cfg.color}15` }]}>
+            <Text style={[svcStyles.badgeText, { color: cfg.color }]}>Service</Text>
+          </View>
+        </View>
+
+        {/* Status row */}
+        <View style={svcStyles.statusRow}>
+          {!isResolved ? (
+            <Animated.View style={{ opacity: pulseAnim }}>
+              <Ionicons name={cfg.icon} size={15} color={cfg.color} />
+            </Animated.View>
+          ) : (
+            <Ionicons name={cfg.icon} size={15} color={cfg.color} />
+          )}
+          <Text style={[svcStyles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+          {status === 'quotes_ready' && quoteCount > 0 && (
+            <View style={svcStyles.quoteBadge}>
+              <Text style={svcStyles.quoteBadgeText}>{quoteCount}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* View Quotes button */}
+        {status === 'quotes_ready' && (
+          <TouchableOpacity
+            style={svcStyles.viewQuotesBtn}
+            onPress={() => setQuotesVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="document-text-outline" size={14} color="#fff" />
+            <Text style={svcStyles.viewQuotesBtnText}>
+              View {quoteCount > 0 ? `${quoteCount} ` : ''}Quote{quoteCount !== 1 ? 's' : ''}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Leads-sent fallback */}
+        {status === 'leads_sent' && (
+          <Text style={svcStyles.leadsSentText}>
+            Providers have been notified and will respond shortly.
+          </Text>
+        )}
+      </View>
+
+      {/* Quotes Modal */}
+      <ServiceQuotesModal
+        visible={quotesVisible}
+        quotes={quotes}
+        needText={need?.searchText}
+        onClose={() => setQuotesVisible(false)}
+        onQuoteConfirmed={() => {
+          setQuotesVisible(false);
+          setNeed(prev => ({ ...prev, serviceMatchStatus: 'leads_sent' }));
+        }}
+      />
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ServiceQuotesModal — swipeable list of auto-generated quotes
+// ─────────────────────────────────────────────────────────────────────────────
+function ServiceQuotesModal({ visible, quotes, needText, onClose, onQuoteConfirmed }) {
+  const [confirming, setConfirming] = useState(null); // quoteId being confirmed
+  const [confirmed, setConfirmed] = useState(new Set());
+
+  const handleConfirm = async (quote) => {
+    setConfirming(quote._id);
+    try {
+      await fetch(`${API}/respondToServiceQuote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quoteId: quote._id, action: 'confirm' }),
+      });
+      setConfirmed(prev => new Set(prev).add(quote._id));
+      onQuoteConfirmed?.();
+    } catch (e) {
+      console.warn('⚠️ Confirm quote failed:', e?.message);
+    } finally {
+      setConfirming(null);
+    }
+  };
+
+  if (!visible) return null;
+  return (
+    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+        <View style={svcStyles.modalHeader}>
+          <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
+            <Ionicons name="chevron-down" size={24} color="#374151" />
+          </TouchableOpacity>
+          <Text style={svcStyles.modalTitle}>Quotes for Your Request</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {needText ? (
+          <View style={svcStyles.needTextBanner}>
+            <Text style={svcStyles.needTextBannerLabel}>Your request:</Text>
+            <Text style={svcStyles.needTextBannerText} numberOfLines={2}>{needText}</Text>
+          </View>
+        ) : null}
+
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+          {quotes.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingTop: 60 }}>
+              <Ionicons name="document-text-outline" size={52} color="#CBD5E1" />
+              <Text style={{ color: '#94A3B8', marginTop: 12, fontSize: 16 }}>No quotes yet</Text>
+            </View>
+          ) : quotes.map(q => (
+            <View key={q._id} style={svcStyles.quoteCard}>
+              {q.businessLogoUrl ? (
+                <Image source={{ uri: q.businessLogoUrl }} style={svcStyles.quoteLogo} />
+              ) : (
+                <View style={[svcStyles.quoteLogo, svcStyles.quoteLogoFallback]}>
+                  <Ionicons name="business-outline" size={22} color="#94A3B8" />
+                </View>
+              )}
+              <View style={{ flex: 1, marginLeft: 12 }}>
+                <Text style={svcStyles.quoteBusinessName}>{q.businessName}</Text>
+                {q.subService ? (
+                  <Text style={svcStyles.quoteSubService}>{q.subService}</Text>
+                ) : null}
+                <Text style={svcStyles.quoteEstimate}>
+                  {q.estimate || (q.estimateMin != null && q.estimateMax != null
+                    ? `$${Math.round(q.estimateMin)}–$${Math.round(q.estimateMax)}`
+                    : 'Quote pending')}
+                </Text>
+                {q.breakdown ? (
+                  <Text style={svcStyles.quoteBreakdown}>{q.breakdown}</Text>
+                ) : null}
+                {confirmed.has(q._id) ? (
+                  <View style={[svcStyles.confirmBtn, { backgroundColor: '#10B981' }]}>
+                    <Ionicons name="checkmark-circle" size={14} color="#fff" />
+                    <Text style={svcStyles.confirmBtnText}>Confirmed</Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={svcStyles.confirmBtn}
+                    onPress={() => handleConfirm(q)}
+                    disabled={confirming === q._id}
+                    activeOpacity={0.8}
+                  >
+                    {confirming === q._id
+                      ? <Text style={svcStyles.confirmBtnText}>Confirming…</Text>
+                      : <>
+                          <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
+                          <Text style={svcStyles.confirmBtnText}>Confirm Appointment</Text>
+                        </>
+                    }
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+const svcStyles = StyleSheet.create({
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    marginHorizontal: 0,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  headerRow:    { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 12 },
+  iconCircle:   { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  title:        { fontSize: 15, fontWeight: '600', color: '#111827', lineHeight: 20 },
+  subtitle:     { fontSize: 12, color: '#64748B', marginTop: 2 },
+  badge:        { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, alignSelf: 'flex-start' },
+  badgeText:    { fontSize: 11, fontWeight: '600' },
+  statusRow:    { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  statusText:   { fontSize: 13, fontWeight: '500' },
+  quoteBadge:   { marginLeft: 4, backgroundColor: '#10B981', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1 },
+  quoteBadgeText: { fontSize: 11, color: '#fff', fontWeight: '700' },
+  viewQuotesBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#2563EB', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14,
+    alignSelf: 'flex-start', marginTop: 4,
+  },
+  viewQuotesBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  leadsSentText: { fontSize: 12, color: '#6B7280', marginTop: 4, fontStyle: 'italic' },
+  modalHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  modalTitle:   { fontSize: 17, fontWeight: '700', color: '#111827' },
+  needTextBanner: { backgroundColor: '#F8FAFC', padding: 12, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  needTextBannerLabel: { fontSize: 11, color: '#94A3B8', fontWeight: '600', textTransform: 'uppercase', marginBottom: 2 },
+  needTextBannerText: { fontSize: 14, color: '#374151' },
+  quoteCard: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, marginBottom: 12,
+    borderWidth: 1, borderColor: '#E2E8F0',
+  },
+  quoteLogo:        { width: 48, height: 48, borderRadius: 10, resizeMode: 'cover' },
+  quoteLogoFallback: { backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
+  quoteBusinessName: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  quoteSubService:   { fontSize: 12, color: '#6B7280', marginTop: 1 },
+  quoteEstimate:     { fontSize: 18, fontWeight: '800', color: '#2563EB', marginTop: 6, marginBottom: 2 },
+  quoteBreakdown:    { fontSize: 12, color: '#64748B', lineHeight: 17, marginBottom: 10 },
+  confirmBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: '#2563EB', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14,
+    alignSelf: 'flex-start', marginTop: 4,
+  },
+  confirmBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gateway wrapper — routes service-lifecycle needs to ServiceNeedCard without
+// violating the Rules of Hooks (no conditional return before hook calls).
+function HorizontalNeedRow(props) {
+  if (props.need?.serviceMatchStatus) {
+    return <ServiceNeedCard need={props.need} isSessionNeed={props.isSessionNeed} onLayout={props.onLayout} />;
+  }
+  return <HorizontalNeedRowInner {...props} />;
+}
+
+function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, autoOpenModal, onOpenNeed, onViewCreator, onLayout }) {
   const [matches, setMatches]           = useState([]);
   const [loaded, setLoaded]             = useState(false);
   const cached = getPillState(need?._id);

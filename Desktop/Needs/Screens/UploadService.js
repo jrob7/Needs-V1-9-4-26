@@ -12,8 +12,8 @@ import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
 import { NODE_API } from '../config';
 
-const SERVICE_CATEGORY_GROUPS = [
-  { group: 'Home Services',         items: ['Plumber', 'Electrician', 'HVAC', 'Handyman', 'House Cleaning', 'Landscaper', 'Lawn Care', 'Painter', 'Carpentry', 'Moving', 'Junk Removal', 'Pest Control', 'Carpet & Upholstery Cleaning', 'Pressure Washing', 'Window Cleaning', 'Pool Service', 'Appliance Repair', 'Garage Door Service', 'Locksmith'] },
+export const SERVICE_CATEGORY_GROUPS = [
+  { group: 'Home Services',         items: ['Plumber', 'Electrician', 'HVAC', 'Handyman', 'House Cleaning', 'Landscaping', 'Lawn Care', 'Painter', 'Carpentry', 'Moving', 'Junk Removal', 'Pest Control', 'Carpet & Upholstery Cleaning', 'Pressure Washing', 'Window Cleaning', 'Pool Service', 'Appliance Repair', 'Garage Door Service', 'Locksmith'] },
   { group: 'Automotive',             items: ['Auto Repair', 'Auto Detailing', 'Tire Shop', 'Auto Body', 'Towing'] },
   { group: 'Personal Care',          items: ['Barber', 'Hair Salon', 'Nail Salon', 'Massage'] },
   { group: 'Professional Services',  items: ['Attorney', 'CPA', 'Tax Preparer', 'Insurance Agent', 'Real Estate Agent'] },
@@ -22,6 +22,474 @@ const SERVICE_CATEGORY_GROUPS = [
   { group: 'Community Support',      items: ['Shelters', 'Rehab', 'Food Assistance', 'Churches', 'Nonprofits'] },
   { group: 'Other',                  items: ['Other'] },
 ];
+
+// ── Per-category sub-service pricing questions ───────────────────────────────
+// Each entry: { service: string, questions: string[] }
+// Shown after a category is selected; all answers are required.
+const CATEGORY_QUESTIONS = {
+  'House Cleaning': [
+    { service: 'Standard Cleaning', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $120 for a standard clean' },
+      { label: 'What home size / bed-bath count does that cover?', placeholder: 'e.g. Up to 3 bed / 2 bath, ~1,500 sq ft' },
+      { label: 'Price for additional bed/bath or size tier?', placeholder: 'e.g. +$25 per additional bedroom' },
+    ]},
+    { service: 'Deep Cleaning', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $200 for a deep clean' },
+      { label: 'What size does that cover?', placeholder: 'e.g. Up to 2,000 sq ft, 3 bed / 2 bath' },
+      { label: 'How much above standard for extra size/condition?', placeholder: 'e.g. +$50 for 4+ bedrooms or heavily soiled' },
+    ]},
+    { service: 'Move-In/Out', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $250 for a move-out clean' },
+      { label: 'What size does that cover?', placeholder: 'e.g. Up to 1,500 sq ft, unfurnished' },
+      { label: 'Add-on for appliances/cabinets?', placeholder: 'e.g. +$40 for inside appliances and cabinet interiors' },
+    ]},
+    { service: 'Recurring Cleaning', questions: [
+      { label: 'Base visit price?', placeholder: 'e.g. $100/visit on a biweekly plan' },
+      { label: 'What frequency options do you offer?', placeholder: 'e.g. Weekly, biweekly, or monthly' },
+      { label: 'Discount for weekly/biweekly/monthly?', placeholder: 'e.g. 10% off for weekly, 5% off for biweekly' },
+    ]},
+  ],
+  'Lawn Care': [
+    { service: 'Lawn Mowing', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $40 minimum for lawns up to 3,000 sq ft' },
+      { label: 'What lawn size does that cover?', placeholder: 'e.g. Flat residential lawn up to 3,000 sq ft' },
+      { label: 'Price/add-on for larger or overgrown lawns?', placeholder: 'e.g. $0.01/sq ft over 3,000 sq ft; +$20 if overgrown' },
+    ]},
+    { service: 'Hedge Trimming', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $50 for up to 10 linear ft of hedges' },
+      { label: 'What amount/size does that cover?', placeholder: 'e.g. Standard hedges up to 6 ft tall, 10 linear ft' },
+      { label: 'Additional hedge/linear-foot charge?', placeholder: 'e.g. $3/linear ft beyond the first 10' },
+    ]},
+    { service: 'Yard Cleanup', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $80 for a standard yard cleanup' },
+      { label: 'What property/debris level does that cover?', placeholder: 'e.g. Up to 5,000 sq ft with light debris' },
+      { label: 'Heavy cleanup surcharge?', placeholder: 'e.g. +$40 for heavy debris or haul-away needed' },
+    ]},
+    { service: 'Recurring Maintenance', questions: [
+      { label: 'Base visit price?', placeholder: 'e.g. $60/visit on a weekly plan' },
+      { label: "What's included?", placeholder: 'e.g. Mow, edge, blow, and basic weeding' },
+      { label: 'Weekly/biweekly/monthly pricing?', placeholder: 'e.g. Weekly $60, biweekly $70, monthly $90' },
+    ]},
+  ],
+  'Auto Detailing': [
+    { service: 'Full Detail', questions: [
+      { label: 'Price by vehicle type?', placeholder: 'e.g. Sedan $150, SUV/Truck $200' },
+      { label: "What's included?", placeholder: 'e.g. Exterior wash, wax, interior vacuum, wipe-down, windows' },
+      { label: 'Pet hair/heavy-soil surcharge?', placeholder: 'e.g. +$30 for pet hair or heavily soiled interior' },
+    ]},
+    { service: 'Interior Detail', questions: [
+      { label: 'Price by vehicle type?', placeholder: 'e.g. Sedan $100, SUV/Truck $130' },
+      { label: "What's included?", placeholder: 'e.g. Vacuum, shampoo seats, wipe all surfaces, clean windows' },
+      { label: 'Stain/pet-hair surcharge?', placeholder: 'e.g. +$25 for deep stains or excessive pet hair' },
+    ]},
+    { service: 'Exterior Detail', questions: [
+      { label: 'Price by vehicle type?', placeholder: 'e.g. Sedan $80, SUV/Truck $110' },
+      { label: "What's included?", placeholder: 'e.g. Hand wash, clay bar, polish, and wax' },
+      { label: 'SUV/truck/oversize surcharge?', placeholder: 'e.g. +$30 for SUVs, trucks, or vans' },
+    ]},
+    { service: 'Wash & Wax', questions: [
+      { label: 'Starting price by vehicle?', placeholder: 'e.g. Sedan $60, SUV $80' },
+      { label: 'What wax/service is included?', placeholder: 'e.g. Hand wash, spray wax, tire shine, windows' },
+      { label: 'Oversize vehicle surcharge?', placeholder: 'e.g. +$20 for full-size trucks or vans' },
+    ]},
+  ],
+  'Handyman': [
+    { service: 'TV Mounting', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $80 to mount a TV up to 55"' },
+      { label: 'What TV size does it cover?', placeholder: 'e.g. Up to 55" on a standard drywall wall' },
+      { label: 'Add-on for larger TV/concealed wires?', placeholder: 'e.g. +$20 for 65"+ or +$40 to conceal wires in wall' },
+    ]},
+    { service: 'Furniture Assembly', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $60 for a standard item like a bed frame or desk' },
+      { label: 'Which item/size does that cover?', placeholder: 'e.g. Single item up to ~30 min assembly time' },
+      { label: 'Additional item/hour charge?', placeholder: 'e.g. +$40/hr for additional items or complex assembly' },
+    ]},
+    { service: 'Shelf Installation', questions: [
+      { label: 'Price per shelf?', placeholder: 'e.g. $30 per shelf including hardware and mounting' },
+      { label: "What's included?", placeholder: 'e.g. Standard drywall anchor mount, up to 30 lbs' },
+      { label: 'Add-on for masonry/special mounting?', placeholder: 'e.g. +$15/shelf for concrete, brick, or tile walls' },
+    ]},
+    { service: 'Curtain/Blind Install', questions: [
+      { label: 'Base/per-window price?', placeholder: 'e.g. $35 per window' },
+      { label: "What's included?", placeholder: 'e.g. Standard bracket install — customer supplies hardware and blinds' },
+      { label: 'Additional window/hardware charge?', placeholder: 'e.g. +$10/window beyond the first 3' },
+    ]},
+  ],
+  'Junk Removal': [
+    { service: 'Furniture Removal', questions: [
+      { label: 'Price per item / starting price?', placeholder: 'e.g. $60 for a single piece of furniture' },
+      { label: 'Which items does that cover?', placeholder: 'e.g. Couch, dresser, bed frame, or similar standard items' },
+      { label: 'Oversized/heavy-item surcharge?', placeholder: 'e.g. +$30 for pianos, safes, or items over 200 lbs' },
+    ]},
+    { service: 'Appliance Removal', questions: [
+      { label: 'Price per appliance?', placeholder: 'e.g. $75 per major appliance' },
+      { label: 'Which appliances?', placeholder: 'e.g. Refrigerators, washers, dryers, stoves, dishwashers' },
+      { label: 'Stairs/disconnection surcharge?', placeholder: 'e.g. +$20 if carried down stairs; disconnection is extra' },
+    ]},
+    { service: 'Mattress Removal', questions: [
+      { label: 'Price per mattress?', placeholder: 'e.g. $60 for twin/full, $75 for queen/king' },
+      { label: 'Does size affect price?', placeholder: 'e.g. Yes — twin/full $60, queen $70, king $80' },
+      { label: 'Additional mattress/box spring price?', placeholder: 'e.g. +$30 per box spring' },
+    ]},
+    { service: 'Load Removal', questions: [
+      { label: 'Price by load size?', placeholder: 'e.g. 1/4 load $100, 1/2 load $175, full load $300' },
+      { label: 'How do you define a load?', placeholder: 'e.g. 1/4 load = 1–2 items or fills a quarter of our truck' },
+      { label: 'Heavy-material surcharge?', placeholder: 'e.g. +$50 for concrete, dirt, or tile (hazmat excluded)' },
+    ]},
+  ],
+  'Pest Control': [
+    { service: 'General Pest', questions: [
+      { label: 'Base treatment price?', placeholder: 'e.g. $120 for a standard interior/exterior treatment' },
+      { label: 'What property size does that cover?', placeholder: 'e.g. Single-family home up to 2,500 sq ft' },
+      { label: 'Additional size/severity charge?', placeholder: 'e.g. +$30 for homes over 2,500 sq ft or heavy infestations' },
+    ]},
+    { service: 'Ant Treatment', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $95 for a standard ant treatment' },
+      { label: "What's included?", placeholder: 'e.g. Interior bait stations and exterior perimeter spray' },
+      { label: 'Severe/multiple-area surcharge?', placeholder: 'e.g. +$25 for multiple entry points or heavy infestation' },
+    ]},
+    { service: 'Roach Treatment', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $110 for a standard roach treatment' },
+      { label: 'What infestation level does that cover?', placeholder: 'e.g. Light to moderate — gel bait and perimeter spray' },
+      { label: 'Follow-up/severe infestation price?', placeholder: 'e.g. Severe starts at $175; follow-up visit $60' },
+    ]},
+    { service: 'Recurring Service', questions: [
+      { label: 'Price per visit/month?', placeholder: 'e.g. $75/month on a quarterly plan' },
+      { label: 'What pests are included?', placeholder: 'e.g. Ants, roaches, spiders, silverfish, general crawling insects' },
+      { label: 'Frequency/contract discount?', placeholder: 'e.g. Monthly $75, quarterly $90/visit, no contract required' },
+    ]},
+  ],
+  'Carpet & Upholstery Cleaning': [
+    { service: 'Carpet Cleaning', questions: [
+      { label: 'Price per room?', placeholder: 'e.g. $45 per room' },
+      { label: 'Maximum room size?', placeholder: 'e.g. Up to 200 sq ft per room' },
+      { label: 'Stain/heavy-soil surcharge?', placeholder: 'e.g. +$20/room for pet stains or heavily soiled carpet' },
+    ]},
+    { service: 'Stair Cleaning', questions: [
+      { label: 'Price per stair/flight?', placeholder: 'e.g. $4 per stair or $60 per flight' },
+      { label: "What's included?", placeholder: 'e.g. Steam clean, deodorize, and spot treat' },
+      { label: 'Additional landing charge?', placeholder: 'e.g. +$25 per landing area' },
+    ]},
+    { service: 'Sofa Cleaning', questions: [
+      { label: 'Price by sofa size?', placeholder: 'e.g. Loveseat $80, standard sofa $110, sectional $160' },
+      { label: "What's included?", placeholder: 'e.g. Steam extraction, deodorize, and spot treatment' },
+      { label: 'Stain/pet-hair surcharge?', placeholder: 'e.g. +$30 for pet hair or deep set-in stains' },
+    ]},
+    { service: 'Area Rug Cleaning', questions: [
+      { label: 'Price by size/sq ft?', placeholder: 'e.g. $2/sq ft, minimum $50' },
+      { label: 'Which materials are included?', placeholder: 'e.g. Wool, synthetic, and cotton — silk quoted separately' },
+      { label: 'Specialty-material surcharge?', placeholder: 'e.g. +$25 for silk, antique, or hand-knotted rugs' },
+    ]},
+  ],
+  'Pressure Washing': [
+    { service: 'Driveway', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $100 for a standard 2-car driveway' },
+      { label: 'What sq ft does that cover?', placeholder: 'e.g. Up to 500 sq ft' },
+      { label: 'Additional sq-ft/heavy-stain charge?', placeholder: 'e.g. $0.15/sq ft over 500; +$30 for oil stains' },
+    ]},
+    { service: 'Patio', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $80 for a standard patio up to 300 sq ft' },
+      { label: 'What size does that cover?', placeholder: 'e.g. Up to 300 sq ft concrete or pavers' },
+      { label: 'Additional sq-ft charge?', placeholder: 'e.g. $0.20/sq ft over 300 sq ft' },
+    ]},
+    { service: 'House Exterior', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $250 for a single-story home' },
+      { label: 'What home size/stories does that cover?', placeholder: 'e.g. Up to 1,500 sq ft single-story' },
+      { label: 'Additional story/sq-ft charge?', placeholder: 'e.g. +$100/story; +$0.10/sq ft over 1,500' },
+    ]},
+    { service: 'Fence/Deck', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $120 for up to 200 sq ft deck or 100 linear ft fence' },
+      { label: 'What sq/linear footage does that cover?', placeholder: 'e.g. Up to 200 sq ft deck or 100 linear ft fence' },
+      { label: 'Additional footage charge?', placeholder: 'e.g. $0.50/linear ft or $0.40/sq ft over the base' },
+    ]},
+  ],
+  'Window Cleaning': [
+    { service: 'Exterior Windows', questions: [
+      { label: 'Price per window / starting price?', placeholder: 'e.g. $8/window, minimum $80' },
+      { label: 'What window type/size is standard?', placeholder: 'e.g. Standard single-pane up to 24" x 36"' },
+      { label: 'Second-story/oversize surcharge?', placeholder: 'e.g. +$5/window for second story or large picture windows' },
+    ]},
+    { service: 'Interior + Exterior', questions: [
+      { label: 'Price per window?', placeholder: 'e.g. $12/window both sides, minimum $100' },
+      { label: "What's included?", placeholder: 'e.g. Both panes, sills wiped, and streak-free finish' },
+      { label: 'Second-story/oversize surcharge?', placeholder: 'e.g. +$6/window for second story; oversize quoted separately' },
+    ]},
+    { service: 'Screen Cleaning', questions: [
+      { label: 'Price per screen?', placeholder: 'e.g. $4/screen or free with a full window cleaning package' },
+      { label: 'Included with window service?', placeholder: 'e.g. Included with 10+ window packages; otherwise $4/screen' },
+      { label: 'Damaged/special screen handling?', placeholder: 'e.g. We remove and reinstall — damaged screens noted but not replaced' },
+    ]},
+    { service: 'Tracks/Sills', questions: [
+      { label: 'Price per window?', placeholder: 'e.g. $3/window or included in interior cleaning packages' },
+      { label: "What's included?", placeholder: 'e.g. Wipe tracks, sills, and frames with a damp cloth' },
+      { label: 'Heavy buildup surcharge?', placeholder: 'e.g. +$2/window for heavy mold or debris buildup' },
+    ]},
+  ],
+  'Pool Service': [
+    { service: 'One-Time Cleaning', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $150 for a standard pool up to 15,000 gallons' },
+      { label: 'What pool size/condition does that cover?', placeholder: 'e.g. Up to 15,000 gal in normal condition' },
+      { label: 'Dirty/green-pool surcharge?', placeholder: 'e.g. +$50–$100 for green or algae-heavy pools' },
+    ]},
+    { service: 'Weekly Service', questions: [
+      { label: 'Monthly/visit price?', placeholder: 'e.g. $150/month (4 visits) including chemicals' },
+      { label: "What's included?", placeholder: 'e.g. Skim, brush, vacuum, test water, add chemicals' },
+      { label: 'Chemicals included or additional?', placeholder: 'e.g. Included in monthly rate; heavy chemical needs may add $20–$40' },
+    ]},
+    { service: 'Filter Cleaning', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $85 for a standard cartridge or sand filter' },
+      { label: 'Which filter types/sizes?', placeholder: 'e.g. Cartridge, sand, and DE filters — standard residential size' },
+      { label: 'Replacement/material charges?', placeholder: 'e.g. Replacement cartridges and media priced separately at cost' },
+    ]},
+    { service: 'Green Pool Cleanup', questions: [
+      { label: 'Starting price/range?', placeholder: 'e.g. $200–$350 depending on severity' },
+      { label: 'What severity does it cover?', placeholder: 'e.g. Light green (1–2 treatments) up to moderate algae' },
+      { label: 'When does it require an in-person quote?', placeholder: 'e.g. Black algae, severe buildup, or drained pools need a quote' },
+    ]},
+  ],
+  'Plumber': [
+    { service: 'Drain Unclogging', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $95 for a standard drain snake service' },
+      { label: 'Which drain types are included?', placeholder: 'e.g. Kitchen, bathroom sink, tub, and shower drains' },
+      { label: 'Severe/main-line condition — surcharge or quote?', placeholder: 'e.g. Main line or root intrusion requires a separate quote starting at $250' },
+    ]},
+    { service: 'Faucet Replacement', questions: [
+      { label: 'Base labor price?', placeholder: 'e.g. $120 labor to swap a standard faucet' },
+      { label: 'Customer-supplied faucet assumed?', placeholder: 'e.g. Yes — customer provides the faucet; we provide labor and parts' },
+      { label: 'Additional faucet/complex install charge?', placeholder: 'e.g. +$40 for kitchen faucets with sprayer or tight under-sink access' },
+    ]},
+    { service: 'Toilet Replacement', questions: [
+      { label: 'Base labor price?', placeholder: 'e.g. $150 labor to replace a standard toilet' },
+      { label: 'Removal/disposal included?', placeholder: 'e.g. Yes, old toilet haul-away is included' },
+      { label: 'Customer-supplied vs. supplied toilet pricing?', placeholder: 'e.g. Customer supplies toilet; we can source one for $100–$250 depending on model' },
+    ]},
+    { service: 'Garbage Disposal', questions: [
+      { label: 'Base labor price?', placeholder: 'e.g. $130 to install a customer-supplied disposal' },
+      { label: 'Customer supplies unit or you do?', placeholder: 'e.g. Customer supplies unit; or we supply starting at $160 including labor' },
+      { label: 'Wiring/plumbing complication — price or quote?', placeholder: 'e.g. New wiring or plumbing tie-in starts at $80 extra; complex setups quoted on-site' },
+    ]},
+  ],
+  'Electrician': [
+    { service: 'Outlet/GFCI', questions: [
+      { label: 'Price for first unit?', placeholder: 'e.g. $120 for the first outlet or GFCI install' },
+      { label: 'Additional-unit price?', placeholder: 'e.g. $75 for each additional outlet on the same visit' },
+      { label: 'New wiring required — quote?', placeholder: 'e.g. Running new circuits or conduit is quoted separately' },
+    ]},
+    { service: 'Light Fixture', questions: [
+      { label: 'Base price per fixture?', placeholder: 'e.g. $90 per standard fixture swap' },
+      { label: 'What fixture/height is standard?', placeholder: 'e.g. Standard ceiling height (8–10 ft), customer supplies fixture' },
+      { label: 'High ceiling/heavy fixture surcharge?', placeholder: 'e.g. +$30 for ceilings above 12 ft or fixtures over 50 lbs' },
+    ]},
+    { service: 'Ceiling Fan', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $120 to install/replace a ceiling fan on an existing box' },
+      { label: 'Additional fan price?', placeholder: 'e.g. $90 for each additional fan on the same visit' },
+      { label: 'High ceiling/new wiring surcharge?', placeholder: 'e.g. +$40 for ceilings over 12 ft; new wiring or mounting box quoted separately' },
+    ]},
+    { service: 'EV Charger', questions: [
+      { label: 'Base price / range?', placeholder: 'e.g. $350–$600 depending on panel distance and amperage' },
+      { label: 'Existing circuit price?', placeholder: 'e.g. $200 if a 240V circuit is already in place near the garage' },
+      { label: 'New circuit/distance — formula or quote?', placeholder: 'e.g. New circuit cost depends on panel location and run length — on-site quote recommended' },
+    ]},
+  ],
+  'HVAC': [
+    { service: 'AC Tune-Up', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $89 for a standard AC tune-up' },
+      { label: "What's included?", placeholder: 'e.g. Filter check, coil clean, refrigerant check, thermostat test' },
+      { label: 'Additional unit price?', placeholder: 'e.g. $70 for each additional unit on the same property' },
+    ]},
+    { service: 'Furnace Tune-Up', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $89 for a standard furnace tune-up' },
+      { label: "What's included?", placeholder: 'e.g. Burner inspection, filter replacement, heat exchanger visual, safety check' },
+      { label: 'Additional unit price?', placeholder: 'e.g. $70 per additional unit' },
+    ]},
+    { service: 'Thermostat Replacement', questions: [
+      { label: 'Labor price?', placeholder: 'e.g. $100 labor to swap a standard thermostat' },
+      { label: 'Standard vs smart thermostat pricing?', placeholder: 'e.g. Standard swap $100; Nest or Ecobee install $130 (customer supplies device)' },
+      { label: 'New wiring required — surcharge or quote?', placeholder: 'e.g. C-wire install +$50; new wiring beyond that quoted on-site' },
+    ]},
+    { service: 'HVAC Diagnostic', questions: [
+      { label: 'Service-call price?', placeholder: 'e.g. $95 diagnostic/service-call fee' },
+      { label: 'Is fee applied toward repair?', placeholder: 'e.g. Yes — the $95 is credited toward any repair we complete' },
+      { label: 'What systems/area does fee cover?', placeholder: 'e.g. Single system (AC or furnace) at one address' },
+    ]},
+  ],
+  'Painter': [
+    { service: 'Single Room', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $200 per room including labor and paint' },
+      { label: 'What room size does that cover?', placeholder: 'e.g. Up to 150 sq ft, standard ceiling height, two coats' },
+      { label: 'Additional wall/size/coat charge?', placeholder: 'e.g. +$50 for rooms over 200 sq ft or if a 3rd coat is needed' },
+    ]},
+    { service: 'Accent Wall', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $120 for a standard accent wall' },
+      { label: 'What wall size does that cover?', placeholder: 'e.g. Up to 120 sq ft (10x12 wall)' },
+      { label: 'Additional prep/coat charge?', placeholder: 'e.g. +$40 if wall needs patching or priming first' },
+    ]},
+    { service: 'Doors', questions: [
+      { label: 'Price per door?', placeholder: 'e.g. $60 per interior door' },
+      { label: 'One/both sides included?', placeholder: 'e.g. Both sides and trim included in the $60' },
+      { label: 'Prep/damaged-door surcharge?', placeholder: 'e.g. +$20 if door needs sanding, filling, or primer coat' },
+    ]},
+    { service: 'Trim/Baseboards', questions: [
+      { label: 'Price per room / linear foot?', placeholder: 'e.g. $80/room or $2.50/linear ft' },
+      { label: "What's included?", placeholder: 'e.g. One coat, caulk as needed, tape and drop cloth included' },
+      { label: 'Prep/additional-coat charge?', placeholder: 'e.g. +$40/room if bare wood or drastic color change requiring primer' },
+    ]},
+  ],
+  'Moving': [
+    { service: 'Local Move', questions: [
+      { label: 'Hourly/base rate?', placeholder: 'e.g. $120/hr for a 2-man crew, 2-hour minimum' },
+      { label: 'How many movers/hours included?', placeholder: 'e.g. 2 movers and a 16-ft truck, 2-hour minimum' },
+      { label: 'Additional hour/mover price?', placeholder: 'e.g. $120/hr; add a 3rd mover for +$40/hr' },
+    ]},
+    { service: 'Labor Only', questions: [
+      { label: 'Hourly rate?', placeholder: 'e.g. $90/hr for 2 movers, 2-hour minimum (no truck)' },
+      { label: 'How many movers included?', placeholder: 'e.g. 2 movers — you provide or rent the truck' },
+      { label: 'Minimum hours/additional mover price?', placeholder: 'e.g. 2-hour minimum; 3rd mover +$35/hr' },
+    ]},
+    { service: 'Furniture Move', questions: [
+      { label: 'Starting/item price?', placeholder: 'e.g. $60 for the first large piece within a home' },
+      { label: 'What size/weight is included?', placeholder: 'e.g. Standard sofas, beds, and dressers up to 300 lbs' },
+      { label: 'Stairs/heavy-item surcharge?', placeholder: 'e.g. +$20/item per flight of stairs; items over 400 lbs quoted separately' },
+    ]},
+    { service: 'Loading/Unloading', questions: [
+      { label: 'Hourly rate?', placeholder: 'e.g. $100/hr for 2 movers loading or unloading your rental truck' },
+      { label: 'Crew size included?', placeholder: 'e.g. 2 movers; 3rd mover available for +$40/hr' },
+      { label: 'Minimum/additional-hour charge?', placeholder: 'e.g. 2-hour minimum; billed in 30-min increments after that' },
+    ]},
+  ],
+  'Appliance Repair': [
+    { service: 'Refrigerator', questions: [
+      { label: 'Diagnostic fee?', placeholder: 'e.g. $85 to diagnose a refrigerator issue' },
+      { label: 'Is fee credited toward repair?', placeholder: 'e.g. Yes — the $85 is applied toward the repair cost if you proceed' },
+      { label: 'Which brands/types do you service?', placeholder: 'e.g. Most major brands — Samsung, LG, GE, Whirlpool, Maytag' },
+    ]},
+    { service: 'Washer', questions: [
+      { label: 'Diagnostic fee?', placeholder: 'e.g. $85 diagnostic fee' },
+      { label: 'Credited toward repair?', placeholder: 'e.g. Yes, credited if repair is completed same day' },
+      { label: 'Which brands/types?', placeholder: 'e.g. Top-load and front-load; most major brands' },
+    ]},
+    { service: 'Dryer', questions: [
+      { label: 'Diagnostic fee?', placeholder: 'e.g. $85 diagnostic fee' },
+      { label: 'Credited toward repair?', placeholder: 'e.g. Yes — credited toward repair labor' },
+      { label: 'Which brands/types?', placeholder: 'e.g. Electric and gas dryers; most major brands' },
+    ]},
+    { service: 'Dishwasher', questions: [
+      { label: 'Diagnostic fee?', placeholder: 'e.g. $85 to diagnose a dishwasher problem' },
+      { label: 'Credited toward repair?', placeholder: 'e.g. Yes, credited if you approve the repair' },
+      { label: 'Which brands/types?', placeholder: 'e.g. Bosch, KitchenAid, Whirlpool, GE, and most standard brands' },
+    ]},
+  ],
+  'Garage Door Service': [
+    { service: 'Tune-Up', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $80 for a standard single-door tune-up' },
+      { label: "What's included?", placeholder: 'e.g. Lubricate springs/rollers, tighten hardware, test safety sensors, adjust balance' },
+      { label: 'Additional door price?', placeholder: 'e.g. +$50 for a second door on the same visit' },
+    ]},
+    { service: 'Sensor Replacement', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $95 to replace a set of safety sensors' },
+      { label: 'Parts included?', placeholder: 'e.g. Yes — includes new sensor set and wiring' },
+      { label: 'Additional sensor/door charge?', placeholder: 'e.g. Standard replacement is per door; compatibility check included' },
+    ]},
+    { service: 'Opener Replacement', questions: [
+      { label: 'Labor/package price?', placeholder: 'e.g. $250 installed for a standard belt-drive opener' },
+      { label: 'Which opener types?', placeholder: 'e.g. Belt, chain, and wall-mount drives — brands include Chamberlain and LiftMaster' },
+      { label: 'Parts supplied by business or customer?', placeholder: 'e.g. We supply the opener; customer can supply their own for labor-only rate of $120' },
+    ]},
+    { service: 'Spring Replacement', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $150 for a single torsion spring, $220 for a double' },
+      { label: 'Single/double spring pricing?', placeholder: 'e.g. Single $150, double $220 — we recommend replacing both at the same time' },
+      { label: 'Which door sizes/types require a quote?', placeholder: 'e.g. Commercial-grade doors, custom sizes, or extension springs need an on-site quote' },
+    ]},
+  ],
+  'Locksmith': [
+    { service: 'Home Lockout', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $75 during business hours to unlock a standard door' },
+      { label: 'What lock types are included?', placeholder: 'e.g. Standard pin-tumbler deadbolts and knob locks' },
+      { label: 'After-hours/complex-lock surcharge?', placeholder: 'e.g. +$40 after 8pm or weekends; high-security/smart locks quoted on arrival' },
+    ]},
+    { service: 'Car Lockout', questions: [
+      { label: 'Base price?', placeholder: 'e.g. $65 for most standard vehicles' },
+      { label: 'Which vehicle types are included?', placeholder: 'e.g. Most cars, trucks, and SUVs with standard door locks' },
+      { label: 'After-hours/special vehicle surcharge?', placeholder: 'e.g. +$30 after 8pm; RVs or proximity fob vehicles quoted separately' },
+    ]},
+    { service: 'Rekey', questions: [
+      { label: 'First-lock price?', placeholder: 'e.g. $60 to rekey the first lock' },
+      { label: 'Additional-lock price?', placeholder: 'e.g. +$15 for each additional lock rekeyed to the same key' },
+      { label: 'New keys included?', placeholder: 'e.g. 2 keys included; additional keys $5 each' },
+    ]},
+    { service: 'Lock Replacement', questions: [
+      { label: 'Labor/base price?', placeholder: 'e.g. $85 labor to replace a standard deadbolt' },
+      { label: 'Lock included or customer supplied?', placeholder: 'e.g. Customer supplies the lock; or we source a quality deadbolt for $45–$80' },
+      { label: 'Additional lock/smart lock surcharge?', placeholder: 'e.g. Smart lock install +$30 for programming and setup' },
+    ]},
+  ],
+  'Pet Services': [
+    { service: 'Dog Walking', questions: [
+      { label: 'Price per walk?', placeholder: 'e.g. $20 for a 30-minute walk' },
+      { label: 'Duration included?', placeholder: 'e.g. 30-minute walk with GPS tracking and post-walk report' },
+      { label: 'Additional dog price?', placeholder: 'e.g. +$10 for a second dog from the same household' },
+    ]},
+    { service: 'Drop-In Visit', questions: [
+      { label: 'Price per visit?', placeholder: 'e.g. $18 per 20-minute drop-in visit' },
+      { label: 'Duration/tasks included?', placeholder: 'e.g. Feed, refresh water, litter scoop or potty break, and a brief play session' },
+      { label: 'Additional pet price?', placeholder: 'e.g. +$8 per additional pet' },
+    ]},
+    { service: 'Pet Sitting', questions: [
+      { label: 'Price per day/night?', placeholder: 'e.g. $55/night for one dog at my home' },
+      { label: "What's included?", placeholder: 'e.g. Overnight stay, all meals, walks, and play time' },
+      { label: 'Additional pet surcharge?', placeholder: 'e.g. +$20/night for a second pet' },
+    ]},
+    { service: 'Dog Grooming', questions: [
+      { label: 'Price by dog size?', placeholder: 'e.g. Small (under 25 lbs) $50, Medium $65, Large $80+' },
+      { label: "What's included?", placeholder: 'e.g. Bath, blow-dry, brush out, trim, nail grind, and ear clean' },
+      { label: 'Coat condition/add-on surcharge?', placeholder: 'e.g. +$15 for matted coats or heavy shedding' },
+    ]},
+  ],
+  'Landscaping': [
+    { service: 'Yard Maintenance', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. I usually charge a minimum of $40 for yard maintenance' },
+      { label: 'What property size/work is included?', placeholder: 'e.g. Up to 5,000 sq ft — mow the lawn, trim hedges, blow clippings' },
+      { label: 'Additional size/condition charge?', placeholder: 'e.g. Over 10,000 sq ft I charge $0.004/sq ft extra; +$25 for overgrown yards' },
+    ]},
+    { service: 'Hedge Trimming', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $60 for up to 20 linear ft of hedges' },
+      { label: 'What hedge size/quantity is included?', placeholder: 'e.g. Hedges up to 6 ft tall, up to 20 linear ft' },
+      { label: 'Additional linear-foot/hedge charge?', placeholder: 'e.g. $2/linear ft beyond 20 ft; tall hedges (8ft+) add $30' },
+    ]},
+    { service: 'Yard Cleanup', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $100 for a standard seasonal cleanup' },
+      { label: 'What size/debris level does that cover?', placeholder: 'e.g. Up to 5,000 sq ft with moderate leaf/debris accumulation' },
+      { label: 'Heavy debris/haul-away surcharge?', placeholder: 'e.g. +$50 for heavy debris; haul-away $75 per truckload' },
+    ]},
+    { service: 'Mulch Installation', questions: [
+      { label: 'Price per sq ft / yard?', placeholder: 'e.g. $5/sq ft installed or $80/cubic yard including material' },
+      { label: 'Is material included?', placeholder: 'e.g. Yes — includes standard hardwood mulch; premium/colored mulch +$20/yard' },
+      { label: 'Delivery/removal charge?', placeholder: 'e.g. Delivery within 15 miles included; old mulch removal +$45' },
+    ]},
+  ],
+  'Auto Repair': [
+    { service: 'Oil Change', questions: [
+      { label: 'Base price by oil type?', placeholder: 'e.g. Conventional $35, full synthetic $65' },
+      { label: 'How many quarts included?', placeholder: 'e.g. Up to 5 quarts included; $7/qt for vehicles needing more' },
+      { label: 'Charge for additional oil/special filters?', placeholder: 'e.g. Diesel or European spec oil +$20; special filter at cost' },
+    ]},
+    { service: 'Brake Pad Replacement', questions: [
+      { label: 'Price per axle?', placeholder: 'e.g. $150/axle for standard pads, labor included' },
+      { label: 'Pads/parts included?', placeholder: 'e.g. Standard ceramic pads included; performance pads priced separately' },
+      { label: 'Additional price for rotors or when is a quote required?', placeholder: 'e.g. Rotor replacement +$80/axle; if rotors are below spec, we quote before proceeding' },
+    ]},
+    { service: 'Battery Replacement', questions: [
+      { label: 'Labor/base price?', placeholder: 'e.g. $120 installed for most standard vehicles' },
+      { label: 'Battery included or priced by vehicle/battery type?', placeholder: 'e.g. Includes standard group-size battery; European or AGM batteries priced higher' },
+      { label: 'Additional charge for difficult-access/programming vehicles?', placeholder: 'e.g. +$30 for BMWs, Audis, or vehicles requiring module programming after swap' },
+    ]},
+    { service: 'Diagnostic / Check Engine', questions: [
+      { label: 'Diagnostic fee?', placeholder: 'e.g. $95 for a full scan and diagnosis' },
+      { label: 'How much diagnostic time does that include?', placeholder: 'e.g. Up to 30 min of tech time — covers most common codes' },
+      { label: 'Is the fee credited toward repair?', placeholder: 'e.g. Yes — the $95 is applied toward any repair completed at our shop' },
+    ]},
+  ],
+};
 
 const AVAILABILITY = ['', 'Next Day', 'Within a Week', 'Flexible'];
 
@@ -32,7 +500,7 @@ const resolveImg = (raw) => {
   return `${NODE_API}/uploads/${raw}`;
 };
 
-export default function UploadService({ route, navigation, onSubmitSuccess, onBack, pendingAccount } = {}) {
+export default function UploadService({ route, navigation, onSubmitSuccess, onBack, pendingAccount, initialCategory } = {}) {
   const { userId, setUserId, setAccountType, setBusinessType } = useContext(UserContext);
   const insets = useSafeAreaInsets();
 
@@ -45,7 +513,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
   // ── Basic Info ──────────────────────────────────────────────
   const [businessName, setBusinessName]   = useState(existingDoc?.businessName || '');
   const [providerName, setProviderName]   = useState(existingDoc?.providerName || ''); // "John's Plumbing" vs "John Smith"
-  const [category, setCategory]           = useState(existingDoc?.category || '');
+  const [category, setCategory]           = useState(initialCategory || existingDoc?.category || '');
   const [tagline, setTagline]             = useState(existingDoc?.tagline || ''); // short pitch
   const [description, setDescription]    = useState(existingDoc?.description || '');
   const [serviceArea, setServiceArea]     = useState(existingDoc?.serviceArea || ''); // city/zip
@@ -69,6 +537,15 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
   const [insured, setInsured]             = useState(existingDoc?.insured ?? null); // true | false | null
   const [bonded, setBonded]               = useState(existingDoc?.bonded ?? null); // true | false | null
   const [certifications, setCertifications] = useState(existingDoc?.certifications || '');
+
+  // ── Pricing details (category-specific questions) ───────────
+  const [pricingDetails, setPricingDetails] = useState(existingDoc?.pricingDetails || {});
+  const updatePricing = (subService, question, value) => {
+    setPricingDetails(prev => ({
+      ...prev,
+      [subService]: { ...(prev[subService] || {}), [question]: value },
+    }));
+  };
 
   // ── Top 3 Services customers come to you for ─────────────────
   const existingServices = existingDoc?.topServices?.length
@@ -114,6 +591,19 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
     if (!businessName || !category || !serviceArea) {
       Alert.alert('Missing info', 'Please fill in business name, category, and service area.');
       return;
+    }
+
+    // Validate category-specific pricing questions
+    const catQuestions = CATEGORY_QUESTIONS[category];
+    if (catQuestions) {
+      for (const { service, questions } of catQuestions) {
+        for (const { label } of questions) {
+          if (!pricingDetails[service]?.[label]?.trim()) {
+            Alert.alert('Pricing required', `Please answer "${label}" under ${service}.`);
+            return;
+          }
+        }
+      }
     }
 
     try {
@@ -188,6 +678,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
         certifications,
         topServices: services.filter(s => s.name),
         portfolioImageUrls: portfolioUrls.filter(Boolean),
+        pricingDetails,
       };
 
       const url    = editMode ? `${NODE_API}/services/${existingDoc._id}` : '${NODE_API}/createService';
@@ -218,6 +709,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
       setResponseTime(''); setPortfolioImages([]); setLicensed(null);
       setLicenseNumber(''); setInsured(null); setBonded(null); setCertifications('');
       setServices([{ name: '' }, { name: '' }, { name: '' }]);
+      setPricingDetails({});
     } catch (err) {
       console.error(err);
       Alert.alert('Upload failed', err.message || 'Something went wrong.');
@@ -252,25 +744,50 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
         <Field label="Website (optional)" value={website} onChangeText={setWebsite} placeholder="https://yourbusiness.com" />
       </SectionCard>
 
-      {/* ── Category ── */}
-      <SectionCard title="Category *">
-        {SERVICE_CATEGORY_GROUPS.map(({ group, items }) => (
-          <View key={group} style={styles.categoryGroup}>
-            <Text style={styles.categoryGroupLabel}>{group}</Text>
-            <View style={styles.chipWrap}>
-              {items.map(c => (
-                <TouchableOpacity
-                  key={c}
-                  onPress={() => setCategory(c)}
-                  style={[styles.chip, category === c && styles.chipActive]}
-                >
-                  <Text style={[styles.chipText, category === c && styles.chipTextActive]}>{c}</Text>
-                </TouchableOpacity>
+      {/* ── Category — hidden in signup flow (already selected), editable in edit mode ── */}
+      {!initialCategory && (
+        <SectionCard title="Category *">
+          {SERVICE_CATEGORY_GROUPS.map(({ group, items }) => (
+            <View key={group} style={styles.categoryGroup}>
+              <Text style={styles.categoryGroupLabel}>{group}</Text>
+              <View style={styles.chipWrap}>
+                {items.map(c => (
+                  <TouchableOpacity
+                    key={c}
+                    onPress={() => { if (c !== category) { setCategory(c); setPricingDetails({}); } }}
+                    style={[styles.chip, category === c && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, category === c && styles.chipTextActive]}>{c}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))}
+        </SectionCard>
+      )}
+
+      {/* ── Category Pricing Questions ── */}
+      {Boolean(category && CATEGORY_QUESTIONS[category]) && (
+        <SectionCard title="Service Pricing *">
+          <Text style={styles.pricingNote}>
+            Please answer each question about your pricing. We'll use your answers to create quick, accurate estimates for specific jobs. You'll always review and approve an estimate before it's sent to a customer.
+          </Text>
+          {CATEGORY_QUESTIONS[category].map(({ service, questions }) => (
+            <View key={service} style={styles.pricingGroup}>
+              <Text style={styles.pricingServiceTitle}>{service}</Text>
+              {questions.map(({ label, placeholder }) => (
+                <Field
+                  key={label}
+                  label={label}
+                  value={pricingDetails[service]?.[label] || ''}
+                  onChangeText={v => updatePricing(service, label, v)}
+                  placeholder={placeholder}
+                />
               ))}
             </View>
-          </View>
-        ))}
-      </SectionCard>
+          ))}
+        </SectionCard>
+      )}
 
       {/* ── Description ── */}
       <SectionCard title="Description">
@@ -455,6 +972,8 @@ const styles = StyleSheet.create({
   },
   textArea: { height: 110, textAlignVertical: 'top' },
 
+  categoryLockedRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  categoryLockedNote: { fontSize: 12, color: '#9CA3AF', fontStyle: 'italic' },
   categoryGroup:      { marginBottom: 16 },
   categoryGroupLabel: { fontSize: 12, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', marginBottom: 8 },
   chipWrap:           { flexDirection: 'row', flexWrap: 'wrap' },
@@ -501,6 +1020,20 @@ const styles = StyleSheet.create({
   },
   addPhotoBtnIcon: { fontSize: 24, color: '#9CA3AF', lineHeight: 28 },
   addPhotoBtnText: { fontSize: 11, color: '#9CA3AF', fontWeight: '600' },
+
+  pricingNote: {
+    fontSize: 13, color: '#6B7280', marginBottom: 16, lineHeight: 18,
+  },
+  pricingGroup: {
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  pricingServiceTitle: {
+    fontSize: 14, fontWeight: '800', color: '#0A8A4A',
+    marginBottom: 12, letterSpacing: 0.2,
+  },
 
   submitButton: {
     backgroundColor: '#0A8A4A', paddingVertical: 18,

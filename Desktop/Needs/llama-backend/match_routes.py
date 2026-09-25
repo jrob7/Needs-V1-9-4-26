@@ -1087,3 +1087,80 @@ def find_matches():
 
     # ── ITEM (passthrough) ────────────────────────────────────────────────────
     return jsonify({"type": "item", "matches": [], "context": {}})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /ai/generateServiceQuote
+#
+# Given a need description and a service's pricingDetails, uses the LLM to
+# identify the best matching sub-service and estimate a price range.
+#
+# Body:    { needText, serviceName, serviceCategory, pricingDetails }
+# Returns: { subService, estimate, estimateMin, estimateMax, breakdown }
+# ─────────────────────────────────────────────────────────────────────────────
+@match_bp.route("/generateServiceQuote", methods=["POST"])
+def generate_service_quote():
+    data          = request.get_json(force=True, silent=True) or {}
+    need_text     = (data.get("needText") or "").strip()
+    service_name  = (data.get("serviceName") or "").strip()
+    service_cat   = (data.get("serviceCategory") or "").strip()
+    pricing       = data.get("pricingDetails") or {}
+
+    if not need_text or not pricing:
+        return jsonify({"error": "needText and pricingDetails required"}), 400
+
+    # Build compact pricing summary
+    lines = []
+    for sub, questions in pricing.items():
+        lines.append(f"  {sub}:")
+        for q, a in (questions or {}).items():
+            lines.append(f"    - {q} {a}")
+    pricing_text = "\n".join(lines)
+
+    prompt = (
+        f'A customer needs: "{need_text}"\n\n'
+        f"Service provider: {service_name} ({service_cat})\n"
+        f"Their pricing details:\n{pricing_text}\n\n"
+        "Based on the customer's request, identify:\n"
+        "1. The best matching sub-service (exact name from the pricing list above)\n"
+        "2. A price estimate or range (e.g. \"$120\" or \"$95-$150\")\n"
+        "3. A one-sentence breakdown explaining the estimate\n"
+        "4. estimateMin: the lower bound as a plain number (no $ sign)\n"
+        "5. estimateMax: the upper bound as a plain number (no $ sign)\n\n"
+        "Respond ONLY with a JSON object with these keys: "
+        "subService, estimate, estimateMin, estimateMax, breakdown\n"
+        "If the request doesn't match any sub-service, pick the closest one.\n"
+        "Do NOT include any text outside the JSON."
+    )
+
+    try:
+        raw = generate_response(prompt)
+        raw = raw.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+        result = json.loads(raw)
+        # Coerce numeric fields
+        for key in ("estimateMin", "estimateMax"):
+            val = result.get(key)
+            if val is not None:
+                try:
+                    result[key] = float(str(val).replace("$", "").replace(",", "").strip())
+                except (ValueError, TypeError):
+                    result[key] = None
+        return jsonify(result)
+    except Exception as e:
+        logging.warning(f"generateServiceQuote LLM/parse error: {e}")
+        # Graceful fallback
+        first_sub = next(iter(pricing), "Service")
+        return jsonify({
+            "subService": first_sub,
+            "estimate": "Quote pending",
+            "estimateMin": None,
+            "estimateMax": None,
+            "breakdown": "Estimate will be confirmed by the provider.",
+        })

@@ -552,6 +552,7 @@ export default function SearchScreen() {
         mediaType: mediaForNeed?.type || null, mediaUri: resolvedMediaUri,
         fileName: mediaForNeed?.fileName || 'media', userId: currentUserId,
         location: locationGeoJSON(),
+        ...(needType === 'service' ? { serviceMatchStatus: 'processing' } : {}),
       };
       console.log('📎 [PAYLOAD] mediaType:', needPayload.mediaType, '| mediaUri:', needPayload.mediaUri?.slice(0, 80));
 
@@ -571,22 +572,19 @@ export default function SearchScreen() {
       setLastCreatedNeed(createdNeed);
 
       if (needType === 'service') {
-        pushAI('Your service request has been created! Finding matching providers...');
-        try {
-          const matchRes = await axios.post(`${FLASK_API}/ai/findMatches`, { query: finalText, type: 'service', ...locationParams() });
-          const matches = matchRes.data?.matches || [];
-          if (matches.length === 0) {
-            pushAI("No matching providers found yet — your request is live on the feed. Feel free to describe another need anytime.");
-            setLastCreatedNeed(null);
-          } else {
-            navigation.navigate('MatchResults', { matches, type: 'service', query: finalText });
-            pushAI(`Found ${matches.length} service provider${matches.length > 1 ? 's' : ''} for you!`,
-              { matches, query: finalText, type: 'service' });
-          }
-        } catch (e) {
-          pushAI(`Your service request has been created. Would you like to view it or create another request?${FUNDRAISERS_ENABLED ? ' Or start a fundraiser?' : ''}`);
-          setAwaitingDecision(true);
+        pushAI("I've got everything I need. I'm now finding 3 services that match your request and generating quotes based on their service expertise, availability, and pricing.");
+        // Trigger background matching — fire and forget
+        if (createdNeed?._id) {
+          const loc = locationRef.current;
+          api.post(`${NODE_API}/triggerServiceMatching`, {
+            needId: String(createdNeed._id),
+            userId: currentUserId,
+            query: finalText,
+            ...(loc?.lat != null && loc?.lng != null ? { userLat: loc.lat, userLng: loc.lng } : {}),
+            ...(loc?.city ? { userCity: loc.city } : {}),
+          }).catch(e => console.warn('⚠️ triggerServiceMatching failed:', e?.message));
         }
+        pushAI("Your Need has been created and added to your Need Stack.", { viewNeedStack: true });
         return;
       }
 
@@ -970,36 +968,40 @@ export default function SearchScreen() {
               console.log('⚠️ Readiness check failed, proceeding without it:', e?.message);
             }
 
-            const loc = locationRef.current;
-            const res = await axios.post(`${FLASK_API}/ai/findMatches`, {
-              query: enhancedText, type: 'service',
-              ...(loc?.lat != null && loc?.lng != null ? { userLat: loc.lat, userLng: loc.lng } : {}),
-              ...(loc?.city ? { userCity: loc.city } : {}),
-            });
             setConversation((prev) => prev.filter((m) => !m.aiThinking));
-            const matches = res.data?.matches || [];
-            if (matches.length === 0) {
-              pushAI("Good, I posted your request for providers to fulfill in the Needs Stack. But, I couldn't find any matching service providers yet. Check back shortly to see which providers can fulfill your request  !");
-            } else {
-              navigation.navigate('MatchResults', { matches, type: 'service', query: enhancedText });
-              pushAI(`Found ${matches.length} service provider${matches.length > 1 ? 's' : ''} matching your request!`,
-                { matches, query: enhancedText, type: 'service' });
-            }
+            pushAI("I've got everything I need. I'm now finding 3 services that match your request and generating quotes based on their service expertise, availability, and pricing.");
+
+            let newServiceNeed = null;
             if (currentUserId) {
-              const initialMatchNames = matches.map(m => (m.businessName || m.name || '').toLowerCase()).filter(Boolean);
-              const mediaHttpUri = media ? await uploadMediaAndGetUri(media) : null;
-              api.post(`${NODE_API}/createNeedRequest`, {
-                searchText: enhancedText, urgency: 'ASAP',
-                bidprice: extractPriceFromText(enhancedText), context: enhancedText,
-                needType: 'service', userId: currentUserId,
-                mediaType: media?.type || null,
-                mediaUri: mediaHttpUri,
-                fileName: media?.fileName || 'media',
-                initialMatchNames,
-                location: locationGeoJSON(),
-              }).then(r => { setLastCreatedNeed(r.data); })
-                .catch(e => console.log('Service NeedRequest save failed:', e?.message));
+              try {
+                const mediaHttpUri = media ? await uploadMediaAndGetUri(media) : null;
+                const createRes = await api.post(`${NODE_API}/createNeedRequest`, {
+                  searchText: enhancedText, urgency: 'ASAP',
+                  bidprice: extractPriceFromText(enhancedText), context: enhancedText,
+                  needType: 'service', userId: currentUserId,
+                  serviceMatchStatus: 'processing',
+                  mediaType: media?.type || null,
+                  mediaUri: mediaHttpUri,
+                  fileName: media?.fileName || 'media',
+                  location: locationGeoJSON(),
+                });
+                newServiceNeed = createRes.data;
+                setLastCreatedNeed(newServiceNeed);
+                invalidateTab2Cache();
+                // Fire-and-forget background matching
+                const loc = locationRef.current;
+                api.post(`${NODE_API}/triggerServiceMatching`, {
+                  needId: String(newServiceNeed._id),
+                  userId: currentUserId,
+                  query: enhancedText,
+                  ...(loc?.lat != null && loc?.lng != null ? { userLat: loc.lat, userLng: loc.lng } : {}),
+                  ...(loc?.city ? { userCity: loc.city } : {}),
+                }).catch(e => console.warn('⚠️ triggerServiceMatching failed:', e?.message));
+              } catch (e) {
+                console.log('Service NeedRequest save failed:', e?.message);
+              }
             }
+            pushAI("Your Need has been created and added to your Need Stack.", { viewNeedStack: true });
           } catch (e) {
             setConversation((prev) => prev.filter((m) => !m.aiThinking));
             pushAI('Could not search services right now. Please try again.');
@@ -1167,6 +1169,17 @@ export default function SearchScreen() {
                       View {msg.matchData.matches.length}{' '}
                       {msg.matchData.type === 'food' ? 'Restaurant' : 'Provider'}{msg.matchData.matches.length !== 1 ? 's' : ''} →
                     </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* ── View in Need Stack button — service needs logic flow ── */}
+                {msg.matchData?.viewNeedStack && (
+                  <TouchableOpacity
+                    style={styles.viewResultsBtn}
+                    onPress={() => navigation.navigate('Fill Needs')}
+                  >
+                    <Ionicons name="list-outline" size={13} color="#2563EB" />
+                    <Text style={styles.viewResultsTxt}>View in Need Stack →</Text>
                   </TouchableOpacity>
                 )}
               </View>

@@ -454,6 +454,7 @@ app.post('/login', async (req, res) => {
       date: new Date(),
       location: geoLocation || { type: "Point", coordinates: [] }, // ✅ always present
       initialMatchNames: Array.isArray(initialMatchNames) ? initialMatchNames : [], // ← Tab2 exclusion list
+      serviceMatchStatus: req.body.serviceMatchStatus || null,
     };
 
     const result = await needRequestsCollection.insertOne(newNeedRequest);
@@ -2958,6 +2959,284 @@ app.post('/createNotification', async (req, res) => {
     res.json({ success: true, _id: result.insertedId.toString() });
   } catch (err) {
     console.error('❌ /createNotification error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ─── Needs Logic Flow: Service Matching ───────────────────────────────────────
+// POST /triggerServiceMatching — returns immediately; runs background matching
+app.post('/triggerServiceMatching', async (req, res) => {
+  const { needId, userId, query, userLat, userLng, userCity } = req.body;
+  if (!needId || !ObjectId.isValid(needId)) {
+    return res.status(400).json({ error: 'needId required' });
+  }
+  res.json({ success: true });
+
+  setImmediate(async () => {
+    const needObjId = new ObjectId(needId);
+    try {
+      // 1. Mark finding_matches
+      await database.collection('NeedRequests').updateOne(
+        { _id: needObjId },
+        { $set: { serviceMatchStatus: 'finding_matches' } }
+      );
+
+      // 2. Find top 3 matching services
+      const matchRes = await fetch(`${FLASK_API}/ai/findMatches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          type: 'service',
+          ...(userLat != null && userLng != null ? { userLat, userLng } : {}),
+          ...(userCity ? { userCity } : {}),
+        }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const matchData = await matchRes.json();
+      const matches = (matchData?.matches || []).slice(0, 3);
+
+      if (matches.length === 0) {
+        await database.collection('NeedRequests').updateOne(
+          { _id: needObjId },
+          { $set: { serviceMatchStatus: 'no_matches', quoteCount: 0 } }
+        );
+        return;
+      }
+
+      // 3. Mark generating_quotes
+      await database.collection('NeedRequests').updateOne(
+        { _id: needObjId },
+        { $set: { serviceMatchStatus: 'generating_quotes' } }
+      );
+
+      // 4. Generate a quote (or send lead) for each matched service
+      let quoteCount = 0;
+      for (const match of matches) {
+        try {
+          const serviceDoc = await database.collection('Services').findOne(
+            match._id && ObjectId.isValid(String(match._id))
+              ? { _id: new ObjectId(String(match._id)) }
+              : { businessName: match.businessName || match.name }
+          );
+          if (!serviceDoc) continue;
+
+          const hasPricing = serviceDoc.pricingDetails &&
+            Object.keys(serviceDoc.pricingDetails).length > 0;
+
+          if (hasPricing) {
+            // Use LLM to generate a quote from pricingDetails
+            const qRes = await fetch(`${FLASK_API}/ai/generateServiceQuote`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                needText: query,
+                serviceName: serviceDoc.businessName,
+                serviceCategory: serviceDoc.category,
+                pricingDetails: serviceDoc.pricingDetails,
+              }),
+              signal: AbortSignal.timeout(15000),
+            });
+            const qData = await qRes.json();
+
+            const quoteDoc = {
+              needId: needObjId,
+              userId: ObjectId.isValid(String(userId)) ? new ObjectId(String(userId)) : null,
+              serviceId: serviceDoc._id,
+              serviceUserId: serviceDoc.userId || null,
+              businessName: serviceDoc.businessName,
+              businessLogoUrl: (serviceDoc.portfolioImageUrls || [])[0] || null,
+              subService: qData.subService || null,
+              estimateMin: qData.estimateMin ?? null,
+              estimateMax: qData.estimateMax ?? null,
+              estimate: qData.estimate || null,
+              breakdown: qData.breakdown || null,
+              needText: query,
+              status: 'pending_business',
+              createdAt: new Date(),
+            };
+            const inserted = await database.collection('ServiceQuotes').insertOne(quoteDoc);
+            quoteCount++;
+
+            // Notify the business
+            if (serviceDoc.userId) {
+              await database.collection('Notifications').insertOne({
+                userId: serviceDoc.userId,
+                fromUserId: ObjectId.isValid(String(userId)) ? new ObjectId(String(userId)) : null,
+                type: 'quote_request',
+                title: '⚡ New Quote Request',
+                body: `"${(query || '').slice(0, 70)}"`,
+                needId: needObjId,
+                quoteId: inserted.insertedId,
+                needText: query,
+                estimateMin: qData.estimateMin ?? null,
+                estimateMax: qData.estimateMax ?? null,
+                subService: qData.subService || null,
+                businessName: serviceDoc.businessName,
+                read: false,
+                createdAt: new Date(),
+              });
+            }
+          } else {
+            // No pricing — fall back to lead notification
+            if (serviceDoc.userId) {
+              await database.collection('Notifications').insertOne({
+                userId: serviceDoc.userId,
+                fromUserId: ObjectId.isValid(String(userId)) ? new ObjectId(String(userId)) : null,
+                type: 'lead',
+                title: '🔔 New Service Lead',
+                body: `"${(query || '').slice(0, 80)}"`,
+                needId: needObjId,
+                needText: query,
+                read: false,
+                createdAt: new Date(),
+              });
+            }
+          }
+        } catch (matchErr) {
+          console.error('⚠️ Quote gen error for', match.businessName, matchErr?.message);
+        }
+      }
+
+      // 5. Final status update
+      const finalStatus = quoteCount > 0 ? 'quotes_ready' : 'leads_sent';
+      await database.collection('NeedRequests').updateOne(
+        { _id: needObjId },
+        { $set: { serviceMatchStatus: finalStatus, quoteCount } }
+      );
+
+      // 6. Notify the user when quotes are ready
+      if (quoteCount > 0 && userId && ObjectId.isValid(String(userId))) {
+        await database.collection('Notifications').insertOne({
+          userId: new ObjectId(String(userId)),
+          type: 'match',
+          title: `🎉 ${quoteCount} Quote${quoteCount > 1 ? 's' : ''} Ready`,
+          body: `Quotes are ready for: "${(query || '').slice(0, 50)}"`,
+          needId: needObjId,
+          quoteCount,
+          read: false,
+          createdAt: new Date(),
+        });
+      }
+      console.log(`✅ triggerServiceMatching: ${quoteCount} quotes, status=${finalStatus}`);
+    } catch (err) {
+      console.error('❌ triggerServiceMatching error:', err?.message);
+      try {
+        await database.collection('NeedRequests').updateOne(
+          { _id: needObjId },
+          { $set: { serviceMatchStatus: 'error' } }
+        );
+      } catch (_) {}
+    }
+  });
+});
+
+// GET /serviceQuotes?needId=X — fetch quotes for a need
+app.get('/serviceQuotes', async (req, res) => {
+  try {
+    const { needId } = req.query;
+    if (!needId || !ObjectId.isValid(needId)) {
+      return res.status(400).json({ error: 'needId required' });
+    }
+    const quotes = await database.collection('ServiceQuotes')
+      .find({ needId: new ObjectId(needId) })
+      .sort({ createdAt: 1 })
+      .toArray();
+    res.json(quotes.map(q => ({
+      ...q,
+      _id: q._id.toString(),
+      needId: q.needId?.toString(),
+      userId: q.userId?.toString() || null,
+      serviceId: q.serviceId?.toString() || null,
+      serviceUserId: q.serviceUserId?.toString() || null,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /needRequest/:id — fetch a single NeedRequest by _id (for ServiceNeedCard polling)
+app.get('/needRequest/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+    const doc = await database.collection('NeedRequests').findOne({ _id: new ObjectId(id) });
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    res.json({ ...doc, _id: doc._id.toString(), userId: doc.userId?.toString() || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /respondToServiceQuote — business confirms, edits price, or asks a question
+// No requireAuth — quoteId is a 24-char ObjectId that acts as the access token
+app.post('/respondToServiceQuote', async (req, res) => {
+  try {
+    const { quoteId, action, editedPrice, message } = req.body;
+    if (!quoteId || !ObjectId.isValid(quoteId)) {
+      return res.status(400).json({ error: 'quoteId required' });
+    }
+    const quote = await database.collection('ServiceQuotes')
+      .findOne({ _id: new ObjectId(quoteId) });
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    if (action === 'confirm') {
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: new ObjectId(quoteId) },
+        { $set: { status: 'confirmed_by_business', updatedAt: new Date() } }
+      );
+      if (quote.userId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.userId,
+          type: 'match',
+          title: '✅ Quote Confirmed',
+          body: `${quote.businessName} confirmed your quote${quote.estimate ? ` for ${quote.estimate}` : ''}`,
+          needId: quote.needId,
+          quoteId: new ObjectId(quoteId),
+          read: false,
+          createdAt: new Date(),
+        });
+      }
+    } else if (action === 'edit') {
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: new ObjectId(quoteId) },
+        { $set: { estimate: editedPrice, status: 'edited_by_business', updatedAt: new Date() } }
+      );
+      if (quote.userId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.userId,
+          type: 'match',
+          title: '✏️ Quote Updated',
+          body: `${quote.businessName} sent an updated quote${editedPrice ? `: ${editedPrice}` : ''}`,
+          needId: quote.needId,
+          quoteId: new ObjectId(quoteId),
+          read: false,
+          createdAt: new Date(),
+        });
+      }
+    } else if (action === 'ask') {
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: new ObjectId(quoteId) },
+        { $set: { status: 'awaiting_info', updatedAt: new Date() } }
+      );
+      if (quote.userId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.userId,
+          type: 'match',
+          title: `Question from ${quote.businessName}`,
+          body: message || 'The provider has a question about your request.',
+          fromUserId: quote.serviceUserId,
+          needId: quote.needId,
+          quoteId: new ObjectId(quoteId),
+          read: false,
+          createdAt: new Date(),
+        });
+      }
+    } else {
+      return res.status(400).json({ error: 'action must be confirm, edit, or ask' });
+    }
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

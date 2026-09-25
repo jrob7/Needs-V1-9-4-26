@@ -8,7 +8,7 @@ import Svg, { Path } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { UserContext } from '../server/CurrentUser';
-import UploadService from './UploadService';
+import UploadService, { SERVICE_CATEGORY_GROUPS } from './UploadService';
 import UploadRestaurant from './UploadRestaurant';
 import UploadNonprofit from './UploadNonprofit';
 
@@ -148,6 +148,7 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
   const [step, setStep] = useState('type');
   const [accountTypeChoice, setAccountTypeChoice] = useState(null); // 'individual' | 'business'
   const [bizTypeChoice, setBizTypeChoice] = useState(null); // 'service' | 'restaurant' | 'nonprofit'
+  const [selectedCategory, setSelectedCategory] = useState('');
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -215,7 +216,11 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
       return;
     }
     if (isBusiness) {
-      setStep('business');
+      if (bizTypeChoice === 'service') {
+        setStep('categorySelect');
+      } else {
+        setStep('business');
+      }
     } else {
       setStep('individualDetails');
     }
@@ -286,8 +291,62 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
           ) : bizTypeChoice === 'nonprofit' ? (
             <UploadNonprofit onSubmitSuccess={finishBusinessSignup} onBack={() => setStep('form')} pendingAccount={pendingAccount} />
           ) : (
-            <UploadService onSubmitSuccess={finishBusinessSignup} onBack={() => setStep('form')} pendingAccount={pendingAccount} />
+            <UploadService key={selectedCategory} onSubmitSuccess={finishBusinessSignup} onBack={() => setStep('categorySelect')} pendingAccount={pendingAccount} initialCategory={selectedCategory} />
           )}
+        </View>
+      )}
+
+      {/* ── Category select: full-screen scrollable (no card) ── */}
+      {step === 'categorySelect' && (
+        <View style={[styles.screen, { justifyContent: 'flex-start' }]}>
+          <Svg style={styles.waveBack} viewBox="0 0 100 30" preserveAspectRatio="none">
+            <Path d="M0,12 C25,28 75,5 100,18 L100,30 L0,30 Z" fill="#DCE9FB" />
+          </Svg>
+          <Svg style={styles.waveFront} viewBox="0 0 100 22" preserveAspectRatio="none">
+            <Path d="M0,16 C30,2 70,26 100,14 L100,22 L0,22 Z" fill="#C7DCF6" />
+          </Svg>
+          <ScrollView
+            style={{ flex: 1, width: '100%' }}
+            contentContainerStyle={styles.categoryScroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.title}>What service do you provide?</Text>
+            <Text style={styles.subtitle}>Select the category that best describes your work</Text>
+
+            {SERVICE_CATEGORY_GROUPS.map(({ group, items }) => (
+              <View key={group} style={{ width: '100%', marginBottom: 8 }}>
+                <Text style={styles.categoryGroupLabel}>{group.toUpperCase()}</Text>
+                <View style={styles.chipWrap}>
+                  {items.map(c => (
+                    <TouchableOpacity
+                      key={c}
+                      onPress={() => setSelectedCategory(c)}
+                      style={[styles.chip, selectedCategory === c && styles.chipActive]}
+                    >
+                      <Text style={[styles.chipText, selectedCategory === c && styles.chipTextActive]}>{c}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ))}
+
+            <TouchableOpacity
+              style={[styles.signInButton, { marginTop: 16 }]}
+              onPress={() => {
+                if (!selectedCategory) {
+                  Alert.alert('Select a category', 'Please choose a service category to continue.');
+                  return;
+                }
+                setStep('business');
+              }}
+            >
+              <Text style={styles.signInButtonText}>Next →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setStep('form')} style={styles.cancelWrap}>
+              <Text style={styles.cancelText}>← Back</Text>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       )}
 
@@ -543,6 +602,24 @@ const styles = StyleSheet.create({
   },
   choiceBtnIcon: { marginRight: 12 },
   choiceBtnText: { fontSize: 17, fontWeight: '700', color: '#2563EB', flexShrink: 1 },
+
+  // ── Category select step ─────────────────────────────────────
+  categoryScroll: {
+    paddingHorizontal: 26, paddingTop: 60, paddingBottom: 60,
+    maxWidth: 460, width: '100%', alignSelf: 'center',
+  },
+  categoryGroupLabel: {
+    fontSize: 11, fontWeight: '700', color: '#94A3B8', letterSpacing: 1,
+    marginBottom: 8, marginTop: 4,
+  },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+    borderWidth: 1.5, borderColor: '#CBD5E1', backgroundColor: '#F8FAFC',
+  },
+  chipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  chipText: { fontSize: 13, fontWeight: '600', color: '#475569' },
+  chipTextActive: { color: '#fff' },
 });
 
 export default CreateNewUser;

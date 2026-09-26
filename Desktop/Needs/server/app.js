@@ -2643,6 +2643,33 @@ app.delete('/auth/google/calendar', requireAuth, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET /calendar/monthEvents?month=YYYY-MM&serviceUserId=xxx
+// Returns which days of the month have calendar events (busy days).
+app.get('/calendar/monthEvents', async (req, res) => {
+  try {
+    const { month, serviceUserId } = req.query;
+    if (!month || !serviceUserId || !ObjectId.isValid(serviceUserId)) {
+      return res.status(400).json({ error: 'month and serviceUserId required' });
+    }
+    const user = await database.collection('Users').findOne(
+      { _id: new ObjectId(serviceUserId) },
+      { projection: { 'googleCalendar.tokens': 1 } }
+    );
+    if (!user?.googleCalendar?.tokens) {
+      return res.json({ connected: false, busyDays: [] });
+    }
+    const [year, m] = month.split('-').map(Number);
+    const monthStart = new Date(year, m - 1, 1);
+    const monthEnd   = new Date(year, m, 1);
+    const busySlots  = await gcal.getBusySlots(user.googleCalendar.tokens, monthStart, monthEnd);
+    const busyDaySet = new Set(busySlots.map(s => {
+      const d = new Date(s.start);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }));
+    res.json({ connected: true, busyDays: [...busyDaySet] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // GET /calendar/slots?date=YYYY-MM-DD&serviceUserId=xxx
 // Returns available 1-hour slots on the given date from the provider's calendar.
 app.get('/calendar/slots', async (req, res) => {

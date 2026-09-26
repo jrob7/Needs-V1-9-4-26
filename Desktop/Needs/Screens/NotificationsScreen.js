@@ -157,13 +157,11 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
 };
 
 // A quote_request — auto-generated quote sent to a business for 1-tap response.
-const QuoteRequestRow = ({ item, onConfirm, onEdit, onAsk, responding }) => {
+// Business-facing quote_request row — Confirm/Edit open RespondToLeadModal (same as leads);
+// Ask sends the AI info-request to the user's Messages.
+const QuoteRequestRow = ({ item, onRespond, onRequestMoreInfo }) => {
   const cfg = NOTIF_ICONS.quote_request;
   const hasEstimate = item.estimateMin != null && item.estimateMax != null;
-  const [editPrice, setEditPrice] = useState('');
-  const [showEdit, setShowEdit] = useState(false);
-  const [showAsk, setShowAsk] = useState(false);
-  const [askText, setAskText] = useState('');
 
   return (
     <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
@@ -187,74 +185,25 @@ const QuoteRequestRow = ({ item, onConfirm, onEdit, onAsk, responding }) => {
           </Text>
         ) : null}
 
-        {!showEdit && !showAsk && (
+        {item.responded ? (
+          <Text style={[styles.rowBody, { color: '#10B981', marginTop: 6, fontWeight: '600' }]}>
+            ✓ Response sent — check your Messages
+          </Text>
+        ) : (
           <View style={styles.leadButtonsRow}>
+            {/* Confirm and Edit Price both open RespondToLeadModal to schedule + message the user */}
             <TouchableOpacity
               style={[styles.respondBtn, { backgroundColor: '#10B981' }]}
-              onPress={() => onConfirm(item)}
-              disabled={responding === item._id}
+              onPress={() => onRespond(item)}
             >
-              <Text style={styles.respondBtnText}>
-                {responding === item._id ? 'Confirming…' : '✓ Confirm'}
-              </Text>
+              <Text style={styles.respondBtnText}>✓ Confirm & Schedule</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.requestInfoBtn]}
-              onPress={() => setShowEdit(true)}
-            >
+            <TouchableOpacity style={styles.requestInfoBtn} onPress={() => onRespond(item)}>
               <Text style={styles.requestInfoBtnText}>✏️ Edit Price</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.requestInfoBtn]}
-              onPress={() => setShowAsk(true)}
-            >
+            <TouchableOpacity style={styles.requestInfoBtn} onPress={() => onRequestMoreInfo(item)}>
               <Text style={styles.requestInfoBtnText}>💬 Ask</Text>
             </TouchableOpacity>
-          </View>
-        )}
-
-        {showEdit && (
-          <View style={{ marginTop: 8 }}>
-            <TextInput
-              style={[styles.rowBody, { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, marginBottom: 6 }]}
-              placeholder="Adjusted price (e.g. $130)"
-              value={editPrice}
-              onChangeText={setEditPrice}
-            />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity
-                style={[styles.respondBtn, { backgroundColor: '#2563EB' }]}
-                onPress={() => { onEdit(item, editPrice); setShowEdit(false); }}
-              >
-                <Text style={styles.respondBtnText}>Send Updated Quote</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.requestInfoBtn} onPress={() => setShowEdit(false)}>
-                <Text style={styles.requestInfoBtnText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {showAsk && (
-          <View style={{ marginTop: 8 }}>
-            <TextInput
-              style={[styles.rowBody, { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, marginBottom: 6 }]}
-              placeholder="Your question for the customer…"
-              value={askText}
-              onChangeText={setAskText}
-              multiline
-            />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity
-                style={[styles.respondBtn, { backgroundColor: '#8B5CF6' }]}
-                onPress={() => { onAsk(item, askText); setShowAsk(false); }}
-              >
-                <Text style={styles.respondBtnText}>Send Question</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.requestInfoBtn} onPress={() => setShowAsk(false)}>
-                <Text style={styles.requestInfoBtnText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         )}
       </View>
@@ -403,7 +352,6 @@ const NotificationsScreen = () => {
   const [appointments, setAppointments] = useState([]);
   const [respondTarget, setRespondTarget] = useState(null);
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
-  const [respondingQuoteId, setRespondingQuoteId] = useState(null);
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
 
@@ -556,25 +504,6 @@ const NotificationsScreen = () => {
 
   const handleRespond = (item) => setRespondTarget(item);
 
-  const handleQuoteAction = async (item, action, extraData) => {
-    setRespondingQuoteId(item._id);
-    try {
-      await authFetch(`${NODE_API}/respondToServiceQuote`, {
-        method: 'POST',
-        body: JSON.stringify({
-          quoteId: item.quoteId?.toString() || item._id,
-          action,
-          editedPrice: extraData,
-          message: extraData,
-        }),
-      });
-      setNotifications(prev => prev.map(n => n._id === item._id ? { ...n, read: true, responded: true } : n));
-    } catch (e) {
-      Alert.alert('Error', 'Could not send response. Please try again.');
-    } finally {
-      setRespondingQuoteId(null);
-    }
-  };
 
   // Fully automated — the business just taps the button. We resolve their
   // own display name, ask the AI for the top missing-detail questions for
@@ -795,10 +724,8 @@ const NotificationsScreen = () => {
               : item.type === 'quote_request'
                 ? <QuoteRequestRow
                     item={item}
-                    onConfirm={i => handleQuoteAction(i, 'confirm')}
-                    onEdit={(i, price) => handleQuoteAction(i, 'edit', price)}
-                    onAsk={(i, msg) => handleQuoteAction(i, 'ask', msg)}
-                    responding={respondingQuoteId}
+                    onRespond={i => handleRespond(i)}
+                    onRequestMoreInfo={i => handleRequestMoreInfo(i)}
                   />
                 : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
           )}

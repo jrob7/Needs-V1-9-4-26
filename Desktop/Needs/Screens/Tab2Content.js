@@ -431,13 +431,13 @@ export default function NeedInquiryView() {
 // ServiceNeedCard — expressive lifecycle card for service needs in the new flow
 // ─────────────────────────────────────────────────────────────────────────────
 const STATUS_STEPS = {
-  processing:         { label: 'Processing your request…',           icon: 'time-outline',           color: '#94A3B8' },
-  finding_matches:    { label: 'Finding matching services…',         icon: 'search-outline',          color: '#F59E0B' },
-  generating_quotes:  { label: 'Generating quotes…',                 icon: 'document-text-outline',   color: '#3B82F6' },
-  quotes_ready:       { label: 'Quotes Ready',                        icon: 'checkmark-circle-outline', color: '#10B981' },
-  leads_sent:         { label: 'Providers notified',                  icon: 'notifications-outline',   color: '#8B5CF6' },
-  no_matches:         { label: 'No matches found yet',               icon: 'alert-circle-outline',    color: '#94A3B8' },
-  error:              { label: 'Something went wrong',               icon: 'warning-outline',         color: '#EF4444' },
+  processing:         { label: 'Pending Matches', icon: 'time-outline',              color: '#F59E0B' },
+  finding_matches:    { label: 'Pending Matches', icon: 'search-outline',             color: '#F59E0B' },
+  generating_quotes:  { label: 'Pending Matches', icon: 'document-text-outline',     color: '#F59E0B' },
+  quotes_ready:       { label: 'Pending Matches', icon: 'hourglass-outline',          color: '#F59E0B' },
+  leads_sent:         { label: 'Pending Matches', icon: 'notifications-outline',      color: '#F59E0B' },
+  no_matches:         { label: 'No Matches Found', icon: 'alert-circle-outline',     color: '#94A3B8' },
+  error:              { label: 'Something Went Wrong', icon: 'warning-outline',      color: '#EF4444' },
 };
 
 function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
@@ -550,24 +550,24 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
           )}
         </View>
 
-        {/* View Quotes button */}
-        {status === 'quotes_ready' && (
+        {/* View Matches button — appears once matches/quotes have been found */}
+        {quoteCount > 0 && (
           <TouchableOpacity
             style={svcStyles.viewQuotesBtn}
             onPress={() => setQuotesVisible(true)}
             activeOpacity={0.8}
           >
-            <Ionicons name="document-text-outline" size={14} color="#fff" />
+            <Ionicons name="people-outline" size={14} color="#fff" />
             <Text style={svcStyles.viewQuotesBtnText}>
-              View {quoteCount > 0 ? `${quoteCount} ` : ''}Quote{quoteCount !== 1 ? 's' : ''}
+              View Matches ({quoteCount})
             </Text>
           </TouchableOpacity>
         )}
 
-        {/* Leads-sent fallback */}
-        {status === 'leads_sent' && (
+        {/* Leads-sent fallback (no auto-pricing available) */}
+        {status === 'leads_sent' && quoteCount === 0 && (
           <Text style={svcStyles.leadsSentText}>
-            Providers have been notified and will respond shortly.
+            Providers have been notified and will respond in Messages.
           </Text>
         )}
       </View>
@@ -578,39 +578,16 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
         quotes={quotes}
         needText={need?.searchText}
         onClose={() => setQuotesVisible(false)}
-        onQuoteConfirmed={() => {
-          setQuotesVisible(false);
-          setNeed(prev => ({ ...prev, serviceMatchStatus: 'leads_sent' }));
-        }}
       />
     </View>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ServiceQuotesModal — swipeable list of auto-generated quotes
+// ServiceQuotesModal — matched businesses with auto-estimated prices.
+// Businesses respond via their Notifications → RespondToLeadModal → Messages.
 // ─────────────────────────────────────────────────────────────────────────────
-function ServiceQuotesModal({ visible, quotes, needText, onClose, onQuoteConfirmed }) {
-  const [confirming, setConfirming] = useState(null); // quoteId being confirmed
-  const [confirmed, setConfirmed] = useState(new Set());
-
-  const handleConfirm = async (quote) => {
-    setConfirming(quote._id);
-    try {
-      await fetch(`${API}/respondToServiceQuote`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quoteId: quote._id, action: 'confirm' }),
-      });
-      setConfirmed(prev => new Set(prev).add(quote._id));
-      onQuoteConfirmed?.();
-    } catch (e) {
-      console.warn('⚠️ Confirm quote failed:', e?.message);
-    } finally {
-      setConfirming(null);
-    }
-  };
-
+function ServiceQuotesModal({ visible, quotes, needText, onClose }) {
   if (!visible) return null;
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
@@ -619,7 +596,7 @@ function ServiceQuotesModal({ visible, quotes, needText, onClose, onQuoteConfirm
           <TouchableOpacity onPress={onClose} style={{ padding: 8 }}>
             <Ionicons name="chevron-down" size={24} color="#374151" />
           </TouchableOpacity>
-          <Text style={svcStyles.modalTitle}>Quotes for Your Request</Text>
+          <Text style={svcStyles.modalTitle}>Your Matched Services</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -630,11 +607,18 @@ function ServiceQuotesModal({ visible, quotes, needText, onClose, onQuoteConfirm
           </View>
         ) : null}
 
+        <View style={svcStyles.matchesInfoBanner}>
+          <Ionicons name="chatbubble-ellipses-outline" size={15} color="#0EA5E9" />
+          <Text style={svcStyles.matchesInfoText}>
+            These businesses have been notified. Check Messages for their response.
+          </Text>
+        </View>
+
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           {quotes.length === 0 ? (
             <View style={{ alignItems: 'center', paddingTop: 60 }}>
-              <Ionicons name="document-text-outline" size={52} color="#CBD5E1" />
-              <Text style={{ color: '#94A3B8', marginTop: 12, fontSize: 16 }}>No quotes yet</Text>
+              <Ionicons name="hourglass-outline" size={52} color="#CBD5E1" />
+              <Text style={{ color: '#94A3B8', marginTop: 12, fontSize: 16 }}>Finding matches…</Text>
             </View>
           ) : quotes.map(q => (
             <View key={q._id} style={svcStyles.quoteCard}>
@@ -652,33 +636,16 @@ function ServiceQuotesModal({ visible, quotes, needText, onClose, onQuoteConfirm
                 ) : null}
                 <Text style={svcStyles.quoteEstimate}>
                   {q.estimate || (q.estimateMin != null && q.estimateMax != null
-                    ? `$${Math.round(q.estimateMin)}–$${Math.round(q.estimateMax)}`
-                    : 'Quote pending')}
+                    ? `Est. $${Math.round(q.estimateMin)}–$${Math.round(q.estimateMax)}`
+                    : 'Awaiting response')}
                 </Text>
                 {q.breakdown ? (
                   <Text style={svcStyles.quoteBreakdown}>{q.breakdown}</Text>
                 ) : null}
-                {confirmed.has(q._id) ? (
-                  <View style={[svcStyles.confirmBtn, { backgroundColor: '#10B981' }]}>
-                    <Ionicons name="checkmark-circle" size={14} color="#fff" />
-                    <Text style={svcStyles.confirmBtnText}>Confirmed</Text>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={svcStyles.confirmBtn}
-                    onPress={() => handleConfirm(q)}
-                    disabled={confirming === q._id}
-                    activeOpacity={0.8}
-                  >
-                    {confirming === q._id
-                      ? <Text style={svcStyles.confirmBtnText}>Confirming…</Text>
-                      : <>
-                          <Ionicons name="checkmark-circle-outline" size={14} color="#fff" />
-                          <Text style={svcStyles.confirmBtnText}>Confirm Appointment</Text>
-                        </>
-                    }
-                  </TouchableOpacity>
-                )}
+                <View style={svcStyles.awaitingBadge}>
+                  <Ionicons name="time-outline" size={12} color="#F59E0B" />
+                  <Text style={svcStyles.awaitingBadgeText}>Awaiting business response</Text>
+                </View>
               </View>
             </View>
           ))}
@@ -735,12 +702,17 @@ const svcStyles = StyleSheet.create({
   quoteSubService:   { fontSize: 12, color: '#6B7280', marginTop: 1 },
   quoteEstimate:     { fontSize: 18, fontWeight: '800', color: '#2563EB', marginTop: 6, marginBottom: 2 },
   quoteBreakdown:    { fontSize: 12, color: '#64748B', lineHeight: 17, marginBottom: 10 },
-  confirmBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: '#2563EB', borderRadius: 10, paddingVertical: 9, paddingHorizontal: 14,
-    alignSelf: 'flex-start', marginTop: 4,
+  matchesInfoBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    backgroundColor: '#F0F9FF', borderBottomWidth: 1, borderBottomColor: '#BAE6FD',
+    paddingHorizontal: 16, paddingVertical: 10,
   },
-  confirmBtnText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  matchesInfoText: { flex: 1, fontSize: 13, color: '#0369A1', lineHeight: 18 },
+  awaitingBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    marginTop: 6,
+  },
+  awaitingBadgeText: { fontSize: 11, color: '#F59E0B', fontWeight: '600' },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

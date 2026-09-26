@@ -159,9 +159,10 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
 // A quote_request — auto-generated quote sent to a business for 1-tap response.
 // Business-facing quote_request row — Confirm/Edit open RespondToLeadModal (same as leads);
 // Ask sends the AI info-request to the user's Messages.
-const QuoteRequestRow = ({ item, onRespond, onRequestMoreInfo }) => {
+const QuoteRequestRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) => {
   const cfg = NOTIF_ICONS.quote_request;
   const hasEstimate = item.estimateMin != null && item.estimateMax != null;
+  const askDone = item.infoRequested;
 
   return (
     <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
@@ -191,18 +192,26 @@ const QuoteRequestRow = ({ item, onRespond, onRequestMoreInfo }) => {
           </Text>
         ) : (
           <View style={styles.leadButtonsRow}>
-            {/* Confirm and Edit Price both open RespondToLeadModal to schedule + message the user */}
             <TouchableOpacity
-              style={[styles.respondBtn, { backgroundColor: '#10B981' }]}
+              style={[styles.respondBtn, { backgroundColor: '#10B981', flex: 1.4 }]}
               onPress={() => onRespond(item)}
             >
-              <Text style={styles.respondBtnText}>✓ Confirm & Schedule</Text>
+              <Text style={styles.respondBtnText}>✓ Confirm</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.requestInfoBtn} onPress={() => onRespond(item)}>
-              <Text style={styles.requestInfoBtnText}>✏️ Edit Price</Text>
+            <TouchableOpacity style={[styles.requestInfoBtn, { flex: 1 }]} onPress={() => onRespond(item)}>
+              <Text style={styles.requestInfoBtnText}>✏️ Edit</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.requestInfoBtn} onPress={() => onRequestMoreInfo(item)}>
-              <Text style={styles.requestInfoBtnText}>💬 Ask</Text>
+            <TouchableOpacity
+              style={[styles.requestInfoBtn, { flex: 1 }, askDone && styles.requestInfoBtnDone]}
+              onPress={() => !askDone && !requestingInfo && onRequestMoreInfo(item)}
+              disabled={askDone || requestingInfo}
+            >
+              {requestingInfo
+                ? <ActivityIndicator size="small" color="#2563EB" />
+                : <Text style={[styles.requestInfoBtnText, askDone && styles.requestInfoBtnTextDone]}>
+                    {askDone ? '✓ Asked' : '💬 Ask'}
+                  </Text>
+              }
             </TouchableOpacity>
           </View>
         )}
@@ -726,6 +735,7 @@ const NotificationsScreen = () => {
                     item={item}
                     onRespond={i => handleRespond(i)}
                     onRequestMoreInfo={i => handleRequestMoreInfo(i)}
+                    requestingInfo={requestingInfoIds.has(item._id)}
                   />
                 : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
           )}

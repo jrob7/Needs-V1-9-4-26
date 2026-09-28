@@ -256,30 +256,30 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
               </View>
 
               <View style={sd.body}>
-                {/* Business name & identity */}
-                <View style={sd.nameRow}>
-                  <BusinessAvatar
-                    picUrl={quote.businessProfilePic || service?.profilePicture}
-                    name={displayName}
-                    size={52}
-                  />
-                  <View style={{ flex: 1, marginLeft: 14 }}>
-                    <Text style={sd.bizName}>{displayName}</Text>
-                    {(quote.subService || service?.category) ? (
-                      <Text style={sd.bizSub}>{quote.subService || service?.category}</Text>
-                    ) : null}
-                  </View>
+                {/* Status badge — mirrors BroadDetailModal's "Available" badge */}
+                <View style={[sd.statusBadge, { backgroundColor: '#DCFCE7' }]}>
+                  <Text style={[sd.statusBadgeText, { color: '#166534' }]}>
+                    {status === 'appointment_confirmed' ? '✓ Confirmed' : 'Quote Ready'}
+                  </Text>
                 </View>
 
-                {service?.rating && (
-                  <View style={sd.metaRow}>
-                    <Ionicons name="star" size={16} color="#F59E0B" />
-                    <Text style={sd.metaTxt}> {service.rating}</Text>
-                    {service.category ? <Text style={sd.metaTxt}> · {service.category}</Text> : null}
-                    {service.serviceArea ? <Text style={sd.metaTxt}> · {service.serviceArea}</Text> : null}
-                  </View>
-                )}
+                {/* Business name — large, matching BroadDetailModal */}
+                <Text style={sd.bizName}>{displayName}</Text>
+                {service?.providerName ? (
+                  <Text style={sd.providerName}>{service.providerName}</Text>
+                ) : null}
 
+                {/* Meta row — rating + category + location */}
+                <View style={sd.metaRow}>
+                  <Ionicons name="star" size={18} color="#F59E0B" />
+                  <Text style={sd.metaTxt}> {service?.rating || '4.8'} · </Text>
+                  <Text style={sd.metaTxt}>{service?.category || quote.subService || 'Service'}</Text>
+                  {service?.serviceArea
+                    ? <Text style={sd.metaTxt}> · {service.serviceArea}</Text>
+                    : null}
+                </View>
+
+                {/* About */}
                 {service?.description ? (
                   <View style={sd.section}>
                     <Text style={sd.sectionTitle}>About</Text>
@@ -287,9 +287,10 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
                   </View>
                 ) : null}
 
+                {/* Top services */}
                 {service?.topServices?.filter(s => s.name).length > 0 && (
                   <View style={sd.section}>
-                    <Text style={sd.sectionTitle}>Services</Text>
+                    <Text style={sd.sectionTitle}>Top Services</Text>
                     {service.topServices.filter(s => s.name).map((sv, i) => (
                       <View key={i} style={sd.serviceRow}>
                         <Text style={sd.serviceRowName}>{sv.name}</Text>
@@ -299,6 +300,25 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
                   </View>
                 )}
 
+                {/* Stats grid — availability + response time */}
+                {(service?.availability || service?.responseTime) && (
+                  <View style={sd.statsGrid}>
+                    {service.availability && (
+                      <View style={sd.statBox}>
+                        <Text style={sd.statVal}>{service.availability}</Text>
+                        <Text style={sd.statLbl}>Availability</Text>
+                      </View>
+                    )}
+                    {service.responseTime && (
+                      <View style={sd.statBox}>
+                        <Text style={sd.statVal} numberOfLines={2}>{service.responseTime}</Text>
+                        <Text style={sd.statLbl}>Response</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+
+                {/* Portfolio */}
                 {service?.portfolioImageUrls?.length > 0 && (
                   <View style={sd.section}>
                     <Text style={sd.sectionTitle}>Portfolio</Text>
@@ -309,6 +329,12 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
                     </ScrollView>
                   </View>
                 )}
+
+                {/* AI note */}
+                <View style={sd.aiNote}>
+                  <Ionicons name="sparkles" size={17} color="#2563EB" />
+                  <Text style={sd.aiNoteTxt}>Matched for your request</Text>
+                </View>
 
                 {/* ── Quote section ───────────────────────────────── */}
                 <View style={sd.divider} />
@@ -435,40 +461,47 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
 }
 
 const sd = StyleSheet.create({
-  hero:        { width: '100%', aspectRatio: 1.4 },
-  backBtn:     { position: 'absolute', top: IS_WEB ? 16 : 52, left: 16, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
-  body:        { padding: IS_WEB ? 26 : 20 },
-  nameRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  bizName:     { fontSize: IS_WEB ? 28 : 22, fontWeight: '900', color: '#111827' },
-  bizSub:      { fontSize: IS_WEB ? 16 : 14, color: '#6B7280', marginTop: 2 },
-  metaRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
-  metaTxt:     { fontSize: 15, color: '#6B7280' },
-  section:     { marginBottom: 22 },
-  sectionTitle:{ fontSize: IS_WEB ? 20 : 17, fontWeight: '800', color: '#111827', marginBottom: 10 },
-  aboutTxt:    { fontSize: IS_WEB ? 16 : 14, color: '#374151', lineHeight: 22 },
-  serviceRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  serviceRowName:  { fontSize: IS_WEB ? 18 : 15, fontWeight: '600', color: '#111827' },
-  serviceRowPrice: { fontSize: 14, color: '#6B7280' },
-  portfolioImg:{ width: 140, height: 105, borderRadius: 12, marginRight: 10 },
-  divider:     { height: 1, backgroundColor: '#F1F5F9', marginVertical: 20 },
-  quoteCard:   { backgroundColor: '#F8FAFC', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E2E8F0', gap: 10, marginBottom: 4 },
-  quoteCardTitle: { fontSize: 13, fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
-  priceRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  priceLabel:  { fontSize: 13, color: '#64748B', fontWeight: '600' },
-  priceValue:  { fontSize: IS_WEB ? 32 : 28, fontWeight: '900', color: '#0F172A' },
-  detailRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  detailTxt:   { fontSize: 14, color: '#2563EB', fontWeight: '600' },
-  noteBox:     { backgroundColor: '#FFF7ED', borderRadius: 10, padding: 11, borderWidth: 1, borderColor: '#FED7AA' },
-  noteLabel:   { fontSize: 11, fontWeight: '800', color: '#92400E', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
-  noteTxt:     { fontSize: 13, color: '#78350F', lineHeight: 18 },
-  actionCol:   { gap: 12, marginTop: 20 },
-  btnPrimary:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#16A34A', borderRadius: 14, paddingVertical: IS_WEB ? 18 : 16 },
-  btnPrimaryTxt: { fontSize: IS_WEB ? 18 : 16, fontWeight: '800', color: '#fff' },
-  btnSecondary:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 14, paddingVertical: IS_WEB ? 16 : 14, borderWidth: 1.5, borderColor: '#BFDBFE' },
-  btnSecondaryTxt: { fontSize: IS_WEB ? 16 : 14, fontWeight: '700', color: '#2563EB' },
-  infoBox:     { alignItems: 'center', backgroundColor: '#EFF6FF', borderRadius: 14, padding: 24, gap: 8, marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE' },
-  infoTitle:   { fontSize: 17, fontWeight: '800', color: '#0F172A', textAlign: 'center' },
-  infoSub:     { fontSize: 13, color: '#475569', textAlign: 'center', lineHeight: 18 },
+  hero:         { width: '100%', aspectRatio: 1.4 },
+  backBtn:      { position: 'absolute', top: IS_WEB ? 20 : 52, left: 20, width: 47, height: 47, borderRadius: 24, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  body:         { padding: 26 },
+  statusBadge:  { alignSelf: 'flex-start', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 8, marginBottom: 13 },
+  statusBadgeText: { fontSize: 17, fontWeight: '700', color: '#fff' },
+  bizName:      { fontSize: IS_WEB ? 34 : 31, fontWeight: '900', color: '#111827', marginBottom: 5 },
+  providerName: { fontSize: 18, fontWeight: '600', color: '#2563EB', marginBottom: 10 },
+  metaRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
+  metaTxt:      { fontSize: 17, color: '#6B7280' },
+  section:      { marginBottom: 26 },
+  sectionTitle: { fontSize: IS_WEB ? 22 : 21, fontWeight: '800', color: '#111827', marginBottom: 13 },
+  aboutTxt:     { fontSize: 18, color: '#374151', lineHeight: 29 },
+  serviceRow:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  serviceRowName:  { fontSize: 20, fontWeight: '600', color: '#111827' },
+  serviceRowPrice: { fontSize: 16, color: '#6B7280' },
+  statsGrid:    { flexDirection: 'row', gap: 13, marginBottom: 26 },
+  statBox:      { flex: 1, backgroundColor: '#F9FAFB', borderRadius: 16, padding: 18, alignItems: 'center' },
+  statVal:      { fontSize: 20, fontWeight: '900', color: '#111827', textAlign: 'center', marginBottom: 5 },
+  statLbl:      { fontSize: 14, color: '#9CA3AF', textAlign: 'center' },
+  portfolioImg: { width: 156, height: 117, borderRadius: 13, marginRight: 13 },
+  aiNote:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 13, padding: 16, marginBottom: 4 },
+  aiNoteTxt:    { fontSize: 17, fontWeight: '700', color: '#2563EB' },
+  divider:      { height: 1, backgroundColor: '#F1F5F9', marginVertical: 22 },
+  quoteCard:    { backgroundColor: '#F8FAFC', borderRadius: 14, padding: 18, borderWidth: 1, borderColor: '#E2E8F0', gap: 12, marginBottom: 4 },
+  quoteCardTitle: { fontSize: 13, fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  priceRow:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  priceLabel:   { fontSize: 14, color: '#64748B', fontWeight: '600' },
+  priceValue:   { fontSize: IS_WEB ? 34 : 30, fontWeight: '900', color: '#0F172A' },
+  detailRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  detailTxt:    { fontSize: 16, color: '#2563EB', fontWeight: '600' },
+  noteBox:      { backgroundColor: '#FFF7ED', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#FED7AA' },
+  noteLabel:    { fontSize: 12, fontWeight: '800', color: '#92400E', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
+  noteTxt:      { fontSize: 15, color: '#78350F', lineHeight: 22 },
+  actionCol:    { gap: 12, marginTop: 23 },
+  btnPrimary:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#16A34A', borderRadius: 16, height: 65 },
+  btnPrimaryTxt:{ fontSize: 18, fontWeight: '800', color: '#fff' },
+  btnSecondary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 16, height: 58, borderWidth: 1.5, borderColor: '#BFDBFE' },
+  btnSecondaryTxt: { fontSize: 17, fontWeight: '700', color: '#2563EB' },
+  infoBox:      { alignItems: 'center', backgroundColor: '#EFF6FF', borderRadius: 14, padding: 28, gap: 8, marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE' },
+  infoTitle:    { fontSize: 19, fontWeight: '800', color: '#0F172A', textAlign: 'center' },
+  infoSub:      { fontSize: 15, color: '#475569', textAlign: 'center', lineHeight: 22 },
 });
 
 // ── Quote summary card (BroadSummaryCard-style) ───────────────────────────────

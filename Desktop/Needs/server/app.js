@@ -2369,6 +2369,16 @@ app.put('/services/:id', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/services/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+    const doc = await database.collection('Services').findOne({ _id: new ObjectId(id) });
+    if (!doc) return res.status(404).json({ error: 'Not found' });
+    res.json({ ...doc, _id: doc._id.toString(), userId: doc.userId?.toString() || null });
+  } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
+});
+
 app.get('/services', async (req, res) => {
   try {
     const { search = '', max = 10 } = req.query;

@@ -193,13 +193,25 @@ const af = StyleSheet.create({
   sendBtnTxt: { fontSize: 14, fontWeight: '800', color: '#fff' },
 });
 
-// ── Service detail modal (full-screen, opens when card is tapped) ──────────────
+// ── Service detail modal — full BroadDetailModal-style profile + quote actions ──
 function ServiceDetailModal({ quote, onClose, onRefresh }) {
+  const [service, setService]         = useState(null);
   const [showReschedule, setShowReschedule] = useState(false);
   const [confirmSending, setConfirmSending] = useState(false);
   const { status } = quote;
-  const coverUrl = quote.businessLogoUrl || null;
   const canConfirm = status === 'business_confirmed' || status === 'business_edited';
+
+  // Fetch the full service profile
+  useEffect(() => {
+    if (!quote.serviceId) return;
+    fetch(`${NODE_API}/services/${quote.serviceId}`)
+      .then(r => r.json())
+      .then(d => { if (d && !d.error) setService(d); })
+      .catch(() => {});
+  }, [quote.serviceId]);
+
+  const coverUrl = service?.portfolioImageUrls?.[0] || quote.businessLogoUrl || null;
+  const displayName = quote.businessName || service?.businessName || 'Service Provider';
 
   const handleConfirm = async () => {
     setConfirmSending(true);
@@ -218,178 +230,235 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
 
   return (
     <Modal visible animationType="slide" transparent={false} onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: '#fff' }}>
-        {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
+      <View style={{ flex: 1, backgroundColor: IS_WEB ? '#F7F7F7' : '#fff' }}>
+        <View style={IS_WEB ? { maxWidth: 960, width: '100%', alignSelf: 'center', flex: 1, backgroundColor: '#fff' } : { flex: 1 }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+          {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
-        {/* Cover / hero */}
-        <View style={sd.heroWrap}>
-          {coverUrl
-            ? <Image source={{ uri: coverUrl }} style={sd.heroCover} resizeMode="cover" />
-            : <View style={[sd.heroCover, { backgroundColor: '#1E3A5F' }]} />}
-          <View style={sd.heroOverlay} />
-          <TouchableOpacity style={sd.backBtn} onPress={onClose}>
-            <Ionicons name="chevron-down" size={22} color="#fff" />
-          </TouchableOpacity>
-          <View style={sd.heroBottom}>
-            <BusinessAvatar picUrl={quote.businessProfilePic} name={quote.businessName} size={56} />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={sd.heroName}>{quote.businessName || 'Service Provider'}</Text>
-              {quote.subService
-                ? <Text style={sd.heroSub}>{quote.subService}</Text>
-                : null}
-            </View>
-            <StatusBadge status={status} />
-          </View>
+              {/* Hero image */}
+              <View style={{ position: 'relative' }}>
+                {coverUrl
+                  ? <Image source={{ uri: coverUrl }} style={sd.hero} resizeMode="cover" />
+                  : <View style={[sd.hero, { backgroundColor: '#1E3A5F' }]} />}
+                <TouchableOpacity style={sd.backBtn} onPress={onClose}>
+                  <Ionicons name="chevron-back" size={26} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={sd.body}>
+                {/* Business name & identity */}
+                <View style={sd.nameRow}>
+                  <BusinessAvatar
+                    picUrl={quote.businessProfilePic || service?.profilePicture}
+                    name={displayName}
+                    size={52}
+                  />
+                  <View style={{ flex: 1, marginLeft: 14 }}>
+                    <Text style={sd.bizName}>{displayName}</Text>
+                    {(quote.subService || service?.category) ? (
+                      <Text style={sd.bizSub}>{quote.subService || service?.category}</Text>
+                    ) : null}
+                  </View>
+                </View>
+
+                {service?.rating && (
+                  <View style={sd.metaRow}>
+                    <Ionicons name="star" size={16} color="#F59E0B" />
+                    <Text style={sd.metaTxt}> {service.rating}</Text>
+                    {service.category ? <Text style={sd.metaTxt}> · {service.category}</Text> : null}
+                    {service.serviceArea ? <Text style={sd.metaTxt}> · {service.serviceArea}</Text> : null}
+                  </View>
+                )}
+
+                {service?.description ? (
+                  <View style={sd.section}>
+                    <Text style={sd.sectionTitle}>About</Text>
+                    <Text style={sd.aboutTxt}>{service.description}</Text>
+                  </View>
+                ) : null}
+
+                {service?.topServices?.filter(s => s.name).length > 0 && (
+                  <View style={sd.section}>
+                    <Text style={sd.sectionTitle}>Services</Text>
+                    {service.topServices.filter(s => s.name).map((sv, i) => (
+                      <View key={i} style={sd.serviceRow}>
+                        <Text style={sd.serviceRowName}>{sv.name}</Text>
+                        {sv.price ? <Text style={sd.serviceRowPrice}>Est. ${sv.price}</Text> : null}
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {service?.portfolioImageUrls?.length > 1 && (
+                  <View style={sd.section}>
+                    <Text style={sd.sectionTitle}>Portfolio</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      {service.portfolioImageUrls.slice(0, 5).map((url, i) => (
+                        <Image key={i} source={{ uri: url }} style={sd.portfolioImg} resizeMode="cover" />
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* ── Quote section ───────────────────────────────── */}
+                <View style={sd.divider} />
+
+                {/* Confirmed appointment */}
+                {status === 'appointment_confirmed' && (
+                  <View style={[sd.infoBox, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}>
+                    <Ionicons name="checkmark-circle" size={44} color="#16A34A" />
+                    <Text style={[sd.infoTitle, { color: '#15803D' }]}>Appointment Confirmed!</Text>
+                    {quote.proposedDate && (
+                      <Text style={[sd.infoSub, { color: '#166534', fontWeight: '700' }]}>
+                        {quote.proposedDate}{quote.proposedTime ? ` at ${quote.proposedTime}` : ''}
+                      </Text>
+                    )}
+                    {quote.confirmedPrice && (
+                      <Text style={[sd.infoSub, { color: '#166534' }]}>Price: ${quote.confirmedPrice}</Text>
+                    )}
+                  </View>
+                )}
+
+                {/* Quote details card */}
+                {(canConfirm || status === 'user_requested_reschedule') && (
+                  <View style={sd.quoteCard}>
+                    <Text style={sd.quoteCardTitle}>Quote Details</Text>
+                    {quote.confirmedPrice ? (
+                      <View style={sd.priceRow}>
+                        <Text style={sd.priceLabel}>Price</Text>
+                        <Text style={sd.priceValue}>${quote.confirmedPrice}</Text>
+                      </View>
+                    ) : (quote.estimateMin || quote.estimateMax) ? (
+                      <View style={sd.priceRow}>
+                        <Text style={sd.priceLabel}>Estimate</Text>
+                        <Text style={sd.priceValue}>
+                          {quote.estimateMin && quote.estimateMax
+                            ? `$${quote.estimateMin}–$${quote.estimateMax}`
+                            : `$${quote.estimateMin || quote.estimateMax}`}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {(quote.proposedDate || quote.proposedTime) && (
+                      <View style={sd.detailRow}>
+                        <Ionicons name="calendar-outline" size={16} color="#2563EB" />
+                        <Text style={sd.detailTxt}>
+                          {quote.proposedDate}{quote.proposedTime ? ` at ${quote.proposedTime}` : ''}
+                        </Text>
+                      </View>
+                    )}
+                    {quote.businessNote ? (
+                      <View style={sd.noteBox}>
+                        <Text style={sd.noteLabel}>Note from Business</Text>
+                        <Text style={sd.noteTxt}>{quote.businessNote}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
+
+                {status === 'pending_business' && (
+                  <View style={[sd.infoBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
+                    <Ionicons name="hourglass-outline" size={36} color="#D97706" />
+                    <Text style={[sd.infoTitle, { color: '#92400E' }]}>Awaiting Quote</Text>
+                    <Text style={sd.infoSub}>The business has been notified and is preparing your quote.</Text>
+                  </View>
+                )}
+
+                {status === 'awaiting_user_info' && (
+                  <AnswerForm quote={quote} onDone={() => { onRefresh?.(); onClose(); }} />
+                )}
+
+                {status === 'user_info_provided' && (
+                  <View style={sd.infoBox}>
+                    <Ionicons name="checkmark-done-circle-outline" size={36} color="#2563EB" />
+                    <Text style={sd.infoTitle}>Answers Sent</Text>
+                    <Text style={sd.infoSub}>The business will review and send an updated quote.</Text>
+                  </View>
+                )}
+
+                {status === 'user_requested_reschedule' && (
+                  <View style={[sd.infoBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A', marginTop: 12 }]}>
+                    <Ionicons name="time-outline" size={32} color="#F59E0B" />
+                    <Text style={[sd.infoTitle, { color: '#92400E' }]}>Reschedule Requested</Text>
+                    {quote.userRequestedDate && (
+                      <Text style={{ marginTop: 4, fontSize: 14, fontWeight: '700', color: '#92400E' }}>
+                        {quote.userRequestedDate}{quote.userRequestedTime ? ` at ${quote.userRequestedTime}` : ''}
+                      </Text>
+                    )}
+                    <Text style={sd.infoSub}>Waiting for the business to confirm your preferred time.</Text>
+                  </View>
+                )}
+
+                {/* CTA buttons */}
+                {canConfirm && !showReschedule && (
+                  <View style={sd.actionCol}>
+                    <TouchableOpacity
+                      style={[sd.btnPrimary, confirmSending && { opacity: 0.5 }]}
+                      onPress={handleConfirm}
+                      disabled={confirmSending}
+                    >
+                      <Ionicons name="checkmark-circle-outline" size={22} color="#fff" />
+                      <Text style={sd.btnPrimaryTxt}>{confirmSending ? 'Confirming…' : 'Confirm Appointment'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={sd.btnSecondary} onPress={() => setShowReschedule(true)}>
+                      <Ionicons name="calendar-outline" size={18} color="#2563EB" />
+                      <Text style={sd.btnSecondaryTxt}>Request Different Time</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {showReschedule && (
+                  <ReschedulePicker
+                    quoteId={quote._id}
+                    onDone={() => { setShowReschedule(false); onRefresh?.(); onClose(); }}
+                  />
+                )}
+
+                <View style={{ height: 40 }} />
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
         </View>
-
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView contentContainerStyle={sd.body} keyboardShouldPersistTaps="handled">
-
-            {/* Quote details */}
-            {(canConfirm || status === 'user_requested_reschedule') && (
-              <View style={sd.quoteCard}>
-                {quote.confirmedPrice ? (
-                  <View style={sd.priceRow}>
-                    <Text style={sd.priceLabel}>Quoted Price</Text>
-                    <Text style={sd.priceValue}>${quote.confirmedPrice}</Text>
-                  </View>
-                ) : (quote.estimateMin || quote.estimateMax) ? (
-                  <View style={sd.priceRow}>
-                    <Text style={sd.priceLabel}>Estimate</Text>
-                    <Text style={sd.priceValue}>
-                      {quote.estimateMin && quote.estimateMax
-                        ? `$${quote.estimateMin}–$${quote.estimateMax}`
-                        : `$${quote.estimateMin || quote.estimateMax}`}
-                    </Text>
-                  </View>
-                ) : null}
-                {(quote.proposedDate || quote.proposedTime) && (
-                  <View style={sd.detailRow}>
-                    <Ionicons name="calendar-outline" size={16} color="#2563EB" />
-                    <Text style={sd.detailTxt}>
-                      {quote.proposedDate}{quote.proposedTime ? ` at ${quote.proposedTime}` : ''}
-                    </Text>
-                  </View>
-                )}
-                {quote.businessNote ? (
-                  <View style={sd.noteBox}>
-                    <Text style={sd.noteLabel}>Note from Business</Text>
-                    <Text style={sd.noteTxt}>{quote.businessNote}</Text>
-                  </View>
-                ) : null}
-              </View>
-            )}
-
-            {/* Awaiting response */}
-            {status === 'pending_business' && (
-              <View style={[sd.infoBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' }]}>
-                <Ionicons name="hourglass-outline" size={36} color="#D97706" />
-                <Text style={[sd.infoTitle, { color: '#92400E' }]}>Awaiting Business Response</Text>
-                <Text style={sd.infoSub}>The business has been notified and is preparing a quote.</Text>
-              </View>
-            )}
-
-            {/* Business asked questions */}
-            {status === 'awaiting_user_info' && (
-              <AnswerForm quote={quote} onDone={() => { onRefresh?.(); onClose(); }} />
-            )}
-
-            {/* Answers sent, waiting for updated quote */}
-            {status === 'user_info_provided' && (
-              <View style={sd.infoBox}>
-                <Ionicons name="checkmark-done-circle-outline" size={36} color="#2563EB" />
-                <Text style={sd.infoTitle}>Answers Sent</Text>
-                <Text style={sd.infoSub}>The business will review and send an updated quote.</Text>
-              </View>
-            )}
-
-            {/* Reschedule pending */}
-            {status === 'user_requested_reschedule' && (
-              <View style={[sd.infoBox, { backgroundColor: '#FFFBEB', borderColor: '#FDE68A', marginTop: 16 }]}>
-                <Ionicons name="time-outline" size={36} color="#F59E0B" />
-                <Text style={[sd.infoTitle, { color: '#92400E' }]}>Reschedule Requested</Text>
-                {quote.userRequestedDate && (
-                  <Text style={{ marginTop: 6, fontSize: 14, fontWeight: '700', color: '#92400E' }}>
-                    {quote.userRequestedDate}{quote.userRequestedTime ? ` at ${quote.userRequestedTime}` : ''}
-                  </Text>
-                )}
-                <Text style={sd.infoSub}>Waiting for the business to confirm your preferred time.</Text>
-              </View>
-            )}
-
-            {/* Confirmed */}
-            {status === 'appointment_confirmed' && (
-              <View style={[sd.infoBox, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}>
-                <Ionicons name="checkmark-circle" size={44} color="#16A34A" />
-                <Text style={[sd.infoTitle, { color: '#15803D' }]}>Appointment Confirmed!</Text>
-                {quote.proposedDate && (
-                  <Text style={[sd.infoSub, { color: '#166534', fontWeight: '700' }]}>
-                    {quote.proposedDate}{quote.proposedTime ? ` at ${quote.proposedTime}` : ''}
-                  </Text>
-                )}
-                {quote.confirmedPrice && (
-                  <Text style={[sd.infoSub, { color: '#166534' }]}>Price: ${quote.confirmedPrice}</Text>
-                )}
-              </View>
-            )}
-
-            {/* Action buttons — confirm or reschedule */}
-            {canConfirm && !showReschedule && (
-              <View style={sd.actionCol}>
-                <TouchableOpacity
-                  style={[sd.btnPrimary, confirmSending && { opacity: 0.5 }]}
-                  onPress={handleConfirm}
-                  disabled={confirmSending}
-                >
-                  <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                  <Text style={sd.btnPrimaryTxt}>{confirmSending ? 'Confirming…' : 'Confirm Appointment'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={sd.btnSecondary} onPress={() => setShowReschedule(true)}>
-                  <Ionicons name="calendar-outline" size={17} color="#2563EB" />
-                  <Text style={sd.btnSecondaryTxt}>Request Different Time</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {showReschedule && (
-              <ReschedulePicker
-                quoteId={quote._id}
-                onDone={() => { setShowReschedule(false); onRefresh?.(); onClose(); }}
-              />
-            )}
-
-            <View style={{ height: 40 }} />
-          </ScrollView>
-        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
 }
 
 const sd = StyleSheet.create({
-  heroWrap:    { height: IS_WEB ? 200 : 180, position: 'relative' },
-  heroCover:   { width: '100%', height: '100%' },
-  heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
-  backBtn:     { position: 'absolute', top: IS_WEB ? 16 : 48, left: 16, width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
-  heroBottom:  { position: 'absolute', bottom: 14, left: 16, right: 16, flexDirection: 'row', alignItems: 'center' },
-  heroName:    { fontSize: IS_WEB ? 18 : 16, fontWeight: '900', color: '#fff' },
-  heroSub:     { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-  body:        { padding: 20 },
-  quoteCard:   { backgroundColor: '#F8FAFC', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E2E8F0', gap: 10 },
+  hero:        { width: '100%', aspectRatio: 1.4 },
+  backBtn:     { position: 'absolute', top: IS_WEB ? 16 : 52, left: 16, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  body:        { padding: IS_WEB ? 26 : 20 },
+  nameRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  bizName:     { fontSize: IS_WEB ? 28 : 22, fontWeight: '900', color: '#111827' },
+  bizSub:      { fontSize: IS_WEB ? 16 : 14, color: '#6B7280', marginTop: 2 },
+  metaRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' },
+  metaTxt:     { fontSize: 15, color: '#6B7280' },
+  section:     { marginBottom: 22 },
+  sectionTitle:{ fontSize: IS_WEB ? 20 : 17, fontWeight: '800', color: '#111827', marginBottom: 10 },
+  aboutTxt:    { fontSize: IS_WEB ? 16 : 14, color: '#374151', lineHeight: 22 },
+  serviceRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  serviceRowName:  { fontSize: IS_WEB ? 18 : 15, fontWeight: '600', color: '#111827' },
+  serviceRowPrice: { fontSize: 14, color: '#6B7280' },
+  portfolioImg:{ width: 140, height: 105, borderRadius: 12, marginRight: 10 },
+  divider:     { height: 1, backgroundColor: '#F1F5F9', marginVertical: 20 },
+  quoteCard:   { backgroundColor: '#F8FAFC', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#E2E8F0', gap: 10, marginBottom: 4 },
+  quoteCardTitle: { fontSize: 13, fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
   priceRow:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   priceLabel:  { fontSize: 13, color: '#64748B', fontWeight: '600' },
-  priceValue:  { fontSize: 28, fontWeight: '900', color: '#0F172A' },
+  priceValue:  { fontSize: IS_WEB ? 32 : 28, fontWeight: '900', color: '#0F172A' },
   detailRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   detailTxt:   { fontSize: 14, color: '#2563EB', fontWeight: '600' },
   noteBox:     { backgroundColor: '#FFF7ED', borderRadius: 10, padding: 11, borderWidth: 1, borderColor: '#FED7AA' },
   noteLabel:   { fontSize: 11, fontWeight: '800', color: '#92400E', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
   noteTxt:     { fontSize: 13, color: '#78350F', lineHeight: 18 },
-  actionCol:   { gap: 10, marginTop: 20 },
-  btnPrimary:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#16A34A', borderRadius: 14, paddingVertical: 16 },
-  btnPrimaryTxt: { fontSize: 16, fontWeight: '800', color: '#fff' },
-  btnSecondary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 14, paddingVertical: 14, borderWidth: 1.5, borderColor: '#BFDBFE' },
-  btnSecondaryTxt: { fontSize: 14, fontWeight: '700', color: '#2563EB' },
-  infoBox:     { alignItems: 'center', backgroundColor: '#EFF6FF', borderRadius: 14, padding: 28, gap: 8, marginTop: 20, borderWidth: 1, borderColor: '#BFDBFE' },
+  actionCol:   { gap: 12, marginTop: 20 },
+  btnPrimary:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#16A34A', borderRadius: 14, paddingVertical: IS_WEB ? 18 : 16 },
+  btnPrimaryTxt: { fontSize: IS_WEB ? 18 : 16, fontWeight: '800', color: '#fff' },
+  btnSecondary:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', borderRadius: 14, paddingVertical: IS_WEB ? 16 : 14, borderWidth: 1.5, borderColor: '#BFDBFE' },
+  btnSecondaryTxt: { fontSize: IS_WEB ? 16 : 14, fontWeight: '700', color: '#2563EB' },
+  infoBox:     { alignItems: 'center', backgroundColor: '#EFF6FF', borderRadius: 14, padding: 24, gap: 8, marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE' },
   infoTitle:   { fontSize: 17, fontWeight: '800', color: '#0F172A', textAlign: 'center' },
   infoSub:     { fontSize: 13, color: '#475569', textAlign: 'center', lineHeight: 18 },
 });

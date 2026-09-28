@@ -3169,6 +3169,17 @@ app.get('/serviceQuotes', async (req, res) => {
       .find({ needId: new ObjectId(needId) })
       .sort({ createdAt: 1 })
       .toArray();
+
+    // Enrich with business profile picture from Users collection
+    const serviceUserIds = [...new Set(quotes.map(q => q.serviceUserId).filter(Boolean))];
+    const bizUsers = serviceUserIds.length > 0
+      ? await database.collection('Users')
+          .find({ _id: { $in: serviceUserIds } }, { projection: { profilePicture: 1 } })
+          .toArray()
+      : [];
+    const bizPicMap = {};
+    bizUsers.forEach(u => { bizPicMap[u._id.toString()] = u.profilePicture || null; });
+
     res.json(quotes.map(q => ({
       ...q,
       _id: q._id.toString(),
@@ -3176,6 +3187,7 @@ app.get('/serviceQuotes', async (req, res) => {
       userId: q.userId?.toString() || null,
       serviceId: q.serviceId?.toString() || null,
       serviceUserId: q.serviceUserId?.toString() || null,
+      businessProfilePic: bizPicMap[q.serviceUserId?.toString()] || q.businessLogoUrl || null,
     })));
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
@@ -3269,13 +3281,36 @@ app.post('/userRespondToQuote', async (req, res) => {
           { $set: { serviceMatchStatus: 'appointment_confirmed' } }
         );
       }
+      // Insert into Appointments so it shows in Scheduler
+      await database.collection('Appointments').insertOne({
+        serviceUserId: quote.serviceUserId ? new ObjectId(quote.serviceUserId) : null,
+        requesterId: quote.userId ? new ObjectId(quote.userId) : null,
+        needText: quote.needText || null,
+        businessName: quote.businessName || null,
+        price: quote.confirmedPrice || null,
+        date: quote.proposedDate || null,
+        time: quote.proposedTime || null,
+        address: null,
+        status: 'confirmed',
+        quoteId: new ObjectId(quoteId),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      // Mark original quote_request notification as confirmed in-place (not a new notification)
       if (quote.serviceUserId) {
-        await database.collection('Notifications').insertOne({
-          userId: quote.serviceUserId, type: 'appointment_confirmed',
-          title: '🎉 Appointment Confirmed',
-          body: `Customer confirmed your appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}`,
-          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
-        });
+        const updated = await database.collection('Notifications').updateOne(
+          { quoteId: new ObjectId(quoteId), type: 'quote_request', userId: quote.serviceUserId },
+          { $set: { appointmentConfirmed: true, read: true } }
+        );
+        // Fallback: if no quote_request found, send the appointment_confirmed notification
+        if (updated.matchedCount === 0) {
+          await database.collection('Notifications').insertOne({
+            userId: quote.serviceUserId, type: 'appointment_confirmed',
+            title: '🎉 Appointment Confirmed',
+            body: `Customer confirmed your appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}`,
+            needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
+          });
+        }
       }
       // Add to business's Google Calendar (fire-and-forget)
       setImmediate(async () => {

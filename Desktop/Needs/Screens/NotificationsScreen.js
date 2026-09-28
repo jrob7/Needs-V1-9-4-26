@@ -187,7 +187,14 @@ const QuoteRequestRow = ({ item, onRespond, onAsk, requestingInfo }) => {
           </Text>
         ) : null}
 
-        {item.responded ? (
+        {item.appointmentConfirmed ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: '#F0FDF4', borderRadius: 8, padding: 8, borderWidth: 1, borderColor: '#BBF7D0' }}>
+            <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
+            <Text style={[styles.rowBody, { color: '#15803D', fontWeight: '700', margin: 0 }]}>
+              Appointment Confirmed
+            </Text>
+          </View>
+        ) : item.responded ? (
           <Text style={[styles.rowBody, { color: '#10B981', marginTop: 6, fontWeight: '600' }]}>
             ✓ Response sent
           </Text>

@@ -446,70 +446,64 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
   const [quotes, setQuotes] = useState([]);
   const [quotesVisible, setQuotesVisible] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  // Prevent cycling: once quotes are loaded, never reset the count downward
+  const quotesLoadedRef = useRef(false);
   const status = need?.serviceMatchStatus || 'processing';
   const TERMINAL_QUOTE_STATUSES = ['appointment_confirmed', 'cancelled'];
   const allQuotesTerminal = quotes.length > 0 && quotes.every(q => TERMINAL_QUOTE_STATUSES.includes(q.status));
   const isResolved = ['no_matches', 'error'].includes(status) ||
     (['quotes_ready', 'leads_sent', 'appointment_confirmed'].includes(status) && allQuotesTerminal);
 
-  // Poll for status updates until all quotes reach terminal state
+  // Poll for status and new quotes
   useEffect(() => {
     if (!need?._id) return;
-    // Stop once the need itself or all quotes are truly done
-    if (['no_matches', 'error'].includes(status) && quotes.length === 0) return;
     if (allQuotesTerminal) return;
     const interval = setInterval(async () => {
       try {
-        const [nRes, qRes] = await Promise.all([
-          fetch(`${API}/needRequest/${need._id}`),
-          fetch(`${API}/serviceQuotes?needId=${need._id}`),
-        ]);
-        const nData = await nRes.json();
+        const qRes = await fetch(`${API}/serviceQuotes?needId=${need._id}`);
         const qData = await qRes.json();
-        const qs = Array.isArray(qData?.quotes) ? qData.quotes : (Array.isArray(qData) ? qData : []);
-
-        if (nData?.serviceMatchStatus && nData.serviceMatchStatus !== need.serviceMatchStatus) {
-          setNeed(prev => ({
-            ...prev,
-            serviceMatchStatus: nData.serviceMatchStatus,
-            quoteCount: nData.quoteCount ?? prev.quoteCount,
-          }));
-        }
+        const qs = Array.isArray(qData) ? qData : [];
 
         if (qs.length > 0) {
+          quotesLoadedRef.current = true;
           setQuotes(qs);
           setNeed(prev => ({
             ...prev,
             serviceMatchStatus: prev.serviceMatchStatus === 'processing' || prev.serviceMatchStatus === 'finding_matches' || prev.serviceMatchStatus === 'generating_quotes'
               ? 'quotes_ready' : prev.serviceMatchStatus,
-            quoteCount: qs.length,
           }));
         }
 
-        // Stop if all quotes done or no-match / error terminal
-        const allDone = qs.length > 0 && qs.every(q => TERMINAL_QUOTE_STATUSES.includes(q.status));
-        const latestStatus = nData?.serviceMatchStatus;
-        if (allDone || ['no_matches', 'error'].includes(latestStatus)) {
-          clearInterval(interval);
+        // Only poll NeedRequest status when quotes not yet loaded
+        if (!quotesLoadedRef.current) {
+          const nRes = await fetch(`${API}/needRequest/${need._id}`);
+          const nData = await nRes.json();
+          if (nData?.serviceMatchStatus && nData.serviceMatchStatus !== need.serviceMatchStatus) {
+            setNeed(prev => ({ ...prev, serviceMatchStatus: nData.serviceMatchStatus }));
+          }
+          if (['no_matches', 'error'].includes(nData?.serviceMatchStatus)) clearInterval(interval);
         }
+
+        const allDone = qs.length > 0 && qs.every(q => TERMINAL_QUOTE_STATUSES.includes(q.status));
+        if (allDone) clearInterval(interval);
       } catch (_) {}
     }, 5000);
     return () => clearInterval(interval);
-  }, [need?._id, status, allQuotesTerminal]);
+  }, [need?._id, allQuotesTerminal]);
 
-  // Load quotes on initial mount when status is already quotes_ready/leads_sent
+  // Load quotes on mount if status already shows quotes available
   useEffect(() => {
-    if (!['quotes_ready', 'leads_sent'].includes(status) || !need?._id || quotes.length > 0) return;
+    if (!need?._id || quotesLoadedRef.current) return;
     fetch(`${API}/serviceQuotes?needId=${need._id}`)
       .then(r => r.json())
       .then(d => {
-        const qs = Array.isArray(d?.quotes) ? d.quotes : (Array.isArray(d) ? d : []);
-        if (qs.length > 0) { setNeed(prev => ({ ...prev, quoteCount: qs.length })); setQuotes(qs); }
+        const qs = Array.isArray(d) ? d : [];
+        if (qs.length > 0) { quotesLoadedRef.current = true; setQuotes(qs); }
       })
       .catch(() => {});
-  }, [status, need?._id]);
+  }, [need?._id]);
 
-  // Pulse animation on active statuses
+  // Pulse animation
   useEffect(() => {
     if (isResolved) { pulseAnim.setValue(1); return; }
     const loop = Animated.loop(
@@ -522,43 +516,36 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     return () => loop.stop();
   }, [isResolved]);
 
-  const cfg = STATUS_STEPS[status] || STATUS_STEPS.processing;
-  const quoteCount = need?.quoteCount || quotes.length;
-  const hasMatches = quoteCount > 0;
+  const hasMatches = quotes.length > 0;
+  // Pill always says "Pending Service Quotes" until quotes arrive, then shows count
+  const pillLabel = hasMatches
+    ? `${quotes.length} Quote${quotes.length !== 1 ? 's' : ''} Ready`
+    : 'Pending Service Quotes';
+  const pillStyle = hasMatches ? styles.matchPill : styles.swipeHintPill;
+  const pillTextStyle = hasMatches ? styles.matchPillText : styles.swipeHintText;
 
-  // Swipe right on the card to open matches
-  const swipePan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy),
-      onPanResponderRelease: (_, g) => { if (g.dx > 40 && hasMatches) setQuotesVisible(true); },
-    })
-  ).current;
-
-  // Pill — on web it lives in rightSlot so it doesn't overlap the media image
   const pillNode = (
-    <TouchableOpacity onPress={() => hasMatches && setQuotesVisible(true)} activeOpacity={0.85}>
-      <Animated.View style={[
-        hasMatches ? styles.matchPill : styles.swipeHintPill,
-        { opacity: pulseAnim, position: 'relative', top: 0, right: 0 },
-      ]}>
-        <Text style={hasMatches ? styles.matchPillText : styles.swipeHintText}>
-          {hasMatches ? `${quoteCount} Match${quoteCount !== 1 ? 'es' : ''}` : cfg.label}
-        </Text>
+    <TouchableOpacity
+      onPress={hasMatches ? () => setQuotesVisible(true) : null}
+      activeOpacity={hasMatches ? 0.85 : 1}
+    >
+      <Animated.View style={[pillStyle, { opacity: pulseAnim, position: 'relative', top: 0, right: 0 }]}>
+        <Text style={pillTextStyle}>{pillLabel}</Text>
       </Animated.View>
     </TouchableOpacity>
   );
 
   return (
-    <View style={{ width: '100%' }} onLayout={onLayout} {...(hasMatches ? swipePan.panHandlers : {})}>
+    <View style={{ width: '100%' }} onLayout={onLayout}>
       <View style={{ width: '100%', position: 'relative' }}>
         <Card
           badgeLabel="Service"
-          badgeColor={cfg.color}
+          badgeColor="#F59E0B"
           title={toTitle((need?.searchText || '').replace(/\*\*/g, ''), 8)}
           subtitle={need?.urgency ? `When: ${need.urgency}` : ''}
           media={IS_WEB ? media : media}
           isActive={isActive}
-          onPress={onOpenNeed}
+          onPress={hasMatches ? () => setQuotesVisible(true) : null}
           creatorName={[need?.firstName, need?.lastName].filter(Boolean).join(' ') || null}
           creatorPic={need?.profilePicture}
           onViewCreator={onViewCreator}
@@ -569,16 +556,11 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
         {!IS_WEB && (
           <TouchableOpacity
             style={{ position: 'absolute', top: 14, right: 16, zIndex: 30 }}
-            onPress={() => hasMatches && setQuotesVisible(true)}
-            activeOpacity={0.85}
+            onPress={hasMatches ? () => setQuotesVisible(true) : null}
+            activeOpacity={hasMatches ? 0.85 : 1}
           >
-            <Animated.View style={[
-              hasMatches ? styles.matchPill : styles.swipeHintPill,
-              { opacity: pulseAnim, position: 'relative', top: 0, right: 0 },
-            ]}>
-              <Text style={hasMatches ? styles.matchPillText : styles.swipeHintText}>
-                {hasMatches ? `${quoteCount} Match${quoteCount !== 1 ? 'es' : ''}` : cfg.label}
-              </Text>
+            <Animated.View style={[pillStyle, { opacity: pulseAnim, position: 'relative', top: 0, right: 0 }]}>
+              <Text style={pillTextStyle}>{pillLabel}</Text>
             </Animated.View>
           </TouchableOpacity>
         )}
@@ -588,6 +570,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
       {quotesVisible && (
         <ServiceMatchesModal
           needId={need?._id}
+          needText={need?.searchText}
           quotes={quotes}
           onClose={() => setQuotesVisible(false)}
           onRefresh={async () => {
@@ -595,7 +578,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
               const r = await fetch(`${API}/serviceQuotes?needId=${need._id}`);
               const d = await r.json();
               const qs = Array.isArray(d) ? d : [];
-              if (qs.length > 0) setQuotes(qs);
+              if (qs.length > 0) { quotesLoadedRef.current = true; setQuotes(qs); }
             } catch (_) {}
           }}
         />

@@ -73,13 +73,15 @@ function ReschedulePicker({ quoteId, onDone }) {
       {IS_WEB ? (
         <>
           {createElement('input', {
-            type: 'date', style: rp.webInput,
+            type: 'date',
+            style: { fontSize: 14, color: '#0F172A', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 12px', marginBottom: 8, width: '100%' },
             value: `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}`,
             min: (() => { const t = new Date(); t.setDate(t.getDate()+1); return `${t.getFullYear()}-${pad(t.getMonth()+1)}-${pad(t.getDate())}`; })(),
             onChange: (e) => { if (e.target.value) { const [y,mo,d] = e.target.value.split('-').map(Number); const nd = new Date(date); nd.setFullYear(y,mo-1,d); setDate(nd); } },
           })}
           {createElement('input', {
-            type: 'time', style: rp.webInput,
+            type: 'time',
+            style: { fontSize: 14, color: '#0F172A', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 12px', marginBottom: 8 },
             value: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
             onChange: (e) => { if (e.target.value) { const [h,m] = e.target.value.split(':').map(Number); const nd = new Date(date); nd.setHours(h,m,0,0); setDate(nd); } },
           })}
@@ -116,7 +118,6 @@ const rp = StyleSheet.create({
   btnTxt:    { flex: 1, fontSize: 14, fontWeight: '700', color: '#2563EB' },
   sendBtn:   { backgroundColor: '#2563EB', borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 },
   sendBtnTxt:{ fontSize: 14, fontWeight: '800', color: '#fff' },
-  webInput:  { fontSize: 14, color: '#0F172A', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 12px', marginBottom: 8, width: '100%' },
 });
 
 // ── Answer form ───────────────────────────────────────────────────────────────

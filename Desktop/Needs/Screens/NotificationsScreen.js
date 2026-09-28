@@ -695,7 +695,7 @@ const NotificationsScreen = () => {
             <TouchableOpacity
               key={tab}
               style={[styles.tab, !W && styles.tabMobile, isActive && styles.tabActive]}
-              onPress={() => setActiveTab(tab)}
+              onPress={() => { setActiveTab(tab); if (tab === 'Scheduler') fetchAppointments(); }}
               activeOpacity={0.7}
             >
               <View style={styles.tabInner}>

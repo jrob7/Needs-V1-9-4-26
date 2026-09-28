@@ -559,7 +559,7 @@ function QuoteSummaryCard({ quote, onTap }) {
 
 const qs = StyleSheet.create({
   card:        { width: CARD_W, backgroundColor: '#fff', borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.09, shadowRadius: 12, elevation: 4 },
-  coverWrap:   { height: IS_WEB ? 130 : 110, position: 'relative' },
+  coverWrap:   { width: '100%', aspectRatio: 1.3, position: 'relative' },
   cover:       { width: '100%', height: '100%' },
   coverOverlay:{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.25)' },
   statusBadgeWrap: { position: 'absolute', bottom: 10, right: 12 },

@@ -31,6 +31,7 @@ import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/nativ
 import { UserContext } from '../server/CurrentUser';
 import { useAuthModal } from './AuthModalContext';
 import { RestaurantDetail } from './MatchResults';
+import ServiceMatchesModal from './MatchesModal';
 import { NODE_API as API, FLASK_API } from '../config';
 import { webContainer, IS_WEB, WEB_HEADER_HEIGHT, WEB_MAX_WIDTH } from '../webLayout';
 import NeedsMapView from './NeedsMapView';
@@ -446,12 +447,17 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
   const [quotesVisible, setQuotesVisible] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const status = need?.serviceMatchStatus || 'processing';
-  const isResolved = ['quotes_ready', 'leads_sent', 'no_matches', 'error'].includes(status);
+  const TERMINAL_QUOTE_STATUSES = ['appointment_confirmed', 'cancelled'];
+  const allQuotesTerminal = quotes.length > 0 && quotes.every(q => TERMINAL_QUOTE_STATUSES.includes(q.status));
+  const isResolved = ['no_matches', 'error'].includes(status) ||
+    (['quotes_ready', 'leads_sent', 'appointment_confirmed'].includes(status) && allQuotesTerminal);
 
-  // Poll for status updates while not yet resolved — refreshes both the
-  // NeedRequest (to get live serviceMatchStatus) and quotes
+  // Poll for status updates until all quotes reach terminal state
   useEffect(() => {
-    if (isResolved || !need?._id) return;
+    if (!need?._id) return;
+    // Stop once the need itself or all quotes are truly done
+    if (['no_matches', 'error'].includes(status) && quotes.length === 0) return;
+    if (allQuotesTerminal) return;
     const interval = setInterval(async () => {
       try {
         const [nRes, qRes] = await Promise.all([
@@ -459,9 +465,9 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
           fetch(`${API}/serviceQuotes?needId=${need._id}`),
         ]);
         const nData = await nRes.json();
-        const qs = await qRes.json();
+        const qData = await qRes.json();
+        const qs = Array.isArray(qData?.quotes) ? qData.quotes : (Array.isArray(qData) ? qData : []);
 
-        // Update need status from server
         if (nData?.serviceMatchStatus && nData.serviceMatchStatus !== need.serviceMatchStatus) {
           setNeed(prev => ({
             ...prev,
@@ -470,29 +476,36 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
           }));
         }
 
-        // Update quotes and mark ready when they arrive
-        if (Array.isArray(qs) && qs.length > 0) {
+        if (qs.length > 0) {
           setQuotes(qs);
-          setNeed(prev => ({ ...prev, serviceMatchStatus: 'quotes_ready', quoteCount: qs.length }));
-          clearInterval(interval);
+          setNeed(prev => ({
+            ...prev,
+            serviceMatchStatus: prev.serviceMatchStatus === 'processing' || prev.serviceMatchStatus === 'finding_matches' || prev.serviceMatchStatus === 'generating_quotes'
+              ? 'quotes_ready' : prev.serviceMatchStatus,
+            quoteCount: qs.length,
+          }));
         }
 
-        // Stop polling on terminal statuses
-        const latest = nData?.serviceMatchStatus;
-        if (['quotes_ready', 'leads_sent', 'no_matches', 'error'].includes(latest)) {
+        // Stop if all quotes done or no-match / error terminal
+        const allDone = qs.length > 0 && qs.every(q => TERMINAL_QUOTE_STATUSES.includes(q.status));
+        const latestStatus = nData?.serviceMatchStatus;
+        if (allDone || ['no_matches', 'error'].includes(latestStatus)) {
           clearInterval(interval);
         }
       } catch (_) {}
     }, 5000);
     return () => clearInterval(interval);
-  }, [need?._id, isResolved]);
+  }, [need?._id, status, allQuotesTerminal]);
 
-  // Load quotes when status is quotes_ready
+  // Load quotes on initial mount when status is already quotes_ready/leads_sent
   useEffect(() => {
-    if (status !== 'quotes_ready' || !need?._id || quotes.length > 0) return;
+    if (!['quotes_ready', 'leads_sent'].includes(status) || !need?._id || quotes.length > 0) return;
     fetch(`${API}/serviceQuotes?needId=${need._id}`)
       .then(r => r.json())
-      .then(qs => { if (Array.isArray(qs)) setNeed(prev => ({ ...prev, quoteCount: qs.length })); setQuotes(Array.isArray(qs) ? qs : []); })
+      .then(d => {
+        const qs = Array.isArray(d?.quotes) ? d.quotes : (Array.isArray(d) ? d : []);
+        if (qs.length > 0) { setNeed(prev => ({ ...prev, quoteCount: qs.length })); setQuotes(qs); }
+      })
       .catch(() => {});
   }, [status, need?._id]);
 
@@ -572,13 +585,22 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
         )}
       </View>
 
-      {/* Quotes Modal */}
-      <ServiceQuotesModal
-        visible={quotesVisible}
-        quotes={quotes}
-        needText={need?.searchText}
-        onClose={() => setQuotesVisible(false)}
-      />
+      {/* Matches Modal — state-based swipeable cards, no messages */}
+      {quotesVisible && (
+        <ServiceMatchesModal
+          needId={need?._id}
+          quotes={quotes}
+          onClose={() => setQuotesVisible(false)}
+          onRefresh={async () => {
+            try {
+              const r = await fetch(`${API}/serviceQuotes?needId=${need._id}`);
+              const d = await r.json();
+              const qs = Array.isArray(d?.quotes) ? d.quotes : (Array.isArray(d) ? d : []);
+              if (qs.length > 0) setQuotes(qs);
+            } catch (_) {}
+          }}
+        />
+      )}
     </View>
   );
 }

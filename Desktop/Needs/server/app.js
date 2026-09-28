@@ -3195,77 +3195,141 @@ app.get('/needRequest/:id', async (req, res) => {
   }
 });
 
-// POST /respondToServiceQuote — business confirms, edits price, or asks a question
-// No requireAuth — quoteId is a 24-char ObjectId that acts as the access token
+// POST /respondToServiceQuote — business responds to a quote_request.
+// Stores the response directly in ServiceQuotes (no messages sent).
+// No requireAuth — quoteId (24-char ObjectId) acts as the access token.
 app.post('/respondToServiceQuote', async (req, res) => {
   try {
-    const { quoteId, action, editedPrice, message } = req.body;
-    if (!quoteId || !ObjectId.isValid(quoteId)) {
-      return res.status(400).json({ error: 'quoteId required' });
-    }
-    const quote = await database.collection('ServiceQuotes')
-      .findOne({ _id: new ObjectId(quoteId) });
+    const { quoteId, action, proposedDate, proposedTime, confirmedPrice, businessNote, questions } = req.body;
+    if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
-    if (action === 'confirm') {
+    if (action === 'confirm' || action === 'edit') {
       await database.collection('ServiceQuotes').updateOne(
         { _id: new ObjectId(quoteId) },
-        { $set: { status: 'confirmed_by_business', updatedAt: new Date() } }
+        { $set: {
+          status: action === 'confirm' ? 'business_confirmed' : 'business_edited',
+          proposedDate:   proposedDate  || null,
+          proposedTime:   proposedTime  || null,
+          confirmedPrice: confirmedPrice || null,
+          businessNote:   businessNote  || null,
+          respondedAt:    new Date(),
+        }}
       );
       if (quote.userId) {
         await database.collection('Notifications').insertOne({
-          userId: quote.userId,
-          type: 'match',
-          title: '✅ Quote Confirmed',
-          body: `${quote.businessName} confirmed your quote${quote.estimate ? ` for ${quote.estimate}` : ''}`,
-          needId: quote.needId,
-          quoteId: new ObjectId(quoteId),
-          read: false,
-          createdAt: new Date(),
-        });
-      }
-    } else if (action === 'edit') {
-      await database.collection('ServiceQuotes').updateOne(
-        { _id: new ObjectId(quoteId) },
-        { $set: { estimate: editedPrice, status: 'edited_by_business', updatedAt: new Date() } }
-      );
-      if (quote.userId) {
-        await database.collection('Notifications').insertOne({
-          userId: quote.userId,
-          type: 'match',
-          title: '✏️ Quote Updated',
-          body: `${quote.businessName} sent an updated quote${editedPrice ? `: ${editedPrice}` : ''}`,
-          needId: quote.needId,
-          quoteId: new ObjectId(quoteId),
-          read: false,
-          createdAt: new Date(),
+          userId: quote.userId, type: 'quote_update',
+          title: `${action === 'confirm' ? '✅' : '✏️'} Quote from ${quote.businessName}`,
+          body: `${quote.businessName} sent a quote${proposedDate ? ` for ${proposedDate}` : ''}`,
+          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
         });
       }
     } else if (action === 'ask') {
       await database.collection('ServiceQuotes').updateOne(
         { _id: new ObjectId(quoteId) },
-        { $set: { status: 'awaiting_info', updatedAt: new Date() } }
+        { $set: {
+          status: 'awaiting_user_info',
+          infoRequest: { questions: questions || [], askedAt: new Date() },
+          respondedAt: new Date(),
+        }}
       );
       if (quote.userId) {
         await database.collection('Notifications').insertOne({
-          userId: quote.userId,
-          type: 'match',
-          title: `Question from ${quote.businessName}`,
-          body: message || 'The provider has a question about your request.',
-          fromUserId: quote.serviceUserId,
-          needId: quote.needId,
-          quoteId: new ObjectId(quoteId),
-          read: false,
-          createdAt: new Date(),
+          userId: quote.userId, type: 'quote_update',
+          title: `💬 Question from ${quote.businessName}`,
+          body: questions?.[0] ? `"${questions[0]}"` : 'The business has a question about your request.',
+          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
         });
       }
     } else {
       return res.status(400).json({ error: 'action must be confirm, edit, or ask' });
     }
     res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
+  } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
+});
+
+// POST /userRespondToQuote — user confirms appointment, requests different time, or answers questions.
+// No requireAuth — quoteId acts as the access token.
+app.post('/userRespondToQuote', async (req, res) => {
+  try {
+    const { quoteId, action, requestedDate, requestedTime, answers } = req.body;
+    if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    if (action === 'confirm') {
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: new ObjectId(quoteId) },
+        { $set: { status: 'appointment_confirmed', userConfirmedAt: new Date() } }
+      );
+      if (quote.needId) {
+        await database.collection('NeedRequests').updateOne(
+          { _id: quote.needId },
+          { $set: { serviceMatchStatus: 'appointment_confirmed' } }
+        );
+      }
+      if (quote.serviceUserId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.serviceUserId, type: 'appointment_confirmed',
+          title: '🎉 Appointment Confirmed',
+          body: `Customer confirmed your appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}`,
+          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
+        });
+      }
+      // Add to business's Google Calendar (fire-and-forget)
+      setImmediate(async () => {
+        try {
+          if (!quote.serviceUserId) return;
+          const provider = await database.collection('Users').findOne(
+            { _id: quote.serviceUserId },
+            { projection: { 'googleCalendar.tokens': 1 } }
+          );
+          if (provider?.googleCalendar?.tokens) {
+            await gcal.createCalendarEvent(provider.googleCalendar.tokens, {
+              needText: quote.needText, businessName: quote.businessName,
+              date: quote.proposedDate, time: quote.proposedTime, price: quote.confirmedPrice,
+            });
+          }
+        } catch (_) {}
+      });
+
+    } else if (action === 'reschedule') {
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: new ObjectId(quoteId) },
+        { $set: {
+          status: 'user_requested_reschedule',
+          userRequestedDate: requestedDate || null,
+          userRequestedTime: requestedTime || null,
+          rescheduleRequestedAt: new Date(),
+        }}
+      );
+      if (quote.serviceUserId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.serviceUserId, type: 'reschedule_request',
+          title: '⏰ Reschedule Request',
+          body: `Customer requested a new time${requestedDate ? `: ${requestedDate}` : ''}`,
+          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
+        });
+      }
+    } else if (action === 'provide_info') {
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: new ObjectId(quoteId) },
+        { $set: { status: 'user_info_provided', infoResponse: { answers: answers || {}, respondedAt: new Date() } } }
+      );
+      if (quote.serviceUserId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.serviceUserId, type: 'info_provided',
+          title: '📝 Customer Answered Your Questions',
+          body: 'View the match to see their response and send an updated quote.',
+          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
+        });
+      }
+    } else {
+      return res.status(400).json({ error: 'action must be confirm, reschedule, or provide_info' });
+    }
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
 
 // Render

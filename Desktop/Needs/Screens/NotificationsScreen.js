@@ -17,6 +17,7 @@ const Notifications = (Platform.OS !== 'web' && !_isExpoGo)
   : { requestPermissionsAsync: async () => ({}), getPermissionsAsync: async () => ({}), scheduleNotificationAsync: async () => {}, getAllScheduledNotificationsAsync: async () => [] };
 import { UserContext } from '../server/CurrentUser';
 import RespondToLeadModal from './RespondToLeadModal';
+import QuoteResponseModal from './QuoteResponseModal';
 
 import { NODE_API, FLASK_API } from '../config';
 import { IS_WEB, IS_MOBILE_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
@@ -159,7 +160,7 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
 // A quote_request — auto-generated quote sent to a business for 1-tap response.
 // Business-facing quote_request row — Confirm/Edit open RespondToLeadModal (same as leads);
 // Ask sends the AI info-request to the user's Messages.
-const QuoteRequestRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) => {
+const QuoteRequestRow = ({ item, onRespond, onAsk, requestingInfo }) => {
   const cfg = NOTIF_ICONS.quote_request;
   const hasEstimate = item.estimateMin != null && item.estimateMax != null;
   const askDone = item.infoRequested;
@@ -188,7 +189,7 @@ const QuoteRequestRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo })
 
         {item.responded ? (
           <Text style={[styles.rowBody, { color: '#10B981', marginTop: 6, fontWeight: '600' }]}>
-            ✓ Response sent — check your Messages
+            ✓ Response sent
           </Text>
         ) : (
           <View style={styles.leadButtonsRow}>
@@ -203,15 +204,12 @@ const QuoteRequestRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo })
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.requestInfoBtn, { flex: 1 }, askDone && styles.requestInfoBtnDone]}
-              onPress={() => !askDone && !requestingInfo && onRequestMoreInfo(item)}
-              disabled={askDone || requestingInfo}
+              onPress={() => !askDone && onAsk(item)}
+              disabled={askDone}
             >
-              {requestingInfo
-                ? <ActivityIndicator size="small" color="#2563EB" />
-                : <Text style={[styles.requestInfoBtnText, askDone && styles.requestInfoBtnTextDone]}>
-                    {askDone ? '✓ Asked' : '💬 Ask'}
-                  </Text>
-              }
+              <Text style={[styles.requestInfoBtnText, askDone && styles.requestInfoBtnTextDone]}>
+                {askDone ? '✓ Asked' : '💬 Ask'}
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -360,6 +358,7 @@ const NotificationsScreen = () => {
   const [myTransactions, setMyTransactions] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [respondTarget, setRespondTarget] = useState(null);
+  const [quoteRespondTarget, setQuoteRespondTarget] = useState(null); // { notification, initialTab }
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
@@ -733,8 +732,8 @@ const NotificationsScreen = () => {
               : item.type === 'quote_request'
                 ? <QuoteRequestRow
                     item={item}
-                    onRespond={i => handleRespond(i)}
-                    onRequestMoreInfo={i => handleRequestMoreInfo(i)}
+                    onRespond={i => setQuoteRespondTarget({ notification: i, initialTab: 'quote' })}
+                    onAsk={i => setQuoteRespondTarget({ notification: i, initialTab: 'ask' })}
                     requestingInfo={requestingInfoIds.has(item._id)}
                   />
                 : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
@@ -753,6 +752,19 @@ const NotificationsScreen = () => {
             setNotifications(prev => prev.map(n => n._id === respondTarget._id ? { ...n, read: true } : n));
             setRespondTarget(null);
             navigation.navigate('Conversation', conversationData);
+          }}
+        />
+      )}
+
+      {quoteRespondTarget && (
+        <QuoteResponseModal
+          notification={quoteRespondTarget.notification}
+          initialTab={quoteRespondTarget.initialTab}
+          onClose={() => setQuoteRespondTarget(null)}
+          onSent={() => {
+            const id = quoteRespondTarget.notification?._id;
+            if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, responded: true, read: true } : n));
+            setQuoteRespondTarget(null);
           }}
         />
       )}

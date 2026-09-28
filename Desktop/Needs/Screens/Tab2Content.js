@@ -465,8 +465,10 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
         const qs = Array.isArray(qData) ? qData : [];
 
         if (qs.length > 0) {
-          quotesLoadedRef.current = true;
           setQuotes(qs);
+          // Only lock ref once a business has actually responded (not just pending_business)
+          const hasRealQuote = qs.some(q => !['pending_business', 'cancelled'].includes(q.status));
+          if (hasRealQuote) quotesLoadedRef.current = true;
           setNeed(prev => ({
             ...prev,
             serviceMatchStatus: prev.serviceMatchStatus === 'processing' || prev.serviceMatchStatus === 'finding_matches' || prev.serviceMatchStatus === 'generating_quotes'
@@ -491,14 +493,19 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     return () => clearInterval(interval);
   }, [need?._id, allQuotesTerminal]);
 
-  // Load quotes on mount if status already shows quotes available
+  // Load quotes on mount
   useEffect(() => {
-    if (!need?._id || quotesLoadedRef.current) return;
+    if (!need?._id) return;
     fetch(`${API}/serviceQuotes?needId=${need._id}`)
       .then(r => r.json())
       .then(d => {
         const qs = Array.isArray(d) ? d : [];
-        if (qs.length > 0) { quotesLoadedRef.current = true; setQuotes(qs); }
+        if (qs.length > 0) {
+          setQuotes(qs);
+          if (qs.some(q => !['pending_business', 'cancelled'].includes(q.status))) {
+            quotesLoadedRef.current = true;
+          }
+        }
       })
       .catch(() => {});
   }, [need?._id]);
@@ -516,10 +523,11 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     return () => loop.stop();
   }, [isResolved]);
 
-  const hasMatches = quotes.length > 0;
-  // Pill always says "Pending Service Quotes" until quotes arrive, then shows count
+  // Only count quotes where the business has actually sent a response (not pending_business)
+  const realQuotes = quotes.filter(q => !['pending_business', 'cancelled'].includes(q.status));
+  const hasMatches = realQuotes.length > 0;
   const pillLabel = hasMatches
-    ? `${quotes.length} Quote${quotes.length !== 1 ? 's' : ''} Ready`
+    ? `${realQuotes.length} Quote${realQuotes.length !== 1 ? 's' : ''} Ready`
     : 'Pending Service Quotes';
   const pillStyle = hasMatches ? styles.matchPill : styles.swipeHintPill;
   const pillTextStyle = hasMatches ? styles.matchPillText : styles.swipeHintText;

@@ -12,8 +12,18 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { NODE_API } from '../config';
 import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 
-const { width: SW, height: SH } = Dimensions.get('window');
+const { width: SW } = Dimensions.get('window');
 const CARD_W = IS_WEB ? Math.min(400, SW - 48) : SW - 32;
+
+// Resolve a raw portfolio URL the same way Tab2Content does.
+// Handles: full http URL, MongoDB ObjectId filename, relative path, or null.
+const DEFAULT_SERVICE_IMG = 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&q=80';
+const resolveServiceImg = (url) => {
+  if (!url) return DEFAULT_SERVICE_IMG;
+  if (url.startsWith('http')) return url;
+  if (/^[0-9a-f]{24}$/i.test(url)) return `${NODE_API}/images/${url}`;
+  return `${NODE_API}/uploads/${url}`;
+};
 
 const pad = (n) => String(n).padStart(2, '0');
 const fmtTime = (d) => {
@@ -210,7 +220,7 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
       .catch(() => {});
   }, [quote.serviceId]);
 
-  const coverUrl = service?.portfolioImageUrls?.[0] || quote.businessLogoUrl || null;
+  const coverUrl = resolveServiceImg(service?.portfolioImageUrls?.[0] || quote.businessLogoUrl || null);
   const displayName = quote.businessName || service?.businessName || 'Service Provider';
 
   const handleConfirm = async () => {
@@ -239,9 +249,7 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
 
               {/* Hero image */}
               <View style={{ position: 'relative' }}>
-                {coverUrl
-                  ? <Image source={{ uri: coverUrl }} style={sd.hero} resizeMode="cover" />
-                  : <View style={[sd.hero, { backgroundColor: '#1E3A5F' }]} />}
+                <Image source={{ uri: coverUrl }} style={sd.hero} resizeMode="cover" />
                 <TouchableOpacity style={sd.backBtn} onPress={onClose}>
                   <Ionicons name="chevron-back" size={26} color="#fff" />
                 </TouchableOpacity>
@@ -291,12 +299,12 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
                   </View>
                 )}
 
-                {service?.portfolioImageUrls?.length > 1 && (
+                {service?.portfolioImageUrls?.length > 0 && (
                   <View style={sd.section}>
                     <Text style={sd.sectionTitle}>Portfolio</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                       {service.portfolioImageUrls.slice(0, 5).map((url, i) => (
-                        <Image key={i} source={{ uri: url }} style={sd.portfolioImg} resizeMode="cover" />
+                        <Image key={i} source={{ uri: resolveServiceImg(url) }} style={sd.portfolioImg} resizeMode="cover" />
                       ))}
                     </ScrollView>
                   </View>
@@ -468,7 +476,7 @@ function QuoteSummaryCard({ quote, onTap }) {
   const isPending   = quote.status === 'pending_business';
   const isConfirmed = quote.status === 'appointment_confirmed';
   const isCancelled = quote.status === 'cancelled';
-  const coverUrl    = quote.businessLogoUrl || null;
+  const coverUrl    = resolveServiceImg(quote.businessLogoUrl || null);
 
   const priceDisplay = quote.confirmedPrice
     ? `$${quote.confirmedPrice}`
@@ -482,9 +490,7 @@ function QuoteSummaryCard({ quote, onTap }) {
     <TouchableOpacity style={qs.card} onPress={() => onTap(quote)} activeOpacity={0.88}>
       {/* Cover image */}
       <View style={qs.coverWrap}>
-        {coverUrl
-          ? <Image source={{ uri: coverUrl }} style={qs.cover} resizeMode="cover" />
-          : <View style={[qs.cover, { backgroundColor: '#1E3A5F' }]} />}
+        <Image source={{ uri: coverUrl }} style={qs.cover} resizeMode="cover" />
         <View style={qs.coverOverlay} />
         <View style={qs.statusBadgeWrap}>
           <StatusBadge status={quote.status} />

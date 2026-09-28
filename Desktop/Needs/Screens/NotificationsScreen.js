@@ -349,6 +349,67 @@ const SchedulerCard = ({ apt, currentUserId }) => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Business-facing rows for quote update notifications
+// ─────────────────────────────────────────────────────────────────────────────
+const AppointmentConfirmedRow = ({ item }) => (
+  <View style={[styles.row, { alignItems: 'flex-start', backgroundColor: '#F0FDF4' }]}>
+    <View style={[styles.iconWrap, { backgroundColor: '#DCFCE7' }]}>
+      <Ionicons name="checkmark-circle" size={W ? 26 : 20} color="#16A34A" />
+    </View>
+    <View style={styles.rowContent}>
+      <View style={styles.rowTop}>
+        <Text style={[styles.rowTitle, { color: '#15803D' }]} numberOfLines={1}>{item.title || '🎉 Appointment Confirmed'}</Text>
+        <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+      </View>
+      <Text style={styles.rowBody}>{item.body}</Text>
+    </View>
+    {!item.read && <View style={styles.unreadDot} />}
+  </View>
+);
+
+const RescheduleRequestRow = ({ item, onRespond }) => (
+  <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
+    <View style={[styles.iconWrap, { backgroundColor: '#FFFBEB' }]}>
+      <Ionicons name="time-outline" size={W ? 26 : 20} color="#D97706" />
+    </View>
+    <View style={styles.rowContent}>
+      <View style={styles.rowTop}>
+        <Text style={styles.rowTitle} numberOfLines={1}>{item.title || '⏰ Reschedule Request'}</Text>
+        <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+      </View>
+      <Text style={styles.rowBody}>{item.body}</Text>
+      <View style={styles.leadButtonsRow}>
+        <TouchableOpacity style={styles.respondBtn} onPress={() => item.quoteId && onRespond(item)}>
+          <Text style={styles.respondBtnText}>Send New Schedule</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+    {!item.read && <View style={styles.unreadDot} />}
+  </View>
+);
+
+const InfoProvidedRow = ({ item, onRespond }) => (
+  <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
+    <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
+      <Ionicons name="chatbubble-ellipses-outline" size={W ? 26 : 20} color="#7C3AED" />
+    </View>
+    <View style={styles.rowContent}>
+      <View style={styles.rowTop}>
+        <Text style={styles.rowTitle} numberOfLines={1}>{item.title || '📝 Customer Answered'}</Text>
+        <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+      </View>
+      <Text style={styles.rowBody}>{item.body}</Text>
+      <View style={styles.leadButtonsRow}>
+        <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => item.quoteId && onRespond(item)}>
+          <Text style={styles.respondBtnText}>Send Quote</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+    {!item.read && <View style={styles.unreadDot} />}
+  </View>
+);
+
 const NotificationsScreen = () => {
   const navigation = useNavigation();
   const { userId } = useContext(UserContext);
@@ -362,6 +423,7 @@ const NotificationsScreen = () => {
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
+  const BUSINESS_QUOTE_TYPES = ['appointment_confirmed', 'reschedule_request', 'info_provided', 'quote_update'];
 
   const fetchNotifications = useCallback(async () => {
     if (!userId) return;
@@ -565,13 +627,14 @@ const NotificationsScreen = () => {
 
   const filtered = notifications.filter(n => {
     if (activeTab === 'Messages') return n.type === 'message';
-    if (activeTab === 'Matches')  return n.type === 'match' || n.type === 'lead' || n.type === 'quote_request';
+    if (activeTab === 'Matches')  return n.type === 'match' || n.type === 'lead' || n.type === 'quote_request'
+      || BUSINESS_QUOTE_TYPES.includes(n.type);
     return true;
   });
 
   const unreadCount    = notifications.filter(n => !n.read).length;
   const messagesCount  = notifications.filter(n => n.type === 'message' && !n.read).length;
-  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request') && !n.read).length;
+  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request' || BUSINESS_QUOTE_TYPES.includes(n.type)) && !n.read).length;
   const schedulerCount = appointments.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length;
   const TAB_META = {
     Messages:  { icon: 'chatbubbles-outline', count: messagesCount },
@@ -736,6 +799,19 @@ const NotificationsScreen = () => {
                     onAsk={i => setQuoteRespondTarget({ notification: i, initialTab: 'ask' })}
                     requestingInfo={requestingInfoIds.has(item._id)}
                   />
+              : item.type === 'appointment_confirmed'
+                ? <AppointmentConfirmedRow item={item} />
+              : item.type === 'reschedule_request'
+                ? <RescheduleRequestRow item={item} onRespond={i => {
+                    // Map notification quoteId → open QuoteResponseModal
+                    const qId = i.quoteId ? String(i.quoteId) : null;
+                    if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'quote' });
+                  }} />
+              : item.type === 'info_provided'
+                ? <InfoProvidedRow item={item} onRespond={i => {
+                    const qId = i.quoteId ? String(i.quoteId) : null;
+                    if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'quote' });
+                  }} />
                 : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
           )}
           ItemSeparatorComponent={() => <View style={styles.sep} />}

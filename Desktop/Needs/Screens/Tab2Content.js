@@ -441,7 +441,7 @@ const STATUS_STEPS = {
   error:              { label: 'Something Went Wrong', icon: 'warning-outline',      color: '#EF4444' },
 };
 
-function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
+function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, onOpenNeed, onViewCreator, onLayout }) {
   const [need, setNeed] = useState(initialNeed);
   const [quotes, setQuotes] = useState([]);
   const [quotesVisible, setQuotesVisible] = useState(false);
@@ -524,68 +524,67 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
 
   const cfg = STATUS_STEPS[status] || STATUS_STEPS.processing;
   const quoteCount = need?.quoteCount || quotes.length;
+  const hasMatches = quoteCount > 0;
+
+  // Swipe right on the card to open matches
+  const swipePan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy),
+      onPanResponderRelease: (_, g) => { if (g.dx > 40 && hasMatches) setQuotesVisible(true); },
+    })
+  ).current;
+
+  // Pill — on web it lives in rightSlot so it doesn't overlap the media image
+  const pillNode = (
+    <TouchableOpacity onPress={() => hasMatches && setQuotesVisible(true)} activeOpacity={0.85}>
+      <Animated.View style={[
+        hasMatches ? styles.matchPill : styles.swipeHintPill,
+        { opacity: pulseAnim, position: 'relative', top: 0, right: 0 },
+      ]}>
+        <Text style={hasMatches ? styles.matchPillText : styles.swipeHintText}>
+          {hasMatches ? `${quoteCount} Match${quoteCount !== 1 ? 'es' : ''}` : cfg.label}
+        </Text>
+      </Animated.View>
+    </TouchableOpacity>
+  );
 
   return (
-    <View style={{ width: '100%' }} onLayout={onLayout}>
-      <View style={svcStyles.card}>
-        {/* Header row */}
-        <View style={svcStyles.headerRow}>
-          <View style={[svcStyles.iconCircle, { backgroundColor: `${cfg.color}20` }]}>
-            <Ionicons name="construct-outline" size={18} color={cfg.color} />
-          </View>
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={svcStyles.title} numberOfLines={2}>
-              {toTitle(need?.searchText || '', 8)}
-            </Text>
-            {need?.urgency ? (
-              <Text style={svcStyles.subtitle}>{need.urgency}</Text>
-            ) : null}
-          </View>
-          <View style={[svcStyles.badge, { backgroundColor: `${cfg.color}15` }]}>
-            <Text style={[svcStyles.badgeText, { color: cfg.color }]}>Service</Text>
-          </View>
-        </View>
+    <View style={{ width: '100%' }} onLayout={onLayout} {...(hasMatches ? swipePan.panHandlers : {})}>
+      <View style={{ width: '100%', position: 'relative' }}>
+        <Card
+          badgeLabel="Service"
+          badgeColor={cfg.color}
+          title={toTitle((need?.searchText || '').replace(/\*\*/g, ''), 8)}
+          subtitle={need?.urgency ? `When: ${need.urgency}` : ''}
+          media={IS_WEB ? media : media}
+          isActive={isActive}
+          onPress={onOpenNeed}
+          creatorName={[need?.firstName, need?.lastName].filter(Boolean).join(' ') || null}
+          creatorPic={need?.profilePicture}
+          onViewCreator={onViewCreator}
+          rightSlot={IS_WEB ? pillNode : undefined}
+        />
 
-        {/* Status row */}
-        <View style={svcStyles.statusRow}>
-          {!isResolved ? (
-            <Animated.View style={{ opacity: pulseAnim }}>
-              <Ionicons name={cfg.icon} size={15} color={cfg.color} />
-            </Animated.View>
-          ) : (
-            <Ionicons name={cfg.icon} size={15} color={cfg.color} />
-          )}
-          <Text style={[svcStyles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
-          {status === 'quotes_ready' && quoteCount > 0 && (
-            <View style={svcStyles.quoteBadge}>
-              <Text style={svcStyles.quoteBadgeText}>{quoteCount}</Text>
-            </View>
-          )}
-        </View>
-
-        {/* View Matches button — appears once matches/quotes have been found */}
-        {quoteCount > 0 && (
+        {/* Status/match pill — native only */}
+        {!IS_WEB && (
           <TouchableOpacity
-            style={svcStyles.viewQuotesBtn}
-            onPress={() => setQuotesVisible(true)}
-            activeOpacity={0.8}
+            style={{ position: 'absolute', top: 14, right: 16, zIndex: 30 }}
+            onPress={() => hasMatches && setQuotesVisible(true)}
+            activeOpacity={0.85}
           >
-            <Ionicons name="people-outline" size={14} color="#fff" />
-            <Text style={svcStyles.viewQuotesBtnText}>
-              View Matches ({quoteCount})
-            </Text>
+            <Animated.View style={[
+              hasMatches ? styles.matchPill : styles.swipeHintPill,
+              { opacity: pulseAnim, position: 'relative', top: 0, right: 0 },
+            ]}>
+              <Text style={hasMatches ? styles.matchPillText : styles.swipeHintText}>
+                {hasMatches ? `${quoteCount} Match${quoteCount !== 1 ? 'es' : ''}` : cfg.label}
+              </Text>
+            </Animated.View>
           </TouchableOpacity>
-        )}
-
-        {/* Leads-sent fallback (no auto-pricing available) */}
-        {status === 'leads_sent' && quoteCount === 0 && (
-          <Text style={svcStyles.leadsSentText}>
-            Providers have been notified and will respond in Messages.
-          </Text>
         )}
       </View>
 
-      {/* Matches Modal — state-based swipeable cards, no messages */}
+      {/* Matches Modal */}
       {quotesVisible && (
         <ServiceMatchesModal
           needId={need?._id}
@@ -595,7 +594,7 @@ function ServiceNeedCard({ need: initialNeed, isSessionNeed, onLayout }) {
             try {
               const r = await fetch(`${API}/serviceQuotes?needId=${need._id}`);
               const d = await r.json();
-              const qs = Array.isArray(d?.quotes) ? d.quotes : (Array.isArray(d) ? d : []);
+              const qs = Array.isArray(d) ? d : [];
               if (qs.length > 0) setQuotes(qs);
             } catch (_) {}
           }}
@@ -754,7 +753,17 @@ function isServiceNeed(need) {
 
 function HorizontalNeedRow(props) {
   if (isServiceNeed(props.need)) {
-    return <ServiceNeedCard need={props.need} isSessionNeed={props.isSessionNeed} onLayout={props.onLayout} />;
+    return (
+      <ServiceNeedCard
+        need={props.need}
+        media={props.media}
+        isActive={props.isActive}
+        isSessionNeed={props.isSessionNeed}
+        onOpenNeed={props.onOpenNeed}
+        onViewCreator={props.onViewCreator}
+        onLayout={props.onLayout}
+      />
+    );
   }
   return <HorizontalNeedRowInner {...props} />;
 }

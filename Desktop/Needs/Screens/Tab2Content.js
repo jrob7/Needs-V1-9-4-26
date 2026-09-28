@@ -740,8 +740,20 @@ const svcStyles = StyleSheet.create({
 // ─────────────────────────────────────────────────────────────────────────────
 // Gateway wrapper — routes service-lifecycle needs to ServiceNeedCard without
 // violating the Rules of Hooks (no conditional return before hook calls).
+const SERVICE_KEYWORDS = ['plumber','plumbing','electrician','mechanic','repair','fix','install',
+  'handyman','cleaner','hvac','painter','mover','barber','salon','attorney','lawyer','tutor',
+  'landscaping','lawn','mowing','cleaning','painting','roofing','pest','tree'];
+
+function isServiceNeed(need) {
+  if (!need) return false;
+  if (need.serviceMatchStatus) return true;        // already in the service flow
+  if (need.needType === 'service') return true;    // explicitly tagged
+  const t = (need.searchText || '').toLowerCase();
+  return SERVICE_KEYWORDS.some(w => t.includes(w));
+}
+
 function HorizontalNeedRow(props) {
-  if (props.need?.serviceMatchStatus) {
+  if (isServiceNeed(props.need)) {
     return <ServiceNeedCard need={props.need} isSessionNeed={props.isSessionNeed} onLayout={props.onLayout} />;
   }
   return <HorizontalNeedRowInner {...props} />;
@@ -833,9 +845,10 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
       if (SERVICE_HINTS.some(w => t.includes(w))) return 'service';
       return 'item';
     })();
+    // Service needs always go through ServiceNeedCard/ServiceMatchesModal — never the broad-match pill.
     // Don't restart the timer if matches are already showing — this prevents
     // the pill from reverting to blinking after returning from a detail view.
-    const shouldFire = isSessionNeed && ['food', 'service'].includes(needType) && !showSwipeHint;
+    const shouldFire = isSessionNeed && needType === 'food' && !showSwipeHint;
     console.log('⏱ Timer check:', need?.searchText?.slice(0, 20), '| fires:', shouldFire);
     if (!shouldFire) return;
 

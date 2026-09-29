@@ -154,7 +154,7 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
       body: JSON.stringify({ query: notification?.needText || '' }),
     })
       .then(r => r.json())
-      .then(d => setQuestions(d.questions || []))
+      .then(d => setQuestions((d.questions || []).map(q => (typeof q === 'string' ? q : q?.question || '')).filter(Boolean)))
       .catch(() => setQuestions(['Please describe your yard size.', 'What day works best for you?']))
       .finally(() => setLoadingQs(false));
   }, [activeTab]);

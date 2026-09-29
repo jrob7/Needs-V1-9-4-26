@@ -3000,6 +3000,62 @@ app.post('/createNotification', async (req, res) => {
   }
 });
 
+// POST /getServicePricingQuestion
+// Runs findMatches on the combined query, pulls the top matched service's real
+// pricingDetails, then asks the LLM to generate ONE question that maps to an
+// actual pricing tier rather than asking generically.
+// Returns: { question: string|null }
+app.post('/getServicePricingQuestion', async (req, res) => {
+  const { query, userLat, userLng, userCity } = req.body;
+  if (!query) return res.json({ question: null });
+
+  try {
+    // 1. Find top matching service for this query
+    const matchRes = await fetch(`${FLASK_API}/ai/findMatches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        type: 'service',
+        ...(userLat != null && userLng != null ? { userLat, userLng } : {}),
+        ...(userCity ? { userCity } : {}),
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const matchData = await matchRes.json();
+    const topMatch = (matchData?.matches || [])[0];
+    if (!topMatch) return res.json({ question: null });
+
+    // 2. Load that service's pricingDetails from the database
+    const serviceDoc = await database.collection('Services').findOne(
+      topMatch._id && ObjectId.isValid(String(topMatch._id))
+        ? { _id: new ObjectId(String(topMatch._id)) }
+        : { businessName: topMatch.businessName || topMatch.name }
+    );
+    if (!serviceDoc?.pricingDetails || Object.keys(serviceDoc.pricingDetails).length === 0) {
+      return res.json({ question: null });
+    }
+
+    // 3. Ask LLM for ONE follow-up question grounded in the real pricing tiers
+    const pRes = await fetch(`${FLASK_API}/ai/generatePricingFollowUp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query,
+        serviceName: serviceDoc.businessName,
+        serviceCategory: serviceDoc.category,
+        pricingDetails: serviceDoc.pricingDetails,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const pData = await pRes.json();
+    return res.json({ question: pData.question || null });
+  } catch (e) {
+    console.error('getServicePricingQuestion error:', e?.message);
+    return res.json({ question: null });
+  }
+});
+
 // ─── Needs Logic Flow: Service Matching ───────────────────────────────────────
 // POST /triggerServiceMatching — returns immediately; runs background matching
 app.post('/triggerServiceMatching', async (req, res) => {

@@ -661,18 +661,24 @@ export default function SearchScreen() {
     if (!base.trim()) { pushAI('I lost track of your request. Please describe your need again.'); return; }
     const combinedText = `${base} ${answer}`.trim();
 
-    // For service requests, ask one pricing-relevant question if the job type is now clear.
+    // For service requests, run a preview match against real services and ask
+    // ONE question grounded in the top match's actual pricing tiers.
     if (isService) {
       try {
-        const pRes = await axios.post(`${FLASK_API}/ai/checkServicePricingQuestion`, { query: combinedText });
-        if (pRes.data?.hasPricingQuestion && pRes.data?.question) {
+        const loc = locationRef.current;
+        const pRes = await api.post(`${NODE_API}/getServicePricingQuestion`, {
+          query: combinedText,
+          ...(loc?.lat != null && loc?.lng != null ? { userLat: loc.lat, userLng: loc.lng } : {}),
+          ...(loc?.city ? { userCity: loc.city } : {}),
+        });
+        if (pRes.data?.question) {
           pushAI(pRes.data.question);
           setPendingPricingQuestion({ combinedText, media: mediaToUse });
           setAwaitingPricingQuestion(true);
           return;
         }
       } catch (e) {
-        console.log('⚠️ checkServicePricingQuestion failed, skipping:', e?.message);
+        console.log('⚠️ getServicePricingQuestion failed, skipping:', e?.message);
       }
     }
 

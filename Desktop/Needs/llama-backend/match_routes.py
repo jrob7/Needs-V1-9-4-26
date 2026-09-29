@@ -1203,6 +1203,47 @@ or
 {{"hasPricingQuestion": false, "question": null}}
 """.strip()
 
+@match_bp.route("/generatePricingFollowUp", methods=["POST"])
+def generate_pricing_follow_up():
+    """Given a customer query + a real service's pricingDetails, returns ONE
+    question whose answer will identify the correct pricing tier."""
+    data     = request.get_json(silent=True) or {}
+    query    = (data.get("query") or "").strip()
+    pricing  = data.get("pricingDetails") or {}
+
+    if not query or not pricing:
+        return jsonify({"question": None})
+
+    lines = []
+    for sub, questions in pricing.items():
+        lines.append(f"  {sub}:")
+        for q, a in (questions or {}).items():
+            lines.append(f"    {q} {a}")
+    pricing_text = "\n".join(lines)
+
+    prompt = (
+        f'Customer request: "{query}"\n\n'
+        f"Matching provider's pricing structure:\n{pricing_text}\n\n"
+        "Identify the single most important question to ask the customer that "
+        "would let you select the correct pricing tier from the list above. "
+        "The question must be short, plain-language, and answerable without "
+        "technical knowledge (e.g. size, quantity, location — not brand or specs).\n\n"
+        "Respond with ONLY valid JSON:\n"
+        '{"question": "<short question>"}\n'
+        "or if no useful differentiating question can be derived:\n"
+        '{"question": null}'
+    )
+
+    try:
+        raw = generate_response(prompt) or ""
+        parsed = _extract_json_object(raw)
+        question = (parsed.get("question") or "").strip() or None
+        return jsonify({"question": question})
+    except Exception as e:
+        logging.warning(f"generatePricingFollowUp error: {e}")
+        return jsonify({"question": None})
+
+
 @match_bp.route("/checkServicePricingQuestion", methods=["POST"])
 def check_service_pricing_question():
     body  = request.get_json(silent=True) or {}

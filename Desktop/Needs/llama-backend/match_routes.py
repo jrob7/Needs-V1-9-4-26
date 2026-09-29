@@ -1164,3 +1164,60 @@ def generate_service_quote():
             "estimateMax": None,
             "breakdown": "Estimate will be confirmed by the provider.",
         })
+
+
+# POST /checkServicePricingQuestion
+# ─────────────────────────────────────────────────────────────────────────────
+# Given a service request that already describes a specific job type, asks ONE
+# strategic question whose answer will meaningfully improve the price estimate
+# (e.g. lawn size for mowing, room count for painting, pipe location for plumbing).
+# Returns: { hasPricingQuestion: bool, question: str|null }
+# ─────────────────────────────────────────────────────────────────────────────
+_PRICING_QUESTION_PROMPT = """
+You are helping generate a price estimate for a local service request.
+
+Customer's request: "{query}"
+
+Step 1 — Does this request describe a SPECIFIC job type (e.g. "mow my lawn", "paint my bedroom", "fix a leak under the sink", "install hardwood floors", "clean my gutters")? A specific job type names a concrete task, not just a profession.
+
+Step 2 — If yes, identify the single attribute that most affects the price for that job type and ask ONE short, conversational question about it. The question should help narrow the price estimate the way a business's own pricing survey would.
+
+Good questions:
+- "Approximately how large is your lawn?" (for mowing)
+- "How many rooms need painting?" (for interior painting)
+- "Is the plumbing issue inside or outside the home?" (for plumbing)
+- "What size is your dog?" (for grooming)
+- "Approximately how many square feet needs cleaning?" (for cleaning)
+- "Is the fence wood, vinyl, or metal?" (for fence repair)
+
+Bad questions — do NOT ask:
+- Brand/model specifics ("What brand is your mower?")
+- Diagnostic details the customer can't easily know ("What's the pipe diameter?")
+- Anything already answered in the request
+
+If the request is vague (just names a profession or general category without a specific task), or if you cannot identify a single pricing-relevant attribute, set hasPricingQuestion to false.
+
+Respond with ONLY valid JSON, no other text:
+{{"hasPricingQuestion": true, "question": "<short conversational question>"}}
+or
+{{"hasPricingQuestion": false, "question": null}}
+""".strip()
+
+@match_bp.route("/checkServicePricingQuestion", methods=["POST"])
+def check_service_pricing_question():
+    body  = request.get_json(silent=True) or {}
+    query = (body.get("query") or "").strip()
+    if not query:
+        return jsonify({"hasPricingQuestion": False, "question": None})
+
+    try:
+        raw = generate_response(_PRICING_QUESTION_PROMPT.format(query=query)) or ""
+        parsed = _extract_json_object(raw)
+        has_q = parsed.get("hasPricingQuestion")
+        question = (parsed.get("question") or "").strip() or None
+        if has_q is True and question:
+            return jsonify({"hasPricingQuestion": True, "question": question})
+    except Exception as e:
+        logging.warning(f"checkServicePricingQuestion error: {e}")
+
+    return jsonify({"hasPricingQuestion": False, "question": None})

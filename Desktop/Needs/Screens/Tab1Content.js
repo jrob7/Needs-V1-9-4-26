@@ -143,7 +143,9 @@ export default function SearchScreen() {
 
   // Routing-readiness clarification — at most ONE question, ever, per request.
   const [awaitingClarification, setAwaitingClarification] = useState(false);
-  const [pendingClarification, setPendingClarification] = useState(null); // { finalText, media }
+  const [pendingClarification, setPendingClarification] = useState(null); // { finalText, media, needType? }
+  const [awaitingPricingQuestion, setAwaitingPricingQuestion] = useState(false);
+  const [pendingPricingQuestion, setPendingPricingQuestion] = useState(null); // { combinedText, media }
   const [awaitingHelpCategory, setAwaitingHelpCategory] = useState(false);
 
   const [enhancing, setEnhancing] = useState(false);
@@ -489,7 +491,7 @@ export default function SearchScreen() {
           if (readyRes.data?.ready === false && readyRes.data?.question) {
             setConversation((prev) => prev.filter((m) => !m.aiThinking));
             pushAI(readyRes.data.question);
-            setPendingClarification({ finalText, media: mediaForNeed });
+            setPendingClarification({ finalText, media: mediaForNeed, needType });
             setAwaitingClarification(true);
             return;
           }
@@ -642,7 +644,8 @@ export default function SearchScreen() {
   };
 
   // Resumes routing after the one allowed clarification question — appends
-  // the answer to the original text and proceeds without asking again.
+  // the answer to the original text, then (for service requests) asks ONE
+  // strategic pricing question before proceeding.
   const handleClarificationAnswer = async () => {
     const answer = (input || '').trim();
     if (!answer) return;
@@ -651,12 +654,45 @@ export default function SearchScreen() {
 
     const base = pendingClarification?.finalText || '';
     const mediaToUse = pendingClarification?.media || null;
+    const isService = pendingClarification?.needType === 'service';
     setAwaitingClarification(false);
     setPendingClarification(null);
 
     if (!base.trim()) { pushAI('I lost track of your request. Please describe your need again.'); return; }
     const combinedText = `${base} ${answer}`.trim();
+
+    // For service requests, ask one pricing-relevant question if the job type is now clear.
+    if (isService) {
+      try {
+        const pRes = await axios.post(`${FLASK_API}/ai/checkServicePricingQuestion`, { query: combinedText });
+        if (pRes.data?.hasPricingQuestion && pRes.data?.question) {
+          pushAI(pRes.data.question);
+          setPendingPricingQuestion({ combinedText, media: mediaToUse });
+          setAwaitingPricingQuestion(true);
+          return;
+        }
+      } catch (e) {
+        console.log('⚠️ checkServicePricingQuestion failed, skipping:', e?.message);
+      }
+    }
+
     await processNeedFlow(combinedText, mediaToUse, { skipReadinessCheck: true });
+  };
+
+  // Handles the answer to the pricing-refinement question (service requests only).
+  const handlePricingQuestionAnswer = async () => {
+    const answer = (input || '').trim();
+    if (!answer) return;
+    pushUser(answer, false);
+    setInput('');
+
+    const { combinedText, media: mediaToUse } = pendingPricingQuestion || {};
+    setAwaitingPricingQuestion(false);
+    setPendingPricingQuestion(null);
+
+    if (!combinedText) { pushAI('I lost track of your request. Please describe your need again.'); return; }
+    const finalText = `${combinedText} ${answer}`.trim();
+    await processNeedFlow(finalText, mediaToUse, { skipReadinessCheck: true });
   };
 
   const handleDecisionStage = async () => {
@@ -793,6 +829,7 @@ export default function SearchScreen() {
     if (!overrideText && awaitingLocationRef.current) { await handleLocationInput(); return; }
     if (awaitingDecision) { await handleDecisionStage(); return; }
     if (awaitingEnhancementChoice) { await handleEnhancementChoice(); return; }
+    if (awaitingPricingQuestion) { await handlePricingQuestionAnswer(); return; }
     if (awaitingClarification) { await handleClarificationAnswer(); return; }
 
     if (awaitingHelpCategory) {
@@ -960,7 +997,7 @@ export default function SearchScreen() {
               if (readyRes.data?.ready === false && readyRes.data?.question) {
                 setConversation((prev) => prev.filter((m) => !m.aiThinking));
                 pushAI(readyRes.data.question);
-                setPendingClarification({ finalText: enhancedText, media });
+                setPendingClarification({ finalText: enhancedText, media, needType: 'service' });
                 setAwaitingClarification(true);
                 return;
               }
@@ -1226,6 +1263,7 @@ export default function SearchScreen() {
                 : 'Type "skip" or add notes while/after uploading media...'
               : awaitingDecision ? 'Type your choice...'
               : awaitingEnhancementChoice ? 'Type "Yes" or "No"...'
+              : awaitingPricingQuestion ? 'Type your answer...'
               : awaitingClarification ? 'Type your answer...'
               : awaitingHelpCategory ? 'Tell me what you need help with...'
               : 'Use an image or describe what you need...'

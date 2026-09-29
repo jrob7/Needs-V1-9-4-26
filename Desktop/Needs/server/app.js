@@ -3312,14 +3312,6 @@ app.post('/respondToServiceQuote', async (req, res) => {
           respondedAt: new Date(),
         }}
       );
-      if (quote.userId) {
-        await database.collection('Notifications').insertOne({
-          userId: quote.userId, type: 'quote_update',
-          title: `💬 Question from ${quote.businessName}`,
-          body: questions?.[0] ? `"${questions[0]}"` : 'The business has a question about your request.',
-          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
-        });
-      }
     } else {
       return res.status(400).json({ error: 'action must be confirm, edit, or ask' });
     }

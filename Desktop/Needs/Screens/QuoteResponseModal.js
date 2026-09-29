@@ -129,7 +129,6 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
 
   // Ask fields
   const [questions,     setQuestions]     = useState([]);
-  const [loadingQs,     setLoadingQs]     = useState(false);
   const [customQuestion, setCustomQuestion] = useState('');
 
   // ── Fetch busy days ─────────────────────────────────────────────────────
@@ -144,20 +143,6 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
       .finally(() => setLoadingMonth(false));
   }, [calMonth, userId, activeTab]);
 
-  // ── Generate AI questions when Ask tab is selected ──────────────────────
-  useEffect(() => {
-    if (activeTab !== 'ask' || questions.length > 0 || loadingQs) return;
-    setLoadingQs(true);
-    fetch(`${FLASK_API}/ai/generateInfoRequest`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: notification?.needText || '' }),
-    })
-      .then(r => r.json())
-      .then(d => setQuestions((d.questions || []).map(q => (typeof q === 'string' ? q : q?.question || '')).filter(Boolean)))
-      .catch(() => setQuestions(['Please describe your yard size.', 'What day works best for you?']))
-      .finally(() => setLoadingQs(false));
-  }, [activeTab]);
 
   // ── Select a day ────────────────────────────────────────────────────────
   const handleSelectDay = useCallback(async (day) => {
@@ -437,38 +422,31 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
             {/* ── ASK TAB ────────────────────────────────────────────── */}
             {activeTab === 'ask' && (
               <>
-                <Text style={[st.sectionTitle, { marginBottom: 6 }]}>Questions for the Customer</Text>
+                <Text style={[st.sectionTitle, { marginBottom: 6 }]}>Ask the Customer</Text>
                 <Text style={[st.noteInput, { color: '#6B7280', fontSize: 13, borderWidth: 0, paddingHorizontal: 0, backgroundColor: 'transparent', marginBottom: 12 }]}>
-                  These questions are pre-generated based on the request. Edit or remove any you don't need.
+                  Type your question(s) below. The customer will see them in their quote view and can reply before you finalize the quote.
                 </Text>
 
-                {loadingQs ? (
-                  <View style={st.slotsLoading}>
-                    <ActivityIndicator color="#2563EB" />
-                    <Text style={st.slotsLoadingTxt}>Generating questions…</Text>
+                {questions.map((q, i) => (
+                  <View key={i} style={st.questionRow}>
+                    <TextInput
+                      style={st.questionInput}
+                      value={q}
+                      onChangeText={v => setQuestions(prev => prev.map((old, idx) => idx === i ? v : old))}
+                      multiline
+                    />
+                    <TouchableOpacity
+                      onPress={() => setQuestions(prev => prev.filter((_, idx) => idx !== i))}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#94A3B8" />
+                    </TouchableOpacity>
                   </View>
-                ) : (
-                  questions.map((q, i) => (
-                    <View key={i} style={st.questionRow}>
-                      <TextInput
-                        style={st.questionInput}
-                        value={q}
-                        onChangeText={v => setQuestions(prev => prev.map((old, idx) => idx === i ? v : old))}
-                        multiline
-                      />
-                      <TouchableOpacity
-                        onPress={() => setQuestions(prev => prev.filter((_, idx) => idx !== i))}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      >
-                        <Ionicons name="close-circle" size={20} color="#94A3B8" />
-                      </TouchableOpacity>
-                    </View>
-                  ))
-                )}
+                ))}
 
                 <TextInput
                   style={[st.questionInput, { marginTop: 8 }]}
-                  placeholder="Add another question…"
+                  placeholder="Type a question…"
                   placeholderTextColor="#94A3B8"
                   value={customQuestion}
                   onChangeText={setCustomQuestion}

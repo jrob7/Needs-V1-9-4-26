@@ -1011,6 +1011,26 @@ export default function SearchScreen() {
               console.log('⚠️ Readiness check failed, proceeding without it:', e?.message);
             }
 
+            // Ask ONE pricing question grounded in the top matched service's real
+            // pricing tiers — applies whether the readiness check passed or was skipped.
+            try {
+              const loc = locationRef.current;
+              const pRes = await api.post(`${NODE_API}/getServicePricingQuestion`, {
+                query: enhancedText,
+                ...(loc?.lat != null && loc?.lng != null ? { userLat: loc.lat, userLng: loc.lng } : {}),
+                ...(loc?.city ? { userCity: loc.city } : {}),
+              });
+              if (pRes.data?.question) {
+                setConversation((prev) => prev.filter((m) => !m.aiThinking));
+                pushAI(pRes.data.question);
+                setPendingPricingQuestion({ combinedText: enhancedText, media });
+                setAwaitingPricingQuestion(true);
+                return;
+              }
+            } catch (e) {
+              console.log('⚠️ getServicePricingQuestion failed, skipping:', e?.message);
+            }
+
             setConversation((prev) => prev.filter((m) => !m.aiThinking));
             pushAI("I've got everything I need. I'm now finding 3 services that match your request and generating quotes based on their service expertise, availability, and pricing.");
 

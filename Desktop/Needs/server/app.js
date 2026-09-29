@@ -3306,21 +3306,20 @@ app.post('/userRespondToQuote', async (req, res) => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      // Mark original quote_request notification as confirmed in-place (not a new notification)
-      if (quote.serviceUserId) {
-        const updated = await database.collection('Notifications').updateOne(
-          { quoteId: new ObjectId(quoteId), type: 'quote_request', userId: quote.serviceUserId },
-          { $set: { appointmentConfirmed: true, read: true } }
-        );
-        // Fallback: if no quote_request found, send the appointment_confirmed notification
-        if (updated.matchedCount === 0) {
-          await database.collection('Notifications').insertOne({
-            userId: quote.serviceUserId, type: 'appointment_confirmed',
-            title: '🎉 Appointment Confirmed',
-            body: `Customer confirmed your appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}`,
-            needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
-          });
-        }
+      // Mark original quote_request notification as confirmed in-place.
+      // Match only on quoteId+type — userId type may differ between collections.
+      const updated = await database.collection('Notifications').updateOne(
+        { quoteId: new ObjectId(quoteId), type: 'quote_request' },
+        { $set: { appointmentConfirmed: true, read: true } }
+      );
+      if (updated.matchedCount === 0 && quote.serviceUserId) {
+        // Fallback: no quote_request notification found — create appointment_confirmed
+        await database.collection('Notifications').insertOne({
+          userId: quote.serviceUserId, type: 'appointment_confirmed',
+          title: '🎉 Appointment Confirmed',
+          body: `Customer confirmed your appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}`,
+          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
+        });
       }
       // Add to business's Google Calendar (fire-and-forget)
       setImmediate(async () => {

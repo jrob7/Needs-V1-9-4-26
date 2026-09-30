@@ -314,36 +314,41 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                       {allRounds.map((round, ri) => (
                         <View key={ri} style={{ marginBottom: ri < allRounds.length - 1 ? 16 : 0 }}>
                           {ri > 0 && <View style={{ height: 1, backgroundColor: '#DDD6FE', marginBottom: 14 }} />}
-                          {(round.questions || []).map((q, qi) => (
-                            <View key={qi} style={{ marginBottom: 10 }}>
-                              {/* Business question bubble */}
-                              <View style={{ alignSelf: 'flex-end', backgroundColor: '#7C3AED', borderRadius: 10, borderBottomRightRadius: 2, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%', marginBottom: 6 }}>
-                                <Text style={{ fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>You asked</Text>
-                                <Text style={{ fontSize: 13, color: '#fff' }}>{q}</Text>
+                          {(round.questions || []).map((q, qi) => {
+                            const isLastQ = qi === (round.questions || []).length - 1;
+                            const hasAnswer = round.answers?.[qi] != null;
+                            return (
+                              <View key={qi} style={{ marginBottom: 10 }}>
+                                {/* Business question bubble */}
+                                <View style={{ alignSelf: 'flex-end', backgroundColor: '#7C3AED', borderRadius: 10, borderBottomRightRadius: 2, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%', marginBottom: 6 }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>You asked</Text>
+                                  <Text style={{ fontSize: 13, color: '#fff' }}>{q}</Text>
+                                </View>
+                                {/* Customer answer bubble */}
+                                {hasAnswer ? (
+                                  <View style={{ alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#DDD6FE', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 2 }}>Customer</Text>
+                                    <Text style={{ fontSize: 13, color: '#1E1B4B' }}>{round.answers[qi]}</Text>
+                                  </View>
+                                ) : (
+                                  <View style={{ alignSelf: 'flex-start', backgroundColor: '#FEF9C3', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
+                                    <Text style={{ fontSize: 12, color: '#92400E' }}>Awaiting response…</Text>
+                                  </View>
+                                )}
+                                {/* Customer photo bubble — shown after last answer in the round */}
+                                {isLastQ && hasAnswer && round.photoUrl ? (
+                                  <View style={{ alignSelf: 'flex-start', maxWidth: '85%', marginTop: 6 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 4 }}>Customer</Text>
+                                    <Image
+                                      source={{ uri: round.photoUrl }}
+                                      style={{ width: 220, height: 180, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F8F5FF' }}
+                                      resizeMode="contain"
+                                    />
+                                  </View>
+                                ) : null}
                               </View>
-                              {/* Customer answer bubble */}
-                              {round.answers?.[qi] != null ? (
-                                <View style={{ alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#DDD6FE', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 2 }}>Customer</Text>
-                                  <Text style={{ fontSize: 13, color: '#1E1B4B' }}>{round.answers[qi]}</Text>
-                                </View>
-                              ) : (
-                                <View style={{ alignSelf: 'flex-start', backgroundColor: '#FEF9C3', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
-                                  <Text style={{ fontSize: 12, color: '#92400E' }}>Awaiting response…</Text>
-                                </View>
-                              )}
-                            </View>
-                          ))}
-                          {round.photoUrl ? (
-                            <View style={{ marginTop: 4, marginBottom: 4 }}>
-                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#5B21B6', marginBottom: 6 }}>Attached Photo</Text>
-                              <Image
-                                source={{ uri: round.photoUrl }}
-                                style={{ width: '100%', height: 260, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F8F5FF' }}
-                                resizeMode="contain"
-                              />
-                            </View>
-                          ) : null}
+                            );
+                          })}
                         </View>
                       ))}
                       {/* Ask another question — only when last round has been answered */}

@@ -529,7 +529,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     return () => loop.stop();
   }, [isResolved]);
 
-  // TEST GLOW animation — pending blinks, ready stays solid
+  // TEST GLOW animation — pending pulses wrapper opacity, ready stays solid
   useEffect(() => {
     if (hasMatches) {
       glowAnim.setValue(1);
@@ -537,8 +537,8 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     }
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(glowAnim, { toValue: 0.15, duration: 1000, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 1,    duration: 1000, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0.6, duration: 900, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 1,   duration: 900, useNativeDriver: true }),
       ])
     );
     loop.start();
@@ -567,11 +567,12 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
 
   // TEST GLOW colors
   const glowColor = hasMatches ? TEST_GLOW_READY : TEST_GLOW_PENDING;
-  const glowBg    = hasMatches ? 'rgba(16,185,129,0.07)' : 'rgba(245,158,11,0.07)';
+  const glowBg    = hasMatches ? 'rgba(16,185,129,0.09)' : 'rgba(245,158,11,0.09)';
 
   return (
     <View style={{ width: '100%' }} onLayout={onLayout}>
-      <View style={{ width: '100%', position: 'relative' }}>
+      {/* TEST GLOW: wrap only the card+pill so the border lives on the card itself — no overlay misalignment */}
+      <Animated.View style={{ width: '100%', position: 'relative', opacity: hasMatches ? 1 : glowAnim }}>
         <Card
           badgeLabel="Service"
           badgeColor="#F59E0B"
@@ -584,7 +585,15 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
           creatorPic={need?.profilePicture}
           onViewCreator={onViewCreator}
           rightSlot={IS_WEB ? pillNode : undefined}
-          cardStyle={{ backgroundColor: glowBg }}
+          cardStyle={{
+            backgroundColor: glowBg,
+            borderColor: glowColor,
+            borderWidth: 2.5,
+            shadowColor: glowColor,
+            shadowOpacity: 0.6,
+            shadowRadius: 12,
+            elevation: 10,
+          }}
         />
 
         {/* Status/match pill — native only */}
@@ -599,21 +608,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
             </Animated.View>
           </TouchableOpacity>
         )}
-
-        {/* TEST GLOW: rendered last so it sits on top of the card; transparent fill so only border+shadow show */}
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            borderRadius: 18, borderWidth: 2.5, borderColor: glowColor,
-            backgroundColor: 'transparent',
-            shadowColor: glowColor, shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.9, shadowRadius: 14, elevation: 10,
-            opacity: glowAnim,
-          }}
-        />
-
-      </View>
+      </Animated.View>
 
       {/* Matches Modal */}
       {quotesVisible && (

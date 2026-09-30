@@ -524,6 +524,10 @@ const NotificationsScreen = () => {
     fetchNotifications();
     fetchActivity();
     fetchAppointments();
+    // Poll notifications every 15s while screen is focused so new match
+    // updates (info_provided, quote_update) appear without manual refresh
+    const pollInterval = setInterval(fetchNotifications, 15000);
+    return () => clearInterval(pollInterval);
   }, [fetchNotifications, fetchActivity, fetchAppointments]));
 
   const handleArchive = async (needId) => {

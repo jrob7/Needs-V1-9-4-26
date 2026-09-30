@@ -311,10 +311,10 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
         <View style={IS_WEB ? { maxWidth: 960, width: '100%', alignSelf: 'center', flex: 1, backgroundColor: '#fff' } : { flex: 1 }}>
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={undefined}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
               automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-              contentContainerStyle={IS_WEB ? { paddingBottom: 300 } : undefined}>
+              contentContainerStyle={{ paddingBottom: IS_WEB ? 300 : 260 }}>
 
               {/* Hero image */}
               <View style={{ position: 'relative' }}>

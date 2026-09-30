@@ -227,6 +227,7 @@ function AnswerForm({ quote, onDone }) {
             style={af.input} placeholder="Your answer…" placeholderTextColor="#94A3B8"
             value={answers[i]} onChangeText={v => setAnswers(prev => prev.map((a, idx) => idx === i ? v : a))}
             multiline
+            onFocus={IS_WEB ? (e) => e.target?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }) : undefined}
           />
         </View>
       ))}

@@ -317,10 +317,19 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                         <Text style={{ fontSize: 12, fontWeight: '700', color: '#5B21B6', marginBottom: 6 }}>Attached Photo</Text>
                         <Image
                           source={{ uri: quoteDoc.infoResponse.photoUrl }}
-                          style={{ width: '100%', height: 180, borderRadius: 10, resizeMode: 'cover', borderWidth: 1, borderColor: '#DDD6FE' }}
+                          style={{ width: '100%', maxHeight: 320, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE' }}
+                          resizeMode="contain"
                         />
                       </View>
                     ) : null}
+                    {/* Ask another question based on what the customer shared */}
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, paddingVertical: 10, borderRadius: 9, borderWidth: 1.5, borderColor: '#7C3AED', backgroundColor: '#EDE9FE' }}
+                      onPress={() => setActiveTab('ask')}
+                    >
+                      <Ionicons name="chatbubble-ellipses-outline" size={16} color="#7C3AED" />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>Ask Another Question</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
 

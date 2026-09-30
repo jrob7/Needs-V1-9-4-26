@@ -565,51 +565,52 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     </TouchableOpacity>
   );
 
-  // TEST GLOW — cardStyle applied directly to the Card so it matches exactly
+  // TEST GLOW colors
   const glowColor = hasMatches ? TEST_GLOW_READY : TEST_GLOW_PENDING;
   const glowBg    = hasMatches ? 'rgba(16,185,129,0.07)' : 'rgba(245,158,11,0.07)';
-  const testCardStyle = {
-    borderColor: glowColor,
-    borderWidth: 2.5,
-    backgroundColor: glowBg,
-    shadowColor: glowColor,
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
-    elevation: 10,
-  };
 
   return (
     <View style={{ width: '100%' }} onLayout={onLayout}>
       <View style={{ width: '100%', position: 'relative' }}>
-        <Animated.View style={{ opacity: glowAnim, width: '100%' }}>
-          <Card
-            badgeLabel="Service"
-            badgeColor="#F59E0B"
-            title={toTitle((need?.searchText || '').replace(/\*\*/g, ''), 8)}
-            subtitle={need?.urgency ? `When: ${need.urgency}` : ''}
-            media={IS_WEB ? media : media}
-            isActive={isActive}
-            onPress={hasMatches ? () => setQuotesVisible(true) : null}
-            creatorName={[need?.firstName, need?.lastName].filter(Boolean).join(' ') || null}
-            creatorPic={need?.profilePicture}
-            onViewCreator={onViewCreator}
-            rightSlot={IS_WEB ? pillNode : undefined}
-            cardStyle={testCardStyle}
-          />
+        {/* TEST GLOW: pulsing border/shadow layer — sits behind card content, text stays static */}
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            borderRadius: 18, borderWidth: 2.5, borderColor: glowColor,
+            shadowColor: glowColor, shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.9, shadowRadius: 14, elevation: 10,
+            opacity: glowAnim,
+          }}
+        />
 
-          {/* Status/match pill — native only */}
-          {!IS_WEB && (
-            <TouchableOpacity
-              style={{ position: 'absolute', top: 14, right: 16, zIndex: 30 }}
-              onPress={hasMatches ? () => setQuotesVisible(true) : null}
-              activeOpacity={hasMatches ? 0.85 : 1}
-            >
-              <Animated.View style={[pillStyle, { opacity: pulseAnim, position: 'relative', top: 0, right: 0 }]}>
-                <Text style={pillTextStyle}>{pillLabel}</Text>
-              </Animated.View>
-            </TouchableOpacity>
-          )}
-        </Animated.View>
+        <Card
+          badgeLabel="Service"
+          badgeColor="#F59E0B"
+          title={toTitle((need?.searchText || '').replace(/\*\*/g, ''), 8)}
+          subtitle={need?.urgency ? `When: ${need.urgency}` : ''}
+          media={IS_WEB ? media : media}
+          isActive={isActive}
+          onPress={hasMatches ? () => setQuotesVisible(true) : null}
+          creatorName={[need?.firstName, need?.lastName].filter(Boolean).join(' ') || null}
+          creatorPic={need?.profilePicture}
+          onViewCreator={onViewCreator}
+          rightSlot={IS_WEB ? pillNode : undefined}
+          cardStyle={{ backgroundColor: glowBg }}
+        />
+
+        {/* Status/match pill — native only */}
+        {!IS_WEB && (
+          <TouchableOpacity
+            style={{ position: 'absolute', top: 14, right: 16, zIndex: 30 }}
+            onPress={hasMatches ? () => setQuotesVisible(true) : null}
+            activeOpacity={hasMatches ? 0.85 : 1}
+          >
+            <Animated.View style={[pillStyle, { opacity: pulseAnim, position: 'relative', top: 0, right: 0 }]}>
+              <Text style={pillTextStyle}>{pillLabel}</Text>
+            </Animated.View>
+          </TouchableOpacity>
+        )}
 
       </View>
 

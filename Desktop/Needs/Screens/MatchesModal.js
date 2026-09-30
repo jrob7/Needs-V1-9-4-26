@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
 import { NODE_API } from '../config';
 import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 
@@ -158,19 +159,46 @@ const rp = StyleSheet.create({
 function AnswerForm({ quote, onDone }) {
   const questions = quote.infoRequest?.questions || [];
   const [answers, setAnswers] = useState(questions.map(() => ''));
+  const [photo, setPhoto] = useState(null);   // { uri, base64 }
+  const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
 
+  const pickPhoto = async () => {
+    if (!IS_WEB) {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permission needed', 'Allow photo access to attach a photo.'); return; }
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true, quality: 0.7, base64: true,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      setPhoto({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+    }
+  };
+
   const handleSend = async () => {
-    if (answers.some(a => !a.trim())) { Alert.alert('Answer all questions', 'Please fill in all answers.'); return; }
+    if (answers.some(a => !a.trim())) { Alert.alert('Answer all questions', 'Please fill in all answers before sending.'); return; }
     setSending(true);
     try {
+      let photoUrl = null;
+      if (photo?.base64) {
+        setUploading(true);
+        const up = await fetch(`${NODE_API}/uploadImage`, {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' },
+          body: `data:image/jpeg;base64,${photo.base64}`,
+        });
+        const upData = await up.json();
+        photoUrl = upData?.url || upData?.imageUrl || null;
+        setUploading(false);
+      }
       const r = await fetch(`${NODE_API}/userRespondToQuote`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quoteId: quote._id, action: 'provide_info', answers }),
+        body: JSON.stringify({ quoteId: quote._id, action: 'provide_info', answers, photoUrl }),
       });
       if (!r.ok) throw new Error();
       onDone?.();
-    } catch { Alert.alert('Error', 'Could not send. Please try again.'); }
+    } catch { Alert.alert('Error', 'Could not send. Please try again.'); setUploading(false); }
     finally { setSending(false); }
   };
 
@@ -187,20 +215,43 @@ function AnswerForm({ quote, onDone }) {
           />
         </View>
       ))}
-      <TouchableOpacity style={[af.sendBtn, sending && { opacity: 0.5 }]} onPress={handleSend} disabled={sending}>
-        <Text style={af.sendBtnTxt}>{sending ? 'Sending…' : 'Send Answers'}</Text>
+
+      {/* Photo attachment */}
+      <View style={af.photoRow}>
+        <TouchableOpacity style={af.photoBtn} onPress={pickPhoto}>
+          <Ionicons name="camera-outline" size={18} color="#7C3AED" />
+          <Text style={af.photoBtnTxt}>{photo ? 'Change Photo' : 'Attach Photo'}</Text>
+        </TouchableOpacity>
+        {photo && (
+          <View style={af.photoPreviewWrap}>
+            <Image source={{ uri: photo.uri }} style={af.photoPreview} />
+            <TouchableOpacity style={af.photoRemove} onPress={() => setPhoto(null)}>
+              <Ionicons name="close-circle" size={20} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      <TouchableOpacity style={[af.sendBtn, (sending || uploading) && { opacity: 0.5 }]} onPress={handleSend} disabled={sending || uploading}>
+        <Text style={af.sendBtnTxt}>{uploading ? 'Uploading…' : sending ? 'Sending…' : 'Send Answers'}</Text>
       </TouchableOpacity>
     </View>
   );
 }
 const af = StyleSheet.create({
-  wrap:     { marginTop: 14, backgroundColor: '#F5F3FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#DDD6FE' },
-  title:    { fontSize: 13, fontWeight: '800', color: '#5B21B6', marginBottom: 10 },
-  qBlock:   { marginBottom: 12 },
-  qTxt:     { fontSize: 13, color: '#3B0764', fontWeight: '600', marginBottom: 6, lineHeight: 18 },
-  input:    { backgroundColor: '#fff', borderRadius: 9, borderWidth: 1, borderColor: '#DDD6FE', padding: 11, fontSize: 14, color: '#0F172A', textAlignVertical: 'top', minHeight: 64 },
-  sendBtn:  { backgroundColor: '#7C3AED', borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 6 },
-  sendBtnTxt: { fontSize: 14, fontWeight: '800', color: '#fff' },
+  wrap:           { marginTop: 14, backgroundColor: '#F5F3FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#DDD6FE' },
+  title:          { fontSize: 13, fontWeight: '800', color: '#5B21B6', marginBottom: 10 },
+  qBlock:         { marginBottom: 12 },
+  qTxt:           { fontSize: 13, color: '#3B0764', fontWeight: '600', marginBottom: 6, lineHeight: 18 },
+  input:          { backgroundColor: '#fff', borderRadius: 9, borderWidth: 1, borderColor: '#DDD6FE', padding: 11, fontSize: 14, color: '#0F172A', textAlignVertical: 'top', minHeight: 64 },
+  photoRow:       { flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 12 },
+  photoBtn:       { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EDE9FE', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  photoBtnTxt:    { fontSize: 13, fontWeight: '700', color: '#7C3AED' },
+  photoPreviewWrap: { position: 'relative' },
+  photoPreview:   { width: 56, height: 56, borderRadius: 8, borderWidth: 1, borderColor: '#DDD6FE' },
+  photoRemove:    { position: 'absolute', top: -8, right: -8 },
+  sendBtn:        { backgroundColor: '#7C3AED', borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 6 },
+  sendBtnTxt:     { fontSize: 14, fontWeight: '800', color: '#fff' },
 });
 
 // ── Service detail modal — full BroadDetailModal-style profile + quote actions ──

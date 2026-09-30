@@ -4,7 +4,7 @@
 // Two tabs: "Send Quote" (calendar + price) | "Ask a Question"
 import React, { createElement, useState, useContext, useEffect, useCallback } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, TextInput,
+  Modal, View, Text, Image, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Alert, Platform, KeyboardAvoidingView, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -312,6 +312,15 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                         </Text>
                       </View>
                     ))}
+                    {quoteDoc.infoResponse?.photoUrl ? (
+                      <View style={{ marginTop: 4 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#5B21B6', marginBottom: 6 }}>Attached Photo</Text>
+                        <Image
+                          source={{ uri: quoteDoc.infoResponse.photoUrl }}
+                          style={{ width: '100%', height: 180, borderRadius: 10, resizeMode: 'cover', borderWidth: 1, borderColor: '#DDD6FE' }}
+                        />
+                      </View>
+                    ) : null}
                   </View>
                 )}
 

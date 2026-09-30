@@ -3334,7 +3334,7 @@ app.post('/respondToServiceQuote', async (req, res) => {
 // No requireAuth — quoteId acts as the access token.
 app.post('/userRespondToQuote', async (req, res) => {
   try {
-    const { quoteId, action, requestedDate, requestedTime, answers } = req.body;
+    const { quoteId, action, requestedDate, requestedTime, answers, photoUrl } = req.body;
     if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
     const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
@@ -3418,7 +3418,7 @@ app.post('/userRespondToQuote', async (req, res) => {
     } else if (action === 'provide_info') {
       await database.collection('ServiceQuotes').updateOne(
         { _id: new ObjectId(quoteId) },
-        { $set: { status: 'user_info_provided', infoResponse: { answers: answers || {}, respondedAt: new Date() } } }
+        { $set: { status: 'user_info_provided', infoResponse: { answers: answers || {}, photoUrl: photoUrl || null, respondedAt: new Date() } } }
       );
       if (quote.serviceUserId) {
         await database.collection('Notifications').insertOne({

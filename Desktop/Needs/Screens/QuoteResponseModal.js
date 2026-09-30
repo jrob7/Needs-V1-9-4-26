@@ -317,7 +317,7 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                         <Text style={{ fontSize: 12, fontWeight: '700', color: '#5B21B6', marginBottom: 6 }}>Attached Photo</Text>
                         <Image
                           source={{ uri: quoteDoc.infoResponse.photoUrl }}
-                          style={{ width: '100%', maxHeight: 320, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE' }}
+                          style={{ width: '100%', height: 260, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F8F5FF' }}
                           resizeMode="contain"
                         />
                       </View>

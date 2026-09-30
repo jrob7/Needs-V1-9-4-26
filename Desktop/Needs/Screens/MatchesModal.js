@@ -313,7 +313,8 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
           {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
-              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+              contentContainerStyle={IS_WEB ? { paddingBottom: 300 } : undefined}>
 
               {/* Hero image */}
               <View style={{ position: 'relative' }}>

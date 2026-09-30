@@ -13,11 +13,9 @@ import {
   Modal,
   SafeAreaView,
   Animated,
-  Easing,
   Alert,
 } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
-const AnimatedRect = Animated.createAnimatedComponent(Rect);
 import Constants from 'expo-constants';
 const _isExpoGo =
   Constants.executionEnvironment === 'storeClient' ||
@@ -443,18 +441,17 @@ const STATUS_STEPS = {
   error:              { label: 'Something Went Wrong', icon: 'warning-outline',      color: '#EF4444' },
 };
 
-// ── TEST CHASING BORDER — swap colors here to test, delete marked blocks to remove ──
-const TEST_GLOW_PENDING = '#3B82F6'; // blue chasing light while pending
-const TEST_GLOW_READY   = '#10B981'; // green solid border when quote ready
-// ──────────────────────────────────────────────────────────────────────────────────
+// ── TEST BORDER — swap colors here, delete marked blocks to remove ──
+const TEST_GLOW_PENDING = '#3B82F6'; // pulsing border color while pending
+const TEST_GLOW_READY   = '#10B981'; // solid border color when quote ready
+// ────────────────────────────────────────────────────────────────────
 
 function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, onOpenNeed, onViewCreator, onLayout }) {
   const [need, setNeed] = useState(initialNeed);
   const [quotes, setQuotes] = useState([]);
   const [quotesVisible, setQuotesVisible] = useState(false);
-  const pulseAnim  = useRef(new Animated.Value(1)).current;
-  const dashAnim   = useRef(new Animated.Value(0)).current;   // TEST chasing border
-  const [cardDims, setCardDims] = useState({ w: 0, h: 0 });  // TEST chasing border
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const borderAnim = useRef(new Animated.Value(1)).current; // TEST border pulse
   // Prevent cycling: once quotes are loaded, never reset the count downward
   const quotesLoadedRef = useRef(false);
   const status = need?.serviceMatchStatus || 'processing';
@@ -532,25 +529,18 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     return () => loop.stop();
   }, [isResolved]);
 
-  // TEST chasing border — animate strokeDashoffset around the card perimeter
-  const borderR = 18;
-  const perim = cardDims.w && cardDims.h
-    ? 2 * (cardDims.w + cardDims.h) - borderR * (8 - 2 * Math.PI)
-    : 0;
-
+  // TEST border pulse — pending blinks, ready stays solid
   useEffect(() => {
-    if (!perim || hasMatches) { dashAnim.setValue(0); return; }
+    if (hasMatches) { borderAnim.setValue(1); return; }
     const loop = Animated.loop(
-      Animated.timing(dashAnim, {
-        toValue: -perim,
-        duration: 2200,
-        easing: Easing.linear,
-        useNativeDriver: false, // SVG props can't use native driver
-      })
+      Animated.sequence([
+        Animated.timing(borderAnim, { toValue: 0.15, duration: 900, useNativeDriver: true }),
+        Animated.timing(borderAnim, { toValue: 1,    duration: 900, useNativeDriver: true }),
+      ])
     );
     loop.start();
     return () => loop.stop();
-  }, [perim, hasMatches]); // TEST chasing border
+  }, [hasMatches]); // TEST border pulse
 
   // Only count quotes where the business has actually sent a response (not pending_business)
   const realQuotes = quotes.filter(q => !['pending_business', 'cancelled'].includes(q.status));
@@ -572,19 +562,12 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     </TouchableOpacity>
   );
 
-  // TEST chasing border colors
+  // TEST border color
   const glowColor = hasMatches ? TEST_GLOW_READY : TEST_GLOW_PENDING;
-  const dashLen   = perim * 0.22; // length of the chasing highlight arc
 
   return (
     <View style={{ width: '100%' }} onLayout={onLayout}>
-      <View
-        style={{ width: '100%', position: 'relative' }}
-        onLayout={e => {
-          const { width, height } = e.nativeEvent.layout;
-          setCardDims(prev => (prev.w === width && prev.h === height ? prev : { w: width, h: height }));
-        }}
-      >
+      <View style={{ width: '100%', position: 'relative' }}>
         <Card
           badgeLabel="Service"
           badgeColor="#F59E0B"
@@ -612,41 +595,16 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
           </TouchableOpacity>
         )}
 
-        {/* TEST chasing border — SVG rounded-rect stroke animating around the card */}
-        {cardDims.w > 0 && (
-          <Svg
-            width={cardDims.w}
-            height={cardDims.h}
-            style={{ position: 'absolute', top: 0, left: 0 }}
-            pointerEvents="none"
-          >
-            {hasMatches ? (
-              /* Quote ready — solid bright border */
-              <Rect
-                x={1.5} y={1.5}
-                width={cardDims.w - 3} height={cardDims.h - 3}
-                rx={borderR} ry={borderR}
-                fill="transparent"
-                stroke={glowColor}
-                strokeWidth={3}
-              />
-            ) : (
-              /* Pending — chasing light travels around */
-              <AnimatedRect
-                x={1.5} y={1.5}
-                width={cardDims.w - 3} height={cardDims.h - 3}
-                rx={borderR} ry={borderR}
-                fill="transparent"
-                stroke={glowColor}
-                strokeWidth={3}
-                strokeLinecap="round"
-                strokeDasharray={`${dashLen} ${perim - dashLen}`}
-                strokeDashoffset={dashAnim}
-              />
-            )}
-          </Svg>
-        )}
-        {/* END TEST chasing border */}
+        {/* TEST border overlay — bottom:12 accounts for cardWrap's marginBottom so border aligns exactly */}
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 12,
+            borderRadius: 18, borderWidth: 2.5, borderColor: glowColor,
+            backgroundColor: 'transparent', opacity: borderAnim,
+          }}
+        />
+        {/* END TEST border */}
       </View>
 
       {/* Matches Modal */}

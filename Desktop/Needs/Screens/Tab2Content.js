@@ -572,18 +572,6 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
   return (
     <View style={{ width: '100%' }} onLayout={onLayout}>
       <View style={{ width: '100%', position: 'relative' }}>
-        {/* TEST GLOW: pulsing border/shadow layer — sits behind card content, text stays static */}
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            borderRadius: 18, borderWidth: 2.5, borderColor: glowColor,
-            shadowColor: glowColor, shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.9, shadowRadius: 14, elevation: 10,
-            opacity: glowAnim,
-          }}
-        />
-
         <Card
           badgeLabel="Service"
           badgeColor="#F59E0B"
@@ -611,6 +599,19 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
             </Animated.View>
           </TouchableOpacity>
         )}
+
+        {/* TEST GLOW: rendered last so it sits on top of the card; transparent fill so only border+shadow show */}
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            borderRadius: 18, borderWidth: 2.5, borderColor: glowColor,
+            backgroundColor: 'transparent',
+            shadowColor: glowColor, shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.9, shadowRadius: 14, elevation: 10,
+            opacity: glowAnim,
+          }}
+        />
 
       </View>
 

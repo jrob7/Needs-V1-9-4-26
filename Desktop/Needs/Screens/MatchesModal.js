@@ -170,10 +170,25 @@ function AnswerForm({ quote, onDone }) {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true, quality: 0.7, base64: true,
+      allowsEditing: !IS_WEB, quality: 0.7, base64: true,
     });
     if (!result.canceled && result.assets?.[0]) {
-      setPhoto({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+      const asset = result.assets[0];
+      let b64 = asset.base64 || null;
+      // On web, the URI may be a blob: URL — fetch it and convert to base64
+      if (!b64 && asset.uri) {
+        try {
+          const resp = await fetch(asset.uri);
+          const blob = await resp.blob();
+          b64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve((reader.result || '').split(',')[1] || null);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        } catch (_) { b64 = null; }
+      }
+      setPhoto({ uri: asset.uri, base64: b64 });
     }
   };
 

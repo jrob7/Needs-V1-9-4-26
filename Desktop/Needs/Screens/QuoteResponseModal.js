@@ -298,40 +298,67 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
             {/* ── QUOTE TAB ──────────────────────────────────────────── */}
             {activeTab === 'quote' && (
               <>
-                {/* Customer Q&A — shown when business opens from info_provided notification */}
-                {quoteDoc?.infoRequest?.questions?.length > 0 && (
-                  <View style={{ backgroundColor: '#F5F3FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#DDD6FE', marginBottom: 18 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#5B21B6', marginBottom: 10 }}>Customer's Answers</Text>
-                    {quoteDoc.infoRequest.questions.map((q, i) => (
-                      <View key={i} style={{ marginBottom: 12 }}>
-                        <Text style={{ fontSize: 13, color: '#3B0764', fontWeight: '600', marginBottom: 4 }}>{i + 1}. {q}</Text>
-                        <Text style={{ fontSize: 13, color: '#1E1B4B', backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#DDD6FE', padding: 10 }}>
-                          {Array.isArray(quoteDoc.infoResponse?.answers)
-                            ? quoteDoc.infoResponse.answers[i] || '—'
-                            : quoteDoc.infoResponse?.answers?.[i] || '—'}
-                        </Text>
-                      </View>
-                    ))}
-                    {quoteDoc.infoResponse?.photoUrl ? (
-                      <View style={{ marginTop: 4 }}>
-                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#5B21B6', marginBottom: 6 }}>Attached Photo</Text>
-                        <Image
-                          source={{ uri: quoteDoc.infoResponse.photoUrl }}
-                          style={{ width: '100%', height: 260, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F8F5FF' }}
-                          resizeMode="contain"
-                        />
-                      </View>
-                    ) : null}
-                    {/* Ask another question based on what the customer shared */}
-                    <TouchableOpacity
-                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, paddingVertical: 10, borderRadius: 9, borderWidth: 1.5, borderColor: '#7C3AED', backgroundColor: '#EDE9FE' }}
-                      onPress={() => setActiveTab('ask')}
-                    >
-                      <Ionicons name="chatbubble-ellipses-outline" size={16} color="#7C3AED" />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>Ask Another Question</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                {/* Q&A conversation chain */}
+                {(() => {
+                  const history = Array.isArray(quoteDoc?.qaHistory) ? quoteDoc.qaHistory : [];
+                  const current = quoteDoc?.infoRequest?.questions?.length > 0 ? {
+                    questions: quoteDoc.infoRequest.questions,
+                    answers:   quoteDoc.infoResponse?.answers || null,
+                    photoUrl:  quoteDoc.infoResponse?.photoUrl || null,
+                  } : null;
+                  const allRounds = [...history, ...(current ? [current] : [])];
+                  if (allRounds.length === 0) return null;
+                  return (
+                    <View style={{ backgroundColor: '#F5F3FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#DDD6FE', marginBottom: 18 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#5B21B6', marginBottom: 12 }}>Q&A Thread</Text>
+                      {allRounds.map((round, ri) => (
+                        <View key={ri} style={{ marginBottom: ri < allRounds.length - 1 ? 16 : 0 }}>
+                          {ri > 0 && <View style={{ height: 1, backgroundColor: '#DDD6FE', marginBottom: 14 }} />}
+                          {(round.questions || []).map((q, qi) => (
+                            <View key={qi} style={{ marginBottom: 10 }}>
+                              {/* Business question bubble */}
+                              <View style={{ alignSelf: 'flex-end', backgroundColor: '#7C3AED', borderRadius: 10, borderBottomRightRadius: 2, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%', marginBottom: 6 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>You asked</Text>
+                                <Text style={{ fontSize: 13, color: '#fff' }}>{q}</Text>
+                              </View>
+                              {/* Customer answer bubble */}
+                              {round.answers?.[qi] != null ? (
+                                <View style={{ alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#DDD6FE', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 2 }}>Customer</Text>
+                                  <Text style={{ fontSize: 13, color: '#1E1B4B' }}>{round.answers[qi]}</Text>
+                                </View>
+                              ) : (
+                                <View style={{ alignSelf: 'flex-start', backgroundColor: '#FEF9C3', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
+                                  <Text style={{ fontSize: 12, color: '#92400E' }}>Awaiting response…</Text>
+                                </View>
+                              )}
+                            </View>
+                          ))}
+                          {round.photoUrl ? (
+                            <View style={{ marginTop: 4, marginBottom: 4 }}>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#5B21B6', marginBottom: 6 }}>Attached Photo</Text>
+                              <Image
+                                source={{ uri: round.photoUrl }}
+                                style={{ width: '100%', height: 260, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F8F5FF' }}
+                                resizeMode="contain"
+                              />
+                            </View>
+                          ) : null}
+                        </View>
+                      ))}
+                      {/* Ask another question — only when last round has been answered */}
+                      {current?.answers?.length > 0 && (
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, paddingVertical: 10, borderRadius: 9, borderWidth: 1.5, borderColor: '#7C3AED', backgroundColor: '#EDE9FE' }}
+                          onPress={() => setActiveTab('ask')}
+                        >
+                          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#7C3AED" />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>Ask Another Question</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })()}
 
                 <View style={st.sectionRow}>
                   <Text style={st.sectionTitle}>Select a Date</Text>

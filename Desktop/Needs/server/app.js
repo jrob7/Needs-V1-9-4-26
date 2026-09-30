@@ -3315,13 +3315,30 @@ app.post('/respondToServiceQuote', async (req, res) => {
         });
       }
     } else if (action === 'ask') {
+      const archiveOps = {};
+      // If there's already a completed Q&A round, push it into history before overwriting
+      if (quote.infoRequest?.questions?.length && quote.infoResponse?.answers?.length) {
+        archiveOps.$push = {
+          qaHistory: {
+            questions: quote.infoRequest.questions,
+            askedAt:   quote.infoRequest.askedAt || null,
+            answers:   quote.infoResponse.answers,
+            photoUrl:  quote.infoResponse.photoUrl || null,
+            respondedAt: quote.infoResponse.respondedAt || null,
+          },
+        };
+      }
       await database.collection('ServiceQuotes').updateOne(
         { _id: new ObjectId(quoteId) },
-        { $set: {
-          status: 'awaiting_user_info',
-          infoRequest: { questions: questions || [], askedAt: new Date() },
-          respondedAt: new Date(),
-        }}
+        {
+          ...archiveOps,
+          $set: {
+            status: 'awaiting_user_info',
+            infoRequest:  { questions: questions || [], askedAt: new Date() },
+            infoResponse: null,
+            respondedAt:  new Date(),
+          },
+        }
       );
     } else {
       return res.status(400).json({ error: 'action must be confirm, edit, or ask' });

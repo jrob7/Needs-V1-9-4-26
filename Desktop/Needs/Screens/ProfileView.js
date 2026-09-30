@@ -319,18 +319,21 @@ const ProfileView = () => {
 
   return (
     <SafeAreaView style={styles.screen}>
-      <Animated.ScrollView style={{ opacity: fade }} contentContainerStyle={[styles.content, IS_WEB && { paddingTop: WEB_HEADER_HEIGHT }]}
+      {/* Web spacer so header sits below the fixed nav bar */}
+      {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
+
+      {/* ── Header — outside ScrollView so it never scrolls under the nav bar */}
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={29} color="#2563EB" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{readOnly ? 'Profile' : 'My Profile'}</Text>
+        <View style={{ width: 36 }} />
+      </View>
+
+      <Animated.ScrollView style={{ opacity: fade }} contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}>
         <View style={IS_WEB ? { maxWidth: Math.round(WEB_MAX_WIDTH * 1.3), width: '100%', alignSelf: 'center' } : null}>
-
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="chevron-back" size={29} color="#2563EB" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{readOnly ? 'Profile' : 'My Profile'}</Text>
-          <View style={{ width: 36 }} />
-        </View>
 
         {/* ── Avatar ─────────────────────────────────────────────── */}
         <View style={styles.hero}>

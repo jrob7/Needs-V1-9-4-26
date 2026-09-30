@@ -3224,6 +3224,17 @@ app.post('/triggerServiceMatching', async (req, res) => {
   });
 });
 
+// GET /serviceQuote/:id — fetch a single quote by ID (includes infoRequest + infoResponse)
+app.get('/serviceQuote/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid id' });
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(id) });
+    if (!quote) return res.status(404).json({ error: 'Not found' });
+    res.json({ ...quote, _id: quote._id.toString() });
+  } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
+});
+
 // GET /serviceQuotes?needId=X — fetch quotes for a need
 app.get('/serviceQuotes', async (req, res) => {
   try {

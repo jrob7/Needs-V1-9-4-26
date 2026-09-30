@@ -131,6 +131,17 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
   const [questions,     setQuestions]     = useState([]);
   const [customQuestion, setCustomQuestion] = useState('');
 
+  // Full quote doc — fetched when opened from info_provided to show customer's answers
+  const [quoteDoc, setQuoteDoc] = useState(null);
+  useEffect(() => {
+    const qId = notification?.quoteId;
+    if (!qId || notification?.type !== 'info_provided') return;
+    authFetch(`${NODE_API}/serviceQuote/${qId}`)
+      .then(r => r.json())
+      .then(d => { if (d && !d.error) setQuoteDoc(d); })
+      .catch(() => {});
+  }, [notification?.quoteId]);
+
   // ── Fetch busy days ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!userId || activeTab !== 'quote') return;
@@ -287,6 +298,23 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
             {/* ── QUOTE TAB ──────────────────────────────────────────── */}
             {activeTab === 'quote' && (
               <>
+                {/* Customer Q&A — shown when business opens from info_provided notification */}
+                {quoteDoc?.infoRequest?.questions?.length > 0 && (
+                  <View style={{ backgroundColor: '#F5F3FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#DDD6FE', marginBottom: 18 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#5B21B6', marginBottom: 10 }}>Customer's Answers</Text>
+                    {quoteDoc.infoRequest.questions.map((q, i) => (
+                      <View key={i} style={{ marginBottom: 12 }}>
+                        <Text style={{ fontSize: 13, color: '#3B0764', fontWeight: '600', marginBottom: 4 }}>{i + 1}. {q}</Text>
+                        <Text style={{ fontSize: 13, color: '#1E1B4B', backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#DDD6FE', padding: 10 }}>
+                          {Array.isArray(quoteDoc.infoResponse?.answers)
+                            ? quoteDoc.infoResponse.answers[i] || '—'
+                            : quoteDoc.infoResponse?.answers?.[i] || '—'}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
                 <View style={st.sectionRow}>
                   <Text style={st.sectionTitle}>Select a Date</Text>
                   {loadingMonth && <ActivityIndicator size="small" color="#2563EB" style={{ marginLeft: 8 }} />}

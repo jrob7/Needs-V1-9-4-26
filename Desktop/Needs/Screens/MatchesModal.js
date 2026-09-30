@@ -245,7 +245,8 @@ function ServiceDetailModal({ quote, onClose, onRefresh }) {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
           {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
           <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
 
               {/* Hero image */}
               <View style={{ position: 'relative' }}>

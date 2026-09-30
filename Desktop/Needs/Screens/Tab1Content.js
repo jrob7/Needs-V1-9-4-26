@@ -448,7 +448,7 @@ export default function SearchScreen() {
   };
 
   const processNeedFlow = async (finalText, mediaForNeed, opts = {}) => {
-    const { skipReadinessCheck = false } = opts;
+    const { skipReadinessCheck = false, skipPricingQuestion = false } = opts;
     if (!finalText || !finalText.trim()) {
       pushAI('I lost track of your description. Please type your need again.');
       return;
@@ -574,6 +574,28 @@ export default function SearchScreen() {
       setLastCreatedNeed(createdNeed);
 
       if (needType === 'service') {
+        // Ask one pricing question grounded in the top matched service's real pricing tiers,
+        // unless we already asked one (skipPricingQuestion set by handlePricingQuestionAnswer).
+        if (!skipPricingQuestion) {
+          try {
+            const loc = locationRef.current;
+            const pRes = await api.post(`${NODE_API}/getServicePricingQuestion`, {
+              query: finalText,
+              ...(loc?.lat != null && loc?.lng != null ? { userLat: loc.lat, userLng: loc.lng } : {}),
+              ...(loc?.city ? { userCity: loc.city } : {}),
+            });
+            if (pRes.data?.question) {
+              setConversation(prev => prev.filter(m => !m.aiThinking));
+              pushAI(pRes.data.question);
+              setPendingPricingQuestion({ combinedText: finalText, media: mediaForNeed });
+              setAwaitingPricingQuestion(true);
+              return;
+            }
+          } catch (e) {
+            console.log('⚠️ getServicePricingQuestion failed, skipping:', e?.message);
+          }
+        }
+
         pushAI("I've got everything I need. I'm now finding 3 services that match your request and generating quotes based on their service expertise, availability, and pricing.");
         // Trigger background matching — fire and forget
         if (createdNeed?._id) {
@@ -698,7 +720,7 @@ export default function SearchScreen() {
 
     if (!combinedText) { pushAI('I lost track of your request. Please describe your need again.'); return; }
     const finalText = `${combinedText} ${answer}`.trim();
-    await processNeedFlow(finalText, mediaToUse, { skipReadinessCheck: true });
+    await processNeedFlow(finalText, mediaToUse, { skipReadinessCheck: true, skipPricingQuestion: true });
   };
 
   const handleDecisionStage = async () => {

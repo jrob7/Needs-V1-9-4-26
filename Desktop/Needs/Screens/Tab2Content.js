@@ -441,11 +441,17 @@ const STATUS_STEPS = {
   error:              { label: 'Something Went Wrong', icon: 'warning-outline',      color: '#EF4444' },
 };
 
+// ── TEST GLOW — change colors here, delete this block + glowAnim below to remove ──
+const TEST_GLOW_PENDING = '#F59E0B'; // amber while waiting for quotes
+const TEST_GLOW_READY   = '#10B981'; // green when quote is ready
+// ─────────────────────────────────────────────────────────────────────────────────
+
 function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, onOpenNeed, onViewCreator, onLayout }) {
   const [need, setNeed] = useState(initialNeed);
   const [quotes, setQuotes] = useState([]);
   const [quotesVisible, setQuotesVisible] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const glowAnim  = useRef(new Animated.Value(0.4)).current; // TEST GLOW
   // Prevent cycling: once quotes are loaded, never reset the count downward
   const quotesLoadedRef = useRef(false);
   const status = need?.serviceMatchStatus || 'processing';
@@ -523,6 +529,22 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     return () => loop.stop();
   }, [isResolved]);
 
+  // TEST GLOW animation — pending blinks, ready stays solid
+  useEffect(() => {
+    if (hasMatches) {
+      glowAnim.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 0.15, duration: 1000, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 1,    duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [hasMatches]); // TEST GLOW
+
   // Only count quotes where the business has actually sent a response (not pending_business)
   const realQuotes = quotes.filter(q => !['pending_business', 'cancelled'].includes(q.status));
   const hasMatches = realQuotes.length > 0;
@@ -543,9 +565,26 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     </TouchableOpacity>
   );
 
+  // TEST GLOW color for current state
+  const glowColor = hasMatches ? TEST_GLOW_READY : TEST_GLOW_PENDING;
+
   return (
     <View style={{ width: '100%' }} onLayout={onLayout}>
       <View style={{ width: '100%', position: 'relative' }}>
+
+        {/* TEST GLOW LAYER — remove this block to revert */}
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            borderRadius: 16, borderWidth: 2, borderColor: glowColor,
+            shadowColor: glowColor, shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.95, shadowRadius: 16, elevation: 12,
+            opacity: glowAnim, zIndex: 5,
+          }}
+        />
+        {/* END TEST GLOW LAYER */}
+
         <Card
           badgeLabel="Service"
           badgeColor="#F59E0B"
@@ -572,6 +611,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
             </Animated.View>
           </TouchableOpacity>
         )}
+
       </View>
 
       {/* Matches Modal */}

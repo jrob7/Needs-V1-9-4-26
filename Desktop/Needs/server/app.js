@@ -2275,10 +2275,17 @@ app.post('/detectOrgMention', requireAuth, async (req, res) => {
       { projection: { orgName: 1, userId: 1 } }
     ).toArray();
 
+    const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'our', 'your']);
+    const sigWords = (orgName) => (orgName || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4 && !STOP_WORDS.has(w));
+
     const lower = text.toLowerCase();
     const match = orgs.find(o => {
       const name = (o.orgName || '').toLowerCase();
-      return name.length >= 3 && lower.includes(name);
+      // Exact substring match first
+      if (name.length >= 3 && lower.includes(name)) return true;
+      // Significant-word match: any key word (4+ chars) from the org name found in the message
+      const words = sigWords(o.orgName);
+      return words.length > 0 && words.some(w => lower.includes(w));
     });
 
     if (!match) return res.json({ org: null });

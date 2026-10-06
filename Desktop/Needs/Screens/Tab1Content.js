@@ -788,12 +788,12 @@ export default function SearchScreen() {
         pushAI('Something went wrong. Please try again.');
       }
     } else {
-      // User said No — continue with the normal need flow
-      await sendQuery(originalText);
+      // User said No — continue with normal flow, skip org detection this time
+      await sendQuery(originalText, true);
     }
   };
 
-  const sendQuery = async (overrideText = null) => {
+  const sendQuery = async (overrideText = null, skipOrgDetection = false) => {
     // Guard: onPress can pass the event object; treat any non-string as no override
     if (overrideText !== null && typeof overrideText !== 'string') overrideText = null;
     Keyboard.dismiss();
@@ -841,7 +841,9 @@ export default function SearchScreen() {
     }
 
     // ── Org name detection: check if user is addressing a specific org ────────
-    if (!isOrgAccount && !overrideText) {
+    // Runs on both first send AND location-retry sends (overrideText set).
+    // Guard against re-running while the confirm picker is already showing.
+    if (!isOrgAccount && !awaitingOrgConfirm && !skipOrgDetection) {
       try {
         const detectRes = await authFetch(`${NODE_API}/detectOrgMention`, {
           method: 'POST',

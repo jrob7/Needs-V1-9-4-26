@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
 import { NODE_API } from '../config';
+import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 
 export const SERVICE_CATEGORY_GROUPS = [
   { group: 'Home Services',         items: ['Plumber', 'Electrician', 'HVAC', 'Handyman', 'House Cleaning', 'Landscaping', 'Lawn Care', 'Painter', 'Carpentry', 'Moving', 'Junk Removal', 'Pest Control', 'Carpet & Upholstery Cleaning', 'Pressure Washing', 'Window Cleaning', 'Pool Service', 'Appliance Repair', 'Garage Door Service', 'Locksmith'] },
@@ -493,6 +494,13 @@ const CATEGORY_QUESTIONS = {
 
 const AVAILABILITY = ['', 'Next Day', 'Within a Week', 'Flexible'];
 
+// Map legacy DB category names to the CATEGORY_QUESTIONS key
+const CATEGORY_ALIAS = {
+  'Painting':   'Painter',
+  'Electrical': 'Electrician',
+  'Cleaning':   'House Cleaning',
+};
+
 const resolveImg = (raw) => {
   if (!raw) return null;
   if (raw.startsWith('http')) return raw;
@@ -594,7 +602,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
     }
 
     // Validate category-specific pricing questions
-    const catQuestions = CATEGORY_QUESTIONS[category];
+    const catQuestions = CATEGORY_QUESTIONS[CATEGORY_ALIAS[category] || category];
     if (catQuestions) {
       for (const { service, questions } of catQuestions) {
         for (const { label } of questions) {
@@ -720,6 +728,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
       {!!handleBack && (
         <TouchableOpacity
           style={[styles.backBtn, { marginTop: insets.top }]}
@@ -767,12 +776,12 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
       )}
 
       {/* ── Category Pricing Questions ── */}
-      {Boolean(category && CATEGORY_QUESTIONS[category]) && (
+      {Boolean(category && CATEGORY_QUESTIONS[CATEGORY_ALIAS[category] || category]) && (
         <SectionCard title="Service Pricing *">
           <Text style={styles.pricingNote}>
             Please answer each question about your pricing. We'll use your answers to create quick, accurate estimates for specific jobs. You'll always review and approve an estimate before it's sent to a customer.
           </Text>
-          {CATEGORY_QUESTIONS[category].map(({ service, questions }) => (
+          {CATEGORY_QUESTIONS[CATEGORY_ALIAS[category] || category].map(({ service, questions }) => (
             <View key={service} style={styles.pricingGroup}>
               <Text style={styles.pricingServiceTitle}>{service}</Text>
               {questions.map(({ label, placeholder }) => (

@@ -8,7 +8,6 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
-
 import { NODE_API } from '../config';
 
 const OFFER_COLORS = {

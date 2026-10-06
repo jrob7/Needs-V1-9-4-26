@@ -205,6 +205,8 @@ const ProfileView = () => {
   const [activity, setActivity]               = useState({});
   const [recommendations, setRecommendations] = useState([]);
   const [showAddReco, setShowAddReco]         = useState(false);
+  const [connection, setConnection]           = useState(null); // null | { _id, status, role }
+  const [connLoading, setConnLoading]         = useState(false);
 
   const fetchUser = useCallback(async () => {
     if (!userId) { console.warn('ProfileView: no userId'); return; }
@@ -239,6 +241,15 @@ const ProfileView = () => {
   useFocusEffect(useCallback(() => {
     fetchUser(); fetchActivity();
   }, [fetchUser, fetchActivity]));
+
+  // Fetch connection status when viewing another user's profile
+  useEffect(() => {
+    if (!readOnly || !userId || !loggedInUserId || userId === loggedInUserId) return;
+    authFetch(`${NODE_API}/connections/status/${userId}`)
+      .then(r => r.json())
+      .then(d => setConnection(d.connection || null))
+      .catch(() => {});
+  }, [userId, readOnly, loggedInUserId]);
 
   // ── Photo pick — only allowed in edit mode ───────────────────────────────
   const handlePickPhoto = async () => {
@@ -301,7 +312,9 @@ const ProfileView = () => {
 
   const firstName      = user?.firstName || '';
   const lastName       = user?.lastName  || '';
-  const fullName       = [firstName, lastName].filter(Boolean).join(' ') || 'Profile';
+  const fullName       = (user?.accountType === 'business' && user?.organization)
+    ? user.organization
+    : ([firstName, lastName].filter(Boolean).join(' ') || 'Profile');
   const memberSince    = user?.memberSince || '';
   const avatarUri      = resolveImg(user?.profilePicture || user?.profileImageUrl);
   const reliability    = parseFloat(user?.reliability    || 0);
@@ -312,10 +325,17 @@ const ProfileView = () => {
   const needCoins      = user?.needCoins   ?? 0;
   const recoData       = readOnly ? recommendations : [...recommendations, { isAdd: true }];
 
-  // ── FIXED: use readOnly (already correctly computed) instead of
-  //    routeUserId alone, which can be undefined even on other-user profiles.
-  //    Also keep loggedInUserId check so you never see it on your own profile.
-  const showMessageButton = readOnly && loggedInUserId && loggedInUserId !== userId;
+  // Message rules: block regular business↔user and business↔business.
+  // Regular business = accountType 'business' with businessType NOT 'nonprofit'.
+  // Messaging is only allowed when connected AND neither party is a regular business.
+  const myIsRegularBusiness =
+    ctx?.accountType === 'business' && ctx?.businessType !== 'nonprofit';
+  const viewedIsRegularBusiness =
+    user?.accountType === 'business' && user?.businessType !== 'nonprofit';
+  const isConnected = connection?.status === 'connected';
+  const canMessage = !myIsRegularBusiness && !viewedIsRegularBusiness && isConnected;
+
+  const showMessageButton = readOnly && loggedInUserId && loggedInUserId !== userId && canMessage;
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -365,31 +385,77 @@ const ProfileView = () => {
             <Text style={styles.heroLocationText}>Long Beach, CA</Text>
           </View>
 
-          {/* ── Message button — only shown on OTHER user's profile ── */}
+          {/* ── Connect + Message buttons side by side ── */}
           {showMessageButton && (
-            <TouchableOpacity
-              style={styles.msgBtn}
-              onPress={async () => {
-                try {
-                  const r = await authFetch(`${NODE_API}/startConversation`, {
-                    method: 'POST',
-                    body: JSON.stringify({ recipientId: userId }),
-                  });
-                  const data = await r.json();
-                  if (data.conversationId) {
-                    navigation.navigate('Conversation', {
-                      conversationId: data.conversationId,
-                      recipientId: userId,
-                      recipientName: fullName,
-                      recipientPic: user?.profilePicture || null,
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, alignItems: 'center' }}>
+              {/* Connect / status */}
+              {!connLoading && (() => {
+                if (connection?.status === 'connected') {
+                  return (
+                    <View style={styles.connectedBadge}>
+                      <Ionicons name="checkmark-circle" size={15} color="#10B981" />
+                      <Text style={styles.connectedBadgeTxt}>Connected</Text>
+                    </View>
+                  );
+                }
+                if (connection?.status === 'pending') {
+                  const label = connection.requesterId === loggedInUserId
+                    ? 'Request Sent' : 'Wants to Connect';
+                  return (
+                    <View style={styles.connectedBadge}>
+                      <Ionicons name="time-outline" size={15} color="#F59E0B" />
+                      <Text style={[styles.connectedBadgeTxt, { color: '#F59E0B' }]}>{label}</Text>
+                    </View>
+                  );
+                }
+                return (
+                  <TouchableOpacity
+                    style={styles.connectBtn}
+                    activeOpacity={0.85}
+                    onPress={async () => {
+                      setConnLoading(true);
+                      try {
+                        const r = await authFetch(`${NODE_API}/connections/request`, {
+                          method: 'POST',
+                          body: JSON.stringify({ targetId: userId }),
+                        });
+                        const d = await r.json();
+                        if (d.connection) setConnection({ ...d.connection, requesterId: loggedInUserId });
+                      } catch (_) { Alert.alert('Error', 'Could not send request.'); }
+                      setConnLoading(false);
+                    }}
+                  >
+                    <Ionicons name="person-add-outline" size={17} color="#2563EB" />
+                    <Text style={styles.connectBtnTxt}>Connect</Text>
+                  </TouchableOpacity>
+                );
+              })()}
+
+              {/* Message */}
+              <TouchableOpacity
+                style={styles.msgBtn}
+                onPress={async () => {
+                  try {
+                    const r = await authFetch(`${NODE_API}/startConversation`, {
+                      method: 'POST',
+                      body: JSON.stringify({ recipientId: userId }),
                     });
-                  }
-                } catch (e) { Alert.alert('Error', 'Could not start conversation.'); }
-              }}
-            >
-              <Ionicons name="chatbubble-outline" size={21} color="#fff" />
-              <Text style={styles.msgBtnTxt}>Message {firstName}</Text>
-            </TouchableOpacity>
+                    const data = await r.json();
+                    if (data.conversationId) {
+                      navigation.navigate('Conversation', {
+                        conversationId: data.conversationId,
+                        recipientId: userId,
+                        recipientName: fullName,
+                        recipientPic: user?.profilePicture || null,
+                      });
+                    }
+                  } catch (e) { Alert.alert('Error', 'Could not start conversation.'); }
+                }}
+              >
+                <Ionicons name="chatbubble-outline" size={18} color="#fff" />
+                <Text style={styles.msgBtnTxt}>Message {firstName}</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -497,11 +563,23 @@ const styles = StyleSheet.create({
   heroLocation:     { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 16 },
   heroLocationText: { fontSize: 16, color: '#64748B' },
   msgBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#2563EB', borderRadius: 18,
-    paddingHorizontal: 26, paddingVertical: 14, marginTop: 5,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#2563EB', borderRadius: 14,
+    paddingHorizontal: 18, paddingVertical: 12,
   },
-  msgBtnTxt: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  msgBtnTxt: { color: '#fff', fontSize: 15, fontWeight: '700' },
+
+  connectBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: '#fff', borderRadius: 14,
+    paddingHorizontal: 18, paddingVertical: 12,
+    borderWidth: 1.5, borderColor: '#2563EB',
+  },
+  connectBtnTxt: { color: '#2563EB', fontSize: 15, fontWeight: '700' },
+  connectedBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8,
+  },
+  connectedBadgeTxt: { fontSize: 13, fontWeight: '600', color: '#10B981' },
 
   card: {
     backgroundColor: '#fff', marginHorizontal: 21, marginBottom: 16,

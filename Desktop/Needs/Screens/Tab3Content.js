@@ -219,21 +219,22 @@ const AccountTabContent = () => {
       return;
     }
     const isRestaurant = ctx.businessType === 'restaurant';
-    const endpoint = isRestaurant ? 'myRestaurant' : ctx.businessType === 'nonprofit' ? 'myNonprofit' : 'myService';
+    const isNonprofit  = ctx.businessType === 'nonprofit';
+    const endpoint     = isRestaurant ? 'myRestaurant' : isNonprofit ? 'myNonprofit' : 'myService';
+    const editScreen   = isRestaurant ? 'UploadRestaurant' : isNonprofit ? 'UploadNonprofit' : 'UploadService';
     try {
       const res = await authFetch(`${NODE_API}/${endpoint}`);
       if (!res.ok) {
-        Alert.alert('No listing found', "We couldn't find your business listing yet.");
+        // No listing yet — go to create flow
+        navigation.navigate(editScreen, { editMode: false });
         return;
       }
       const existingDoc = await res.json();
-      const editScreen = isRestaurant ? 'UploadRestaurant' : ctx.businessType === 'nonprofit' ? 'UploadNonprofit' : 'UploadService';
-      navigation.navigate(editScreen, {
-        editMode: true, existingDoc,
-      });
+      navigation.navigate(editScreen, { editMode: true, existingDoc });
     } catch (e) {
       console.error('Edit profile fetch failed:', e);
-      Alert.alert('Error', 'Could not load your business listing.');
+      // Navigate anyway so the user can create their listing
+      navigation.navigate(editScreen, { editMode: false });
     }
   };
 
@@ -294,7 +295,7 @@ const AccountTabContent = () => {
   const experiences    = userDetails?.experiences ?? 0;
   const firstName      = userDetails?.firstName || '';
   const lastName       = userDetails?.lastName  || '';
-  const businessName   = businessDoc?.businessName || businessDoc?.name || '';
+  const businessName   = businessDoc?.businessName || businessDoc?.name || userDetails?.organization || '';
   const businessLocation = businessDoc?.serviceArea || businessDoc?.businessAddress || businessDoc?.address || '';
   const fullName       = isBusiness
     ? (businessName || 'Your Business')
@@ -350,7 +351,7 @@ const AccountTabContent = () => {
 
         {/* Left: avatar + info */}
         <View style={styles.profileLeft}>
-          <View style={styles.avatarWrap}>
+          <TouchableOpacity style={styles.avatarWrap} onPress={handlePickPhoto} activeOpacity={0.85}>
             {avatarUri
               ? <Image source={{ uri: avatarUri }} style={styles.avatar} />
               : (
@@ -362,7 +363,10 @@ const AccountTabContent = () => {
             <View style={styles.verifiedDot}>
               <Ionicons name="checkmark-circle" size={IS_WEB ? 26 : 20} color="#2563EB" />
             </View>
-          </View>
+            <View style={styles.photoPlusBadge}>
+              <Ionicons name="add" size={IS_WEB ? 16 : 12} color="#fff" />
+            </View>
+          </TouchableOpacity>
           <Text style={styles.profileName}>{fullName}</Text>
           <Text style={styles.profileSub}>Member since {memberSince}</Text>
           {!!locationText && (
@@ -436,8 +440,10 @@ const AccountTabContent = () => {
       {/* ── MENU ─────────────────────────────────────────────────────── */}
       <View style={styles.menuWrap}>
 
-        <Section icon="bookmark" title="Saved" color="#8B5CF6">
-          <MenuItem icon="list-outline"          label="Saved Requests"    />
+        <Section icon="people" title="Connections" color="#2563EB">
+          <MenuItem icon="person-add-outline"    label="My Connections"         onPress={() => navigation.navigate('ConnectionsModal')} />
+          <MenuItem icon="options-outline"       label="Connection Preferences" onPress={() => navigation.navigate('ConnectionSettings')} />
+          <MenuItem icon="bookmark-outline"      label="Saved Requests"    />
           <MenuItem icon="construct-outline"     label="Saved Services"    />
           <MenuItem icon="restaurant-outline"    label="Saved Restaurants" />
         </Section>

@@ -32,6 +32,7 @@ import { UserContext } from '../server/CurrentUser';
 
 // ====== Configure these for your setup ======
 import { NODE_API, FLASK_API } from '../config';
+import { authFetch } from '../server/api';
 import { invalidateTab2Cache } from './Tab2Content';
 // ============================================
 
@@ -41,9 +42,6 @@ const HELP_CATEGORIES = [
   { emoji: '👨‍👩‍👧', label: 'Family Support',              query: 'family children kids parenting domestic' },
 ];
 
-// Fundraiser initiation disabled for now — app is currently focused on services & restaurants.
-// Flip back to true to re-enable the "start a fundraiser" flow.
-const FUNDRAISERS_ENABLED = false;
 
 const GOOGLE_VISION_API_KEY = 'AIzaSyDcozWA1GD5WpZUONt7V7lscHn80PddUps';
 const GOOGLE_VISION_URL = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`;
@@ -111,7 +109,8 @@ function BlueSpinner({ size = 100 }) {
 
 export default function SearchScreen() {
   const navigation = useNavigation();
-  const { userId: currentUserId } = useContext(UserContext);
+  const { userId: currentUserId, accountType: currentAccountType, businessType: currentBusinessType } = useContext(UserContext);
+  const isOrgAccount = currentAccountType === 'business' && currentBusinessType === 'nonprofit';
   const insets = useSafeAreaInsets();
   const tabBarOffset = 49 + insets.bottom;
 
@@ -125,15 +124,9 @@ export default function SearchScreen() {
   const mediaRef = useRef(null);
   useEffect(() => { mediaRef.current = media; }, [media]);
 
-  // Fundraiser flow
-  const [mode, setMode] = useState('none');
-  const [fundStep, setFundStep] = useState(0);
-  const [fundraiser, setFundraiser] = useState({
-    title: '', description: '', targetAmount: 0,
-    mediaType: null, mediaUri: null, fileName: null, createdBy: null,
-  });
-
   const [awaitingDecision, setAwaitingDecision] = useState(false);
+  const [awaitingOrgConfirm, setAwaitingOrgConfirm] = useState(false);
+  const [pendingOrgTarget, setPendingOrgTarget] = useState(null); // { _id, orgName, userId }
   const [lastCreatedNeed, setLastCreatedNeed] = useState(null);
 
   const [awaitingEnhancementChoice, setAwaitingEnhancementChoice] = useState(false);
@@ -147,6 +140,9 @@ export default function SearchScreen() {
   const [awaitingPricingQuestion, setAwaitingPricingQuestion] = useState(false);
   const [pendingPricingQuestion, setPendingPricingQuestion] = useState(null); // { combinedText, media }
   const [awaitingHelpCategory, setAwaitingHelpCategory] = useState(false);
+
+  // ── Org broadcast flow ────────────────────────────────────────────────────
+  const [pendingBroadcast, setPendingBroadcast] = useState(null); // { text, connCount }
 
   const [enhancing, setEnhancing] = useState(false);
 
@@ -177,8 +173,8 @@ export default function SearchScreen() {
     setAwaitingLocationInput(false); awaitingLocationRef.current = false;
     setPendingNeedAfterLocation(null);
     locationRef.current = null;
-    setMode('none');
-    setFundStep(0);
+    setAwaitingOrgConfirm(false);
+    setPendingOrgTarget(null);
     inputRef.current = '';
     if (imageEnhanceTimeoutRef.current) clearTimeout(imageEnhanceTimeoutRef.current);
   }, [currentUserId]);
@@ -200,6 +196,43 @@ export default function SearchScreen() {
       ...prev,
       { user: content, media: withMedia ? media : null },
     ]);
+
+  // Fetches connection prefs and pushes a passive note if connections are ON for this category
+  const pushConnectionNote = async (category) => {
+    if (!currentUserId) return;
+    try {
+      const r = await authFetch(`${NODE_API}/connectionPreferences`);
+      const prefs = await r.json();
+      if (prefs[category]) {
+        pushAI('✓ Your connections are included based on your preferences.');
+      }
+    } catch (_) {}
+  };
+
+  const handleBroadcastChoice = async (scope, broadcastData) => {
+    setConversation(prev => prev.filter(m => !m.broadcastPicker));
+    const label = scope === 'connections'
+      ? `Send to my ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}`
+      : 'Make it available to everyone';
+    pushUser(label);
+    setConversation(prev => [...prev, { aiThinking: true }]);
+    try {
+      await authFetch(`${NODE_API}/orgBroadcast`, {
+        method: 'POST',
+        body: JSON.stringify({ text: broadcastData.text, scope, userId: currentUserId }),
+      });
+      setConversation(prev => prev.filter(m => !m.aiThinking));
+      if (scope === 'connections') {
+        pushAI(`Done! Your request has been sent to your ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}. You'll be notified when someone responds.`);
+      } else {
+        pushAI("Done! Your request is now available to everyone on Needs. You'll be notified when someone responds.");
+      }
+    } catch (_) {
+      setConversation(prev => prev.filter(m => !m.aiThinking));
+      pushAI('Something went wrong. Please try again.');
+    }
+    setPendingBroadcast(null);
+  };
 
   useEffect(() => { inputRef.current = input; }, [input]);
 
@@ -333,14 +366,7 @@ export default function SearchScreen() {
       setMedia(asset);
       wasAutoEnhancedRef.current = false;
 
-      if (mode === 'fundraiser' && fundStep === 2) {
-        setFundraiser((prev) => ({
-          ...prev, mediaType: asset.type, mediaUri: asset.uri,
-          fileName: asset.fileName || 'media',
-        }));
-      }
-
-      if (asset.type === 'image' && asset.base64 && mode === 'none') {
+      if (asset.type === 'image' && asset.base64) {
         if (imageEnhanceTimeoutRef.current) clearTimeout(imageEnhanceTimeoutRef.current);
 
         imageEnhanceTimeoutRef.current = setTimeout(async () => {
@@ -370,51 +396,6 @@ export default function SearchScreen() {
           }
         }, 3000);
       }
-    }
-  };
-
-  const parseFundraiserText = (txt) => {
-    const amountMatch = (txt || '').match(/\$?\s*([\d,]+)(?:\.\d{1,2})?/);
-    const targetAmount = amountMatch ? parseInt(amountMatch[1].replace(/,/g, ''), 10) : 0;
-    const words = (txt || '').trim().split(/\s+/);
-    const title = words.slice(0, Math.min(words.length, 8)).join(' ') || 'Fundraiser';
-    return { title, description: (txt || '').trim(), targetAmount: Number.isFinite(targetAmount) ? targetAmount : 0 };
-  };
-
-  const resetFundraiserState = () => {
-    setMode('none'); setFundStep(0);
-    setFundraiser({ title: '', description: '', targetAmount: 0, mediaType: null, mediaUri: null, fileName: null, createdBy: null });
-    setMedia(null);
-  };
-
-  const finalizeFundraiser = async () => {
-    try {
-      const payload = {
-        ...fundraiser,
-        targetAmount: Number.isFinite(Number(fundraiser.targetAmount)) ? Number(fundraiser.targetAmount) : 0,
-        createdBy: fundraiser.createdBy || currentUserId || null,
-        mediaType: fundraiser.mediaType ?? media?.type ?? null,
-        mediaUri: fundraiser.mediaUri ?? media?.uri ?? null,
-        fileName: fundraiser.fileName ?? media?.fileName ?? null,
-      };
-      const r = await api.post(`${NODE_API}/createFundraiser`, payload);
-      if (r.status >= 200 && r.status < 300 && r.data) {
-        pushAI(
-          <Text>
-            Your fundraiser has been created!
-            {'\n'}• Title: <Text style={{ fontWeight: '700' }}>{payload.title}</Text>
-            {'\n'}• Goal: <Text style={{ fontWeight: '700' }}>${payload.targetAmount}</Text>
-            {'\n'}• Description: {payload.description || '(none)'}
-          </Text>
-        );
-      } else {
-        pushAI('Fundraiser saving failed. Please try again.');
-      }
-    } catch (e) {
-      const status = e?.response?.status;
-      pushAI(`Fundraiser saving failed${status ? ` (status ${status})` : ''}. Please try again.`);
-    } finally {
-      resetFundraiserState();
     }
   };
 
@@ -462,17 +443,8 @@ export default function SearchScreen() {
         mediaType: mediaForNeed?.type || null,
         fileName: mediaForNeed?.fileName || 'media',
       });
-      const intentType = resp.data?.type;
       const extractedData = resp.data?.searchParams;
       const needType = resp.data?.needType || 'item';
-
-      if (FUNDRAISERS_ENABLED && intentType === 'fundraiser') {
-        setConversation((prev) => prev.filter((m) => !m.aiThinking));
-        pushAI(<Text>I can help you start a fundraiser. First, please share a short <Text style={{ fontWeight: '700' }}>description</Text> and your <Text style={{ fontWeight: '700' }}>target amount</Text> (e.g., $2500).</Text>);
-        setMode('fundraiser'); setFundStep(1);
-        setFundraiser((prev) => ({ ...prev, createdBy: currentUserId || null }));
-        return;
-      }
 
       if (!extractedData || !extractedData.searchText) {
         setConversation((prev) => prev.filter((m) => !m.aiThinking));
@@ -566,7 +538,7 @@ export default function SearchScreen() {
       } catch (e) {
         setConversation((prev) => prev.filter((m) => !m.aiThinking));
         pushAI('I tried to save your need request, but something went wrong. Please try again.');
-        if (mode !== 'fundraiser') setMedia(null);
+        setMedia(null);
         return;
       }
 
@@ -597,6 +569,7 @@ export default function SearchScreen() {
         }
 
         pushAI("I've got everything I need. I'm now finding 3 services that match your request and generating quotes based on their service expertise, availability, and pricing.");
+        pushConnectionNote('services');
         // Trigger background matching — fire and forget
         if (createdNeed?._id) {
           const loc = locationRef.current;
@@ -615,7 +588,6 @@ export default function SearchScreen() {
       // Item flow disabled for now — app is currently focused on services & restaurants,
       // so anything that isn't a service falls into the food/restaurant match flow below.
       // if (needType === 'item') {
-      //   pushAI('Your Need request has been created. Would you like to view it, browse available related items, create another request, or start a fundraiser?');
       //   setAwaitingDecision(true);
       //   return;
       // }
@@ -633,7 +605,7 @@ export default function SearchScreen() {
             { matches, query: finalText, type: 'food' });
         }
       } catch (e) {
-        pushAI(`Your request has been created. Would you like to view it or create another request?${FUNDRAISERS_ENABLED ? ' Or start a fundraiser?' : ''}`);
+        pushAI('Your request has been created. Would you like to view it or create another request?');
         setAwaitingDecision(true);
       }
     } catch (err) {
@@ -642,7 +614,7 @@ export default function SearchScreen() {
       pushAI('Something went wrong. Please try again.');
     } finally {
       setInput('');
-      if (mode !== 'fundraiser') setMedia(null);
+      setMedia(null);
     }
   };
 
@@ -739,36 +711,6 @@ export default function SearchScreen() {
         setAwaitingDecision(false); return;
       }
 
-      if (action === 'VIEW_UPLOADED') {
-        if (lastCreatedNeed?.needType === 'service') {
-          pushAI('This is a service request, so there are no items to browse. Providers will be matched soon.');
-          setAwaitingDecision(false); return;
-        }
-        try {
-          if (lastCreatedNeed) {
-            const matchRes = await api.get(`${NODE_API}/searchUploadedItems`, {
-              params: { title: lastCreatedNeed.searchText || '', maxPrice: lastCreatedNeed.bidprice || '', urgency: lastCreatedNeed.urgency || '' },
-            });
-            const matches = Array.isArray(matchRes.data) ? matchRes.data : [];
-            if (matches.length === 0) { pushAI('No close matches were found for your request yet.'); }
-            else { navigation.navigate('SearchResults', { searchResults: matches, searchText: lastCreatedNeed.searchText || '', urgency: lastCreatedNeed.urgency || '', bidprice: lastCreatedNeed.bidprice || '' }); }
-          } else {
-            const browseRes = await api.get(`${NODE_API}/uploadedItemsAll`);
-            const allItems = Array.isArray(browseRes.data) ? browseRes.data : [];
-            if (allItems.length === 0) { pushAI('There are no uploaded items available yet.'); }
-            else { navigation.navigate('SearchResults', { searchResults: allItems, searchText: 'All Available Items', urgency: '', bidprice: '' }); }
-          }
-        } catch (e) { pushAI('I could not load items right now. Please try again.'); }
-        setAwaitingDecision(false); return;
-      }
-
-      if (FUNDRAISERS_ENABLED && action === 'FUNDRAISER') {
-        pushAI(<Text>Let&apos;s start a fundraiser. First, please share a short <Text style={{ fontWeight: '700' }}>description</Text> and your <Text style={{ fontWeight: '700' }}>target amount</Text> (e.g., $2500).</Text>);
-        setMode('fundraiser'); setFundStep(1);
-        setFundraiser((prev) => ({ ...prev, createdBy: currentUserId || null }));
-        setAwaitingDecision(false); return;
-      }
-
       pushAI('Okay, describe your next need request.');
       setAwaitingDecision(false);
       setLastCreatedNeed(null);
@@ -823,6 +765,34 @@ export default function SearchScreen() {
     await searchNonprofits(cat.query);
   };
 
+  const handleOrgConfirm = async (confirmed, orgTarget, originalText) => {
+    setAwaitingOrgConfirm(false);
+    setConversation(prev => prev.filter(m => !m.orgConfirmPicker));
+    setPendingOrgTarget(null);
+    if (confirmed) {
+      setConversation(prev => [...prev, { aiThinking: true }]);
+      try {
+        const r = await authFetch(`${NODE_API}/sendOrgRequest`, {
+          method: 'POST',
+          body: JSON.stringify({ text: originalText, targetOrgId: orgTarget.userId, targetOrgName: orgTarget.orgName }),
+        });
+        setConversation(prev => prev.filter(m => !m.aiThinking));
+        const d = await r.json();
+        if (d.success) {
+          pushAI(`✅ Your request has been sent directly to ${orgTarget.orgName}. They'll be notified right away.`);
+        } else {
+          pushAI('Something went wrong sending your request. Please try again.');
+        }
+      } catch {
+        setConversation(prev => prev.filter(m => !m.aiThinking));
+        pushAI('Something went wrong. Please try again.');
+      }
+    } else {
+      // User said No — continue with the normal need flow
+      await sendQuery(originalText);
+    }
+  };
+
   const sendQuery = async (overrideText = null) => {
     // Guard: onPress can pass the event object; treat any non-string as no override
     if (overrideText !== null && typeof overrideText !== 'string') overrideText = null;
@@ -833,26 +803,6 @@ export default function SearchScreen() {
       return;
     }
 
-    if (mode === 'fundraiser') {
-      if (fundStep === 1) {
-        pushUser(input || '(no text)', false);
-        const parsed = parseFundraiserText(input || '');
-        setFundraiser((prev) => ({ ...prev, ...parsed, createdBy: prev.createdBy || currentUserId || null }));
-        setInput('');
-        pushAI(<Text>Great—now please <Text style={{ fontWeight: '700' }}>upload an image or a short video</Text> for your fundraiser, or type <Text style={{ fontStyle: 'italic' }}>"skip"</Text> to continue without media.</Text>);
-        setFundStep(2); return;
-      }
-      if (fundStep === 2) {
-        const saidSkip = (input || '').trim().toLowerCase() === 'skip';
-        if (saidSkip || media) {
-          pushUser(saidSkip ? 'skip' : '(uploaded media)', !!media);
-          setInput('');
-          await finalizeFundraiser(); return;
-        }
-        pushAI('Please upload an image/video or type "skip" to continue.'); return;
-      }
-      return;
-    }
 
     if (!overrideText && awaitingLocationRef.current) { await handleLocationInput(); return; }
     if (awaitingDecision) { await handleDecisionStage(); return; }
@@ -872,6 +822,43 @@ export default function SearchScreen() {
 
     const originalText = overrideText || (input || '').trim();
     if (!originalText) return;
+
+    // ── Org broadcast: always ask scope before doing anything else ────────────
+    if (isOrgAccount && currentUserId && !overrideText) {
+      pushUser(originalText, !!media);
+      setInput('');
+      setConversation(prev => [...prev, { aiThinking: true }]);
+      let connCount = 0;
+      try {
+        const r = await authFetch(`${NODE_API}/connections`);
+        const conns = await r.json();
+        connCount = Array.isArray(conns) ? conns.length : 0;
+      } catch (_) {}
+      setConversation(prev => prev.filter(m => !m.aiThinking));
+      setPendingBroadcast({ text: originalText, connCount });
+      setConversation(prev => [...prev, { broadcastPicker: true, text: originalText, connCount }]);
+      return;
+    }
+
+    // ── Org name detection: check if user is addressing a specific org ────────
+    if (!isOrgAccount && !overrideText) {
+      try {
+        const detectRes = await authFetch(`${NODE_API}/detectOrgMention`, {
+          method: 'POST',
+          body: JSON.stringify({ text: originalText }),
+        });
+        const detectData = await detectRes.json();
+        if (detectData?.org) {
+          const org = detectData.org;
+          pushUser(originalText, !!media);
+          setInput('');
+          setPendingOrgTarget(org);
+          setAwaitingOrgConfirm(true);
+          setConversation(prev => [...prev, { orgConfirmPicker: true, org, text: originalText }]);
+          return;
+        }
+      } catch (_) { /* non-fatal — fall through to normal flow */ }
+    }
 
     // ── Help / Nonprofit trigger ──────────────────────────────────────────────
     const isJustHelp = /^help[!?. ]*$/i.test(originalText);
@@ -903,42 +890,15 @@ export default function SearchScreen() {
         const resp = await axios.post(`${FLASK_API}/ai/nextAction`, { userReply: originalText });
         const action = resp.data?.action;
 
-        // Location is required for all need searches. Skip for fundraiser/browse actions.
-        if (action !== 'FUNDRAISER' && action !== 'VIEW_UPLOADED') {
-          if (!locationRef.current) {
-            const gotGPS = await captureLocation();
-            if (!gotGPS) {
-              setConversation(prev => prev.filter(m => !m.aiThinking));
-              setPendingNeedAfterLocation({ originalText });
-              setAwaitingLocationInput(true); awaitingLocationRef.current = true;
-              pushAI("I currently do not have access to your location for this request. Could you please provide a City, Zip code, or Address so I can look in that area?");
-              return;
-            }
+        if (!locationRef.current) {
+          const gotGPS = await captureLocation();
+          if (!gotGPS) {
+            setConversation(prev => prev.filter(m => !m.aiThinking));
+            setPendingNeedAfterLocation({ originalText });
+            setAwaitingLocationInput(true); awaitingLocationRef.current = true;
+            pushAI("I currently do not have access to your location for this request. Could you please provide a City, Zip code, or Address so I can look in that area?");
+            return;
           }
-        }
-
-        if (FUNDRAISERS_ENABLED && action === 'FUNDRAISER') {
-          pushAI(<Text>Let's start your fundraiser! First, give me a short <Text style={{ fontWeight: '700' }}>description</Text> and your <Text style={{ fontWeight: '700' }}>target amount</Text> (e.g., $2500).</Text>);
-          setMode('fundraiser'); setFundStep(1);
-          setFundraiser(prev => ({ ...prev, createdBy: currentUserId }));
-          return;
-        }
-
-        if (action === 'VIEW_UPLOADED') {
-          if (lastCreatedNeed) {
-            const matchRes = await api.get(`${NODE_API}/searchUploadedItems`, {
-              params: { title: lastCreatedNeed.searchText || '', maxPrice: lastCreatedNeed.bidprice || '', urgency: lastCreatedNeed.urgency || '' },
-            });
-            const matches = Array.isArray(matchRes.data) ? matchRes.data : [];
-            if (matches.length === 0) { pushAI('No close matches were found for your request yet.'); }
-            else { navigation.navigate('SearchResults', { searchResults: matches, searchText: lastCreatedNeed.searchText || '', urgency: lastCreatedNeed.urgency || '', bidprice: lastCreatedNeed.bidprice || '' }); }
-          } else {
-            const browseRes = await api.get(`${NODE_API}/uploadedItemsAll`);
-            const allItems = Array.isArray(browseRes.data) ? browseRes.data : [];
-            if (allItems.length === 0) { pushAI('There are no uploaded items available yet.'); }
-            else { navigation.navigate('SearchResults', { searchResults: allItems, searchText: 'All Available Items', urgency: '', bidprice: '' }); }
-          }
-          return;
         }
 
         if (action === 'FIND_RESTAURANT') {
@@ -975,6 +935,7 @@ export default function SearchScreen() {
               navigation.navigate('MatchResults', { matches, type: 'food', query: enhancedText, context });
               pushAI(`Found ${matches.length} restaurant${matches.length > 1 ? 's' : ''} matching your request!`,
                 { matches, query: enhancedText, type: 'food' });
+              pushConnectionNote('restaurants');
             }
             if (currentUserId) {
               const initialMatchNames = matches.map(m => (m.name || '').toLowerCase()).filter(Boolean);
@@ -1055,6 +1016,7 @@ export default function SearchScreen() {
 
             setConversation((prev) => prev.filter((m) => !m.aiThinking));
             pushAI("I've got everything I need. I'm now finding 3 services that match your request and generating quotes based on their service expertise, availability, and pricing.");
+            pushConnectionNote('services');
 
             let newServiceNeed = null;
             if (currentUserId) {
@@ -1179,10 +1141,70 @@ export default function SearchScreen() {
       >
         {conversation.map((msg, i) => (
           <View key={i} style={styles.chatMessage}>
+            {msg.broadcastPicker && (
+              <View style={[styles.bubble, styles.aiBubble, { maxWidth: '95%' }]}>
+                <Text style={[IS_WEB ? { fontSize: 18 } : {}, { marginBottom: 14 }]}>
+                  <Text style={styles.nameLabelAI}>NeedAI: </Text>
+                  Who should see this request?
+                </Text>
+
+                {/* Your Connections option */}
+                <TouchableOpacity
+                  style={{ backgroundColor: '#2563EB', borderRadius: 12, padding: IS_WEB ? 14 : 12, marginBottom: 10 }}
+                  onPress={() => handleBroadcastChoice('connections', { text: msg.text, connCount: msg.connCount })}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: IS_WEB ? 16 : 14, marginBottom: 3 }}>
+                    Your Connections
+                  </Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: IS_WEB ? 14 : 12 }}>
+                    {msg.connCount > 0
+                      ? `Only the ${msg.connCount} ${msg.connCount === 1 ? 'person' : 'people'} connected with your organization.`
+                      : 'Only people connected with your organization.'}
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Anyone Who Can Help option */}
+                <TouchableOpacity
+                  style={{ backgroundColor: '#0F172A', borderRadius: 12, padding: IS_WEB ? 14 : 12 }}
+                  onPress={() => handleBroadcastChoice('public', { text: msg.text, connCount: msg.connCount })}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: IS_WEB ? 16 : 14, marginBottom: 3 }}>
+                    Anyone Who Can Help
+                  </Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: IS_WEB ? 14 : 12 }}>
+                    Make this request available to anyone on Needs who may be able to help.
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             {msg.aiThinking && (
               <View style={[styles.bubble, styles.aiBubble, { flexDirection: 'row', alignItems: 'center' }]}>
                 <Text style={styles.nameLabelAI}>NeedAI: </Text>
                 <BlueSpinner size={24} />
+              </View>
+            )}
+
+            {msg.orgConfirmPicker && (
+              <View style={[styles.bubble, styles.aiBubble, { maxWidth: '95%' }]}>
+                <Text style={[IS_WEB ? { fontSize: 18 } : {}, { marginBottom: 14 }]}>
+                  <Text style={styles.nameLabelAI}>NeedAI: </Text>
+                  {`Did you want to send this directly to ${msg.org?.orgName}?`}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: '#2563EB', borderRadius: 12, paddingVertical: IS_WEB ? 12 : 10, alignItems: 'center' }}
+                    onPress={() => handleOrgConfirm(true, msg.org, msg.text)}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: IS_WEB ? 16 : 14 }}>Yes, send to them</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: '#F1F5F9', borderRadius: 12, paddingVertical: IS_WEB ? 12 : 10, alignItems: 'center' }}
+                    onPress={() => handleOrgConfirm(false, msg.org, msg.text)}
+                  >
+                    <Text style={{ color: '#475569', fontWeight: '800', fontSize: IS_WEB ? 16 : 14 }}>No, search everyone</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 
@@ -1226,7 +1248,7 @@ export default function SearchScreen() {
 
             {msg.ai && (
               <View style={[styles.bubble, styles.aiBubble]}>
-                {/* Handle both plain string and JSX element (fundraiser steps use JSX) */}
+                {/* Handle both plain string and JSX element */}
                 {typeof msg.ai === 'string' ? (
                   <Text style={IS_WEB && { fontSize: 18 }}>
                     <Text style={styles.nameLabelAI}>NeedAI: </Text>
@@ -1306,15 +1328,13 @@ export default function SearchScreen() {
         <TextInput
           style={[styles.searchInput, IS_WEB && { minHeight: 47, maxHeight: 130, padding: 12, paddingHorizontal: 20, fontSize: 20 }]}
           placeholder={
-            mode === 'fundraiser'
-              ? fundStep === 1 ? 'Describe your fundraiser & target (e.g., "Playground rebuild $2500")'
-                : 'Type "skip" or add notes while/after uploading media...'
-              : awaitingDecision ? 'Type your choice...'
-              : awaitingEnhancementChoice ? 'Type "Yes" or "No"...'
-              : awaitingPricingQuestion ? 'Type your answer...'
-              : awaitingClarification ? 'Type your answer...'
-              : awaitingHelpCategory ? 'Tell me what you need help with...'
-              : 'Use an image or describe what you need...'
+            awaitingOrgConfirm ? 'Tap a button above...'
+            : awaitingDecision ? 'Type your choice...'
+            : awaitingEnhancementChoice ? 'Type "Yes" or "No"...'
+            : awaitingPricingQuestion ? 'Type your answer...'
+            : awaitingClarification ? 'Type your answer...'
+            : awaitingHelpCategory ? 'Tell me what you need help with...'
+            : 'Use an image or describe what you need...'
           }
           onChangeText={(text) => { wasAutoEnhancedRef.current = false; setInput(text); }}
           value={input}

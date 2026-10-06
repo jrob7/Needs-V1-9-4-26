@@ -229,7 +229,7 @@ client.connect()
             console.log('Received request for /createUser:', req.body);
 
             try {
-                const { firstName, lastName, organization, email, password, phoneNumber, streetAddress, zipcode, accountType, businessType, profilePicture } = req.body;
+                const { firstName, lastName, organization, email, password, phoneNumber, streetAddress, zipcode, accountType, businessType, orgSubType, profilePicture } = req.body;
                 const isBusiness = accountType === 'business';
 
                 // Validate input — business accounts only need email/password;
@@ -255,6 +255,7 @@ client.connect()
                     zipcode: zipcode || null,
                     accountType: isBusiness ? 'business' : 'individual',
                     businessType: isBusiness ? (businessType || null) : null,
+                    orgSubType: (isBusiness && businessType === 'nonprofit') ? (orgSubType || null) : null,
                     profilePicture: profilePicture || null,
                     cashCredits: 0,
                     helpingCredits: 0,
@@ -2262,6 +2263,92 @@ app.get('/restaurants', async (req, res) => {
 // NONPROFITS & COMMUNITY RESOURCES
 // ─────────────────────────────────────────────────────────────────────────────
 
+// POST /detectOrgMention — checks if a message text names a known nonprofit org
+app.post('/detectOrgMention', requireAuth, async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text || text.trim().length < 3) return res.json({ org: null });
+
+    // Pull all nonprofit org names and do a case-insensitive substring match
+    const orgs = await database.collection('Nonprofits').find(
+      {},
+      { projection: { orgName: 1, userId: 1 } }
+    ).toArray();
+
+    const lower = text.toLowerCase();
+    const match = orgs.find(o => {
+      const name = (o.orgName || '').toLowerCase();
+      return name.length >= 3 && lower.includes(name);
+    });
+
+    if (!match) return res.json({ org: null });
+
+    // Resolve the org's userId to get a clean user _id for notifications
+    const orgUser = await database.collection('Users').findOne(
+      { _id: ObjectId.isValid(match.userId) ? new ObjectId(String(match.userId)) : match.userId },
+      { projection: { _id: 1, organization: 1 } }
+    );
+
+    res.json({
+      org: {
+        _id: match._id.toString(),
+        orgName: match.orgName,
+        userId: orgUser ? orgUser._id.toString() : String(match.userId),
+      }
+    });
+  } catch (err) {
+    console.error('POST /detectOrgMention error:', err);
+    res.json({ org: null }); // non-fatal — fall back to normal flow
+  }
+});
+
+// POST /sendOrgRequest — user sends a need request directly to a specific org
+app.post('/sendOrgRequest', requireAuth, async (req, res) => {
+  try {
+    const { text, targetOrgId, targetOrgName } = req.body || {};
+    if (!text || !targetOrgId) return res.status(400).json({ error: 'text and targetOrgId required' });
+
+    const requesterId = req.userId;
+
+    const needDoc = {
+      searchText: text,
+      needType: 'org_request',
+      targetOrgId,
+      targetOrgName: targetOrgName || '',
+      userId: requesterId,
+      status: 'active',
+      createdAt: new Date(),
+    };
+    const result = await database.collection('NeedRequests').insertOne(needDoc);
+
+    // Look up requester name for notification
+    const requester = await database.collection('Users').findOne(
+      { _id: new ObjectId(requesterId) },
+      { projection: { firstName: 1, lastName: 1 } }
+    );
+    const requesterName = [requester?.firstName, requester?.lastName].filter(Boolean).join(' ') || 'Someone';
+
+    // Notify the org
+    if (ObjectId.isValid(targetOrgId)) {
+      await database.collection('Notifications').insertOne({
+        userId: new ObjectId(targetOrgId),
+        type: 'org_request',
+        title: '📩 New Direct Request',
+        body: `${requesterName} sent you a request: "${text}"`,
+        needId: result.insertedId.toString(),
+        requesterId,
+        read: false,
+        createdAt: new Date(),
+      });
+    }
+
+    res.json({ success: true, needId: result.insertedId.toString() });
+  } catch (err) {
+    console.error('POST /sendOrgRequest error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.post('/createNonprofit', requireAuth, async (req, res) => {
   try {
     const payload = { ...req.body, userId: req.userId, createdAt: new Date(), updatedAt: new Date() };
@@ -2802,6 +2889,43 @@ app.patch('/appointments/:id', requireAuth, async (req, res) => {
     }
 
     res.json({ success: true, _id: id, ...updates });
+  } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
+});
+
+// POST /appointments/:id/rescheduleRequest
+// Notifies the other party that the requester wants to reschedule.
+app.post('/appointments/:id/rescheduleRequest', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid appointment id' });
+    const apt = await database.collection('Appointments').findOne({ _id: new ObjectId(id) });
+    if (!apt) return res.status(404).json({ error: 'Appointment not found' });
+
+    const requesterId = req.userId;
+    const otherUserId = apt.serviceUserId === requesterId ? apt.requesterId : apt.serviceUserId;
+    const db = client.db('Need');
+    const requester = await db.collection('Users').findOne(
+      { _id: new ObjectId(requesterId) },
+      { projection: { firstName: 1, lastName: 1 } }
+    );
+    const requesterName = [requester?.firstName, requester?.lastName].filter(Boolean).join(' ') || 'Someone';
+
+    await database.collection('Appointments').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status: 'reschedule_requested', rescheduleRequestedAt: new Date() } }
+    );
+
+    await database.collection('Notifications').insertOne({
+      userId: otherUserId,
+      type: 'reschedule_request',
+      title: '⏰ Reschedule Request',
+      body: `${requesterName} would like to reschedule their appointment.`,
+      appointmentId: new ObjectId(id),
+      read: false,
+      createdAt: new Date(),
+    });
+
+    res.json({ success: true });
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
 
@@ -3776,6 +3900,210 @@ app.post('/restaurantFollowUps/complete', requireAuth, async (req, res) => {
     res.json({ success: true, coinAwarded: COINS, addedReco });
   } catch (err) {
     console.error('❌ /restaurantFollowUps/complete error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// CONNECTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /connections — list all connections for the logged-in user
+app.get('/connections', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const conns = await db.collection('Connections').find({
+      $or: [{ requesterId: userId }, { targetId: userId }],
+    }).sort({ createdAt: -1 }).toArray();
+
+    const enriched = await Promise.all(conns.map(async (c) => {
+      const otherId = c.requesterId === userId ? c.targetId : c.requesterId;
+      const role    = c.requesterId === userId ? 'sent' : 'received';
+      let other = null;
+      try {
+        other = await db.collection('Users').findOne(
+          { _id: new ObjectId(otherId) },
+          { projection: { firstName: 1, lastName: 1, profilePicture: 1, profileImageUrl: 1 } }
+        );
+      } catch (_) {}
+      return {
+        ...c,
+        role,
+        otherId,
+        otherName: other ? [other.firstName, other.lastName].filter(Boolean).join(' ') : 'Unknown',
+        otherPic:  other?.profilePicture || other?.profileImageUrl || null,
+      };
+    }));
+    res.json(enriched);
+  } catch (err) {
+    console.error('GET /connections error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /connections/status/:targetId — check connection status between logged-in user and targetId
+app.get('/connections/status/:targetId', requireAuth, async (req, res) => {
+  try {
+    const userId   = req.user.userId;
+    const targetId = req.params.targetId;
+    const conn = await db.collection('Connections').findOne({
+      $or: [
+        { requesterId: userId, targetId },
+        { requesterId: targetId, targetId: userId },
+      ],
+    });
+    res.json({ connection: conn || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /connections/request — send a connection request
+app.post('/connections/request', requireAuth, async (req, res) => {
+  try {
+    const requesterId = req.user.userId;
+    const { targetId } = req.body;
+    if (!targetId) return res.status(400).json({ error: 'targetId required' });
+    if (requesterId === targetId) return res.status(400).json({ error: 'Cannot connect to yourself' });
+
+    const existing = await db.collection('Connections').findOne({
+      $or: [
+        { requesterId, targetId },
+        { requesterId: targetId, targetId: requesterId },
+      ],
+    });
+    if (existing) return res.json({ connection: existing, alreadyExists: true });
+
+    const doc = { requesterId, targetId, status: 'pending', createdAt: new Date() };
+    const result = await db.collection('Connections').insertOne(doc);
+    res.json({ connection: { ...doc, _id: result.insertedId } });
+  } catch (err) {
+    console.error('POST /connections/request error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /connections/accept — accept a pending request
+app.post('/connections/accept', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { connectionId } = req.body;
+    await db.collection('Connections').updateOne(
+      { _id: new ObjectId(connectionId), targetId: userId, status: 'pending' },
+      { $set: { status: 'connected', connectedAt: new Date() } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// DELETE /connections/:id — disconnect (either party can remove)
+app.delete('/connections/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    await db.collection('Connections').deleteOne({
+      _id: new ObjectId(req.params.id),
+      $or: [{ requesterId: userId }, { targetId: userId }],
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONNECTION PREFERENCES
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GET /connectionPreferences — get the logged-in user's connection preferences
+app.get('/connectionPreferences', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const user = await db.collection('Users').findOne(
+      { _id: new ObjectId(userId) },
+      { projection: { connectionPreferences: 1 } }
+    );
+    const defaults = { services: true, restaurants: true, nonprofits: true };
+    res.json({ ...defaults, ...(user?.connectionPreferences || {}) });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /connectionPreferences — update the logged-in user's connection preferences
+app.post('/connectionPreferences', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { services, restaurants, nonprofits } = req.body;
+    const prefs = {};
+    if (services   !== undefined) prefs['connectionPreferences.services']     = !!services;
+    if (restaurants !== undefined) prefs['connectionPreferences.restaurants'] = !!restaurants;
+    if (nonprofits  !== undefined) prefs['connectionPreferences.nonprofits']  = !!nonprofits;
+    await db.collection('Users').updateOne({ _id: new ObjectId(userId) }, { $set: prefs });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORG BROADCAST
+// ─────────────────────────────────────────────────────────────────────────────
+
+// POST /orgBroadcast — org sends a request to their connections or everyone
+app.post('/orgBroadcast', requireAuth, async (req, res) => {
+  try {
+    const orgId = req.userId;
+    const { text, scope } = req.body; // scope: 'connections' | 'public'
+    if (!text) return res.status(400).json({ error: 'text required' });
+
+    // Save as a NeedRequest
+    const needDoc = {
+      searchText: text,
+      needType: 'org_broadcast',
+      isBroadcast: true,
+      broadcastScope: scope || 'public',
+      userId: orgId,
+      createdAt: new Date(),
+      status: 'active',
+    };
+    const needResult = await db.collection('NeedRequests').insertOne(needDoc);
+    const needId = needResult.insertedId;
+
+    // Fan out notifications to connections if scope === 'connections'
+    if (scope === 'connections') {
+      const conns = await db.collection('Connections').find({
+        $or: [{ requesterId: orgId }, { targetId: orgId }],
+        status: 'connected',
+      }).toArray();
+
+      const orgUser = await db.collection('Users').findOne(
+        { _id: new ObjectId(orgId) },
+        { projection: { firstName: 1, lastName: 1, organization: 1 } }
+      );
+      const orgName = orgUser?.organization || [orgUser?.firstName, orgUser?.lastName].filter(Boolean).join(' ') || 'An organization';
+
+      const notifications = conns.map(c => {
+        const recipientId = c.requesterId === orgId ? c.targetId : c.requesterId;
+        return {
+          userId: recipientId,
+          type: 'org_broadcast',
+          message: `${orgName}: ${text}`,
+          orgId,
+          needId: String(needId),
+          read: false,
+          createdAt: new Date(),
+        };
+      });
+
+      if (notifications.length > 0) {
+        await db.collection('Notifications').insertMany(notifications);
+      }
+    }
+
+    res.json({ success: true, needId: String(needId) });
+  } catch (err) {
+    console.error('POST /orgBroadcast error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

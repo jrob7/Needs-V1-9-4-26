@@ -288,7 +288,7 @@ const ActivitySection = ({ title, icon, color, needs, onPressNeed, onArchive }) 
 //   Business viewing their schedule → shows the customer who booked.
 //   Customer viewing their schedule → shows the business name + logo.
 // ─────────────────────────────────────────────────────────────────────────────
-const SchedulerCard = ({ apt, currentUserId }) => {
+const SchedulerCard = ({ apt, currentUserId, onCancel, onReschedule }) => {
   const isProvider = apt.serviceUserId === currentUserId;
   const otherUserId = isProvider ? apt.requesterId : apt.serviceUserId;
 
@@ -350,6 +350,19 @@ const SchedulerCard = ({ apt, currentUserId }) => {
         <View style={styles.aptAddressRow}>
           <Ionicons name="location-outline" size={W ? 17 : 13} color="#64748B" />
           <Text style={styles.aptAddressTxt}>{apt.address}</Text>
+        </View>
+      )}
+
+      {apt.status === 'confirmed' && (
+        <View style={styles.aptActionRow}>
+          <TouchableOpacity style={styles.aptRescheduleBtn} onPress={() => onReschedule && onReschedule(apt)}>
+            <Ionicons name="time-outline" size={15} color="#D97706" />
+            <Text style={styles.aptRescheduleTxt}>Request Reschedule</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.aptCancelBtn} onPress={() => onCancel && onCancel(apt)}>
+            <Ionicons name="close-circle-outline" size={15} color="#DC2626" />
+            <Text style={styles.aptCancelTxt}>Cancel</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -463,6 +476,49 @@ const NotificationsScreen = () => {
       setAppointments(Array.isArray(data) ? data : []);
     } catch (e) { console.log('Appointments fetch error:', e); }
   }, [userId]);
+
+  const handleCancelAppointment = (apt) => {
+    Alert.alert(
+      'Cancel Appointment',
+      'Are you sure you want to cancel this appointment?',
+      [
+        { text: 'Keep It', style: 'cancel' },
+        {
+          text: 'Cancel Appointment', style: 'destructive',
+          onPress: async () => {
+            try {
+              await authFetch(`${NODE_API}/appointments/${apt._id}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ status: 'cancelled' }),
+              });
+              setAppointments(prev => prev.map(a => a._id === apt._id ? { ...a, status: 'cancelled' } : a));
+            } catch { Alert.alert('Error', 'Could not cancel appointment.'); }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRescheduleRequest = (apt) => {
+    Alert.alert(
+      'Request Reschedule',
+      'This will notify the other party that you would like to reschedule.',
+      [
+        { text: 'Nevermind', style: 'cancel' },
+        {
+          text: 'Send Request',
+          onPress: async () => {
+            try {
+              await authFetch(`${NODE_API}/appointments/${apt._id}/rescheduleRequest`, {
+                method: 'POST',
+              });
+              Alert.alert('Request Sent', 'The other party has been notified.');
+            } catch { Alert.alert('Error', 'Could not send reschedule request.'); }
+          },
+        },
+      ]
+    );
+  };
 
   const checkScheduledNotifications = async () => {
     try {
@@ -736,7 +792,7 @@ const NotificationsScreen = () => {
                 <Text style={styles.emptySub}>Accepted quotes will appear here</Text>
               </View>
             ) : upcoming.map(apt => (
-              <SchedulerCard key={apt._id} apt={apt} currentUserId={userId} />
+              <SchedulerCard key={apt._id} apt={apt} currentUserId={userId} onCancel={handleCancelAppointment} onReschedule={handleRescheduleRequest} />
             ));
           })()}
 
@@ -1009,6 +1065,22 @@ const styles = StyleSheet.create({
   aptAvatarFallback:{ backgroundColor: '#DBEAFE', justifyContent: 'center', alignItems: 'center' },
   aptAvatarInitial: { fontSize: W ? 23 : 18, fontWeight: '900', color: '#2563EB' },
   aptPartyLabel:    { fontSize: W ? 14 : 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: W ? 3 : 2 },
+
+  aptActionRow:     { flexDirection: 'row', gap: W ? 10 : 8, marginTop: W ? 14 : 10 },
+  aptRescheduleBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: W ? 6 : 5, paddingVertical: W ? 9 : 7,
+    borderRadius: W ? 10 : 8, borderWidth: 1.5, borderColor: '#D97706',
+    backgroundColor: '#FFFBEB',
+  },
+  aptRescheduleTxt: { fontSize: W ? 14 : 11, fontWeight: '700', color: '#D97706' },
+  aptCancelBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: W ? 6 : 5, paddingVertical: W ? 9 : 7,
+    borderRadius: W ? 10 : 8, borderWidth: 1.5, borderColor: '#DC2626',
+    backgroundColor: '#FFF1F1',
+  },
+  aptCancelTxt:     { fontSize: W ? 14 : 11, fontWeight: '700', color: '#DC2626' },
 
 });
 

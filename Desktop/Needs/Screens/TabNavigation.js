@@ -32,6 +32,8 @@ import MessagesScreen                from './MessagesScreen';
 import NewMessageScreen               from './NewMessageScreen';
 import ConversationScreen            from './ConversationScreen';
 import NotificationsScreen           from './NotificationsScreen';
+import ConnectionsModal              from './ConnectionsModal';
+import ConnectionSettings            from './ConnectionSettings';
 
 import { UserContext }  from '../server/CurrentUser';
 import { useAuthModal } from './AuthModalContext';
@@ -48,6 +50,8 @@ const SHARED_SCREENS = [
   { name: 'SingleItemView',                component: SingleItemView },
   { name: 'SearchResults',                 component: SearchResults },
   { name: 'ProfileView',                   component: ProfileView },
+  { name: 'ConnectionsModal',              component: ConnectionsModal },
+  { name: 'ConnectionSettings',            component: ConnectionSettings },
   { name: 'CurrentProfileView',            component: CurrentProfileView },
   { name: 'Activity',                      component: Activity },
   { name: 'FillNeedTransaction',           component: FillNeedTransaction },

@@ -12,6 +12,7 @@ import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
 
 import { NODE_API } from '../config';
+import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 const resolveImg = (raw) => {
   if (!raw) return null;
   if (raw.startsWith('http')) return raw;
@@ -190,6 +191,7 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
 
   return (
     <View style={{ flex: 1, backgroundColor: '#fff', paddingTop: insets.top }}>
+      {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onBack || (() => navigation?.goBack())} style={styles.backBtn}>

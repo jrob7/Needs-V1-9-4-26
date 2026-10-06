@@ -144,10 +144,11 @@ function CreateNewUser({ onLoginSuccess, onCancel }) {
 function CreateAccountModal({ onClose, onLoginSuccess }) {
   const { setUserId, setAccountType, setBusinessType } = useContext(UserContext);
 
-  // 'type' -> 'bizType' (business only) -> 'form' -> 'business' (business only)
+  // 'type' -> 'bizType' | 'orgType' -> 'form' -> 'business' (business only)
   const [step, setStep] = useState('type');
   const [accountTypeChoice, setAccountTypeChoice] = useState(null); // 'individual' | 'business'
   const [bizTypeChoice, setBizTypeChoice] = useState(null); // 'service' | 'restaurant' | 'nonprofit'
+  const [orgSubType, setOrgSubType] = useState(null); // 'nonprofit' | 'church' | 'community'
   const [selectedCategory, setSelectedCategory] = useState('');
 
   const [firstName, setFirstName] = useState('');
@@ -275,7 +276,7 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
   // is actually submitted. Computed unconditionally so the business form
   // (rendered further down) can stay mounted across step changes.
   const pendingAccount = bizTypeChoice
-    ? { email, password, accountType: 'business', businessType: bizTypeChoice }
+    ? { email, password, accountType: 'business', businessType: bizTypeChoice, orgSubType: orgSubType || null }
     : null;
 
   return (
@@ -350,7 +351,7 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
         </View>
       )}
 
-      {(step === 'type' || step === 'bizType' || step === 'form' || step === 'individualDetails') && (
+      {(step === 'type' || step === 'bizType' || step === 'orgType' || step === 'form' || step === 'individualDetails') && (
         <View style={styles.screen}>
           <Svg style={styles.waveBack} viewBox="0 0 100 30" preserveAspectRatio="none">
             <Path d="M0,12 C25,28 75,5 100,18 L100,30 L0,30 Z" fill="#DCE9FB" />
@@ -374,9 +375,9 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
                 <Ionicons name="business-outline" size={22} color="#2563EB" style={styles.choiceBtnIcon} />
                 <Text style={styles.choiceBtnText}>Business / Service Provider</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.choiceBtn} onPress={() => { setAccountTypeChoice('business'); setBizTypeChoice('nonprofit'); setStep('form'); }}>
+              <TouchableOpacity style={styles.choiceBtn} onPress={() => { setAccountTypeChoice('business'); setStep('orgType'); }}>
                 <Ionicons name="people-outline" size={22} color="#2563EB" style={styles.choiceBtnIcon} />
-                <Text style={styles.choiceBtnText}>Nonprofit / Community Resource</Text>
+                <Text style={styles.choiceBtnText}>Organization</Text>
               </TouchableOpacity>
 
               <TouchableOpacity onPress={onClose} style={styles.cancelWrap}>
@@ -396,6 +397,29 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
               <TouchableOpacity style={styles.choiceBtn} onPress={() => { setBizTypeChoice('restaurant'); setStep('form'); }}>
                 <Ionicons name="restaurant-outline" size={22} color="#2563EB" style={styles.choiceBtnIcon} />
                 <Text style={styles.choiceBtnText}>Restaurant</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={() => setStep('type')} style={styles.cancelWrap}>
+                <Text style={styles.cancelText}>← Back</Text>
+              </TouchableOpacity>
+            </>)}
+
+            {/* ── OrgType step ── */}
+            {step === 'orgType' && (<>
+              <Text style={styles.title}>What type of organization?</Text>
+              <Text style={styles.subtitle}>Select the type that best describes you</Text>
+
+              <TouchableOpacity style={styles.choiceBtn} onPress={() => { setBizTypeChoice('nonprofit'); setOrgSubType('nonprofit'); setStep('form'); }}>
+                <Ionicons name="ribbon-outline" size={22} color="#2563EB" style={styles.choiceBtnIcon} />
+                <Text style={styles.choiceBtnText}>Nonprofit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.choiceBtn} onPress={() => { setBizTypeChoice('nonprofit'); setOrgSubType('church'); setStep('form'); }}>
+                <Ionicons name="home-outline" size={22} color="#2563EB" style={styles.choiceBtnIcon} />
+                <Text style={styles.choiceBtnText}>Church / Faith Organization</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.choiceBtn} onPress={() => { setBizTypeChoice('nonprofit'); setOrgSubType('community'); setStep('form'); }}>
+                <Ionicons name="people-outline" size={22} color="#2563EB" style={styles.choiceBtnIcon} />
+                <Text style={styles.choiceBtnText}>Community Organization</Text>
               </TouchableOpacity>
 
               <TouchableOpacity onPress={() => setStep('type')} style={styles.cancelWrap}>

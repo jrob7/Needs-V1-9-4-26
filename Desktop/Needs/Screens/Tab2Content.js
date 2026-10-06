@@ -442,8 +442,8 @@ const STATUS_STEPS = {
 };
 
 // ── TEST BORDER — swap colors here, delete marked blocks to remove ──
-const TEST_GLOW_PENDING = '#3B82F6'; // pulsing border color while pending
-const TEST_GLOW_READY   = '#10B981'; // solid border color when quote ready
+const TEST_GLOW_PENDING = '#10B981'; // pulsing border: white → green (matches pill)
+const TEST_GLOW_READY   = '#10B981'; // solid border when quote ready
 // ────────────────────────────────────────────────────────────────────
 
 function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, onOpenNeed, onViewCreator, onLayout }) {
@@ -451,7 +451,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
   const [quotes, setQuotes] = useState([]);
   const [quotesVisible, setQuotesVisible] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const borderAnim = useRef(new Animated.Value(1)).current; // TEST border pulse
+  const borderAnim = useRef(new Animated.Value(0)).current;
   // Prevent cycling: once quotes are loaded, never reset the count downward
   const quotesLoadedRef = useRef(false);
   const status = need?.serviceMatchStatus || 'processing';
@@ -516,35 +516,35 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
       .catch(() => {});
   }, [need?._id]);
 
-  // Pulse animation
-  useEffect(() => {
-    if (isResolved) { pulseAnim.setValue(1); return; }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 0.6, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1,   duration: 700, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [isResolved]);
-
-  // TEST border pulse — pending blinks, ready stays solid
-  useEffect(() => {
-    if (hasMatches) { borderAnim.setValue(1); return; }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(borderAnim, { toValue: 0.15, duration: 900, useNativeDriver: true }),
-        Animated.timing(borderAnim, { toValue: 1,    duration: 900, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [hasMatches]); // TEST border pulse
-
   // Only count quotes where the business has actually sent a response (not pending_business)
   const realQuotes = quotes.filter(q => !['pending_business', 'cancelled'].includes(q.status));
   const hasMatches = realQuotes.length > 0;
+
+  // Pill pulse: blink when pending, solid when quote ready or resolved
+  useEffect(() => {
+    if (isResolved || hasMatches) { pulseAnim.setValue(1); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.6, duration: 1000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,   duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [isResolved, hasMatches]);
+
+  // Border pulse: blink only when quote is ready
+  useEffect(() => {
+    if (!hasMatches) { borderAnim.setValue(0); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(borderAnim, { toValue: 0,  duration: 1000, useNativeDriver: true }),
+        Animated.timing(borderAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [hasMatches]);
   const pillLabel = hasMatches
     ? `${realQuotes.length} Quote${realQuotes.length !== 1 ? 's' : ''} Ready`
     : 'Pending Service Quotes';
@@ -569,8 +569,8 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     <View style={{ width: '100%' }} onLayout={onLayout}>
       <View style={{ width: '100%', position: 'relative' }}>
         <Card
-          badgeLabel="Service"
-          badgeColor="#F59E0B"
+          badgeLabel="Need"
+          badgeColor="#007bff"
           title={toTitle((need?.searchText || '').replace(/\*\*/g, ''), 8)}
           subtitle={need?.urgency ? `When: ${need.urgency}` : ''}
           media={IS_WEB ? media : media}
@@ -1729,7 +1729,7 @@ const styles = StyleSheet.create({
   swipeHintPill: {
     position: 'absolute', zIndex: 20, right: 16, top: 14,
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#10B981', borderRadius: 999,
+    backgroundColor: '#F59E0B', borderRadius: 999,
     paddingVertical: 6, paddingHorizontal: 12,
     shadowColor: '#000', shadowOpacity: 0.15,
     shadowOffset: { width: 0, height: 2 }, shadowRadius: 4, elevation: 3,

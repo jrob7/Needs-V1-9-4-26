@@ -491,6 +491,7 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
     // 1. Your own requests (any type)
     // 2. org_request directed to you (targetOrgId === you)
     // 3. org_broadcast from orgs you are connected to
+    // 4. org_broadcast shared with you directly (viral share chain)
     const docs = await collection.find({
       archived: { $ne: true },
       $or: [
@@ -499,6 +500,7 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
         { needType: 'org_request', targetOrgId: currentUserId },
         { needType: 'org_broadcast', userId: { $in: connectedOrgIds } },
         { needType: 'org_broadcast', userId: { $in: connectedOrgIds.map(id => ObjectId.isValid(id) ? new ObjectId(id) : id) } },
+        { needType: 'org_broadcast', sharedWith: currentUserId },
       ],
     }).sort({ date: -1 }).toArray();
 
@@ -4115,11 +4117,57 @@ app.post('/connectionPreferences', requireAuth, async (req, res) => {
 // ORG BROADCAST
 // ─────────────────────────────────────────────────────────────────────────────
 
-// POST /orgBroadcast — org sends a request to their connections or everyone
+// POST /needRequests/:id/share — share a broadcast with selected connections (viral chain)
+app.post('/needRequests/:id/share', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = req.userId;
+    const { targetUserIds } = req.body; // array of userIds to share with
+    if (!Array.isArray(targetUserIds) || targetUserIds.length === 0) {
+      return res.status(400).json({ error: 'targetUserIds required' });
+    }
+
+    const need = await database.collection('NeedRequests').findOne({ _id: new ObjectId(id) });
+    if (!need) return res.status(404).json({ error: 'Not found' });
+    if (!need.shareable) return res.status(403).json({ error: 'Not shareable' });
+
+    // Add new recipients to sharedWith (avoid duplicates with $addToSet)
+    await database.collection('NeedRequests').updateOne(
+      { _id: new ObjectId(id) },
+      { $addToSet: { sharedWith: { $each: targetUserIds } } }
+    );
+
+    // Notify each new recipient
+    const sharer = await database.collection('Users').findOne(
+      { _id: new ObjectId(currentUserId) },
+      { projection: { firstName: 1, lastName: 1, organization: 1 } }
+    );
+    const sharerName = sharer?.organization || [sharer?.firstName, sharer?.lastName].filter(Boolean).join(' ') || 'Someone';
+
+    const notifications = targetUserIds.map(uid => ({
+      userId: uid,
+      type: 'shared_need',
+      message: `${sharerName} shared a need request with you: "${need.searchText}"`,
+      needId: id,
+      read: false,
+      createdAt: new Date(),
+    }));
+    if (notifications.length > 0) {
+      await database.collection('Notifications').insertMany(notifications);
+    }
+
+    res.json({ success: true, sharedCount: targetUserIds.length });
+  } catch (err) {
+    console.error('POST /needRequests/:id/share error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /orgBroadcast — org sends a request to their connections
 app.post('/orgBroadcast', requireAuth, async (req, res) => {
   try {
     const orgId = req.userId;
-    const { text } = req.body;
+    const { text, shareable } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });
 
     // Save as a NeedRequest — always connections-only
@@ -4128,6 +4176,8 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
       needType: 'org_broadcast',
       isBroadcast: true,
       broadcastScope: 'connections',
+      shareable: !!shareable,
+      sharedWith: [],
       userId: orgId,
       createdAt: new Date(),
       status: 'active',

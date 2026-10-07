@@ -209,12 +209,17 @@ export default function SearchScreen() {
     } catch (_) {}
   };
 
+  const handleShareableChoice = (shareable, broadcastData) => {
+    setConversation(prev => prev.filter(m => !m.shareablePicker));
+    handleBroadcastChoice({ ...broadcastData, shareable });
+  };
+
   const handleBroadcastChoice = async (broadcastData) => {
     setConversation(prev => [...prev, { aiThinking: true }]);
     try {
       await authFetch(`${NODE_API}/orgBroadcast`, {
         method: 'POST',
-        body: JSON.stringify({ text: broadcastData.text, userId: currentUserId }),
+        body: JSON.stringify({ text: broadcastData.text, shareable: !!broadcastData.shareable, userId: currentUserId }),
       });
       setConversation(prev => prev.filter(m => !m.aiThinking));
       const connLabel = broadcastData.connCount > 0
@@ -817,7 +822,7 @@ export default function SearchScreen() {
     const originalText = overrideText || (input || '').trim();
     if (!originalText) return;
 
-    // ── Org broadcast: send directly to connections, no picker needed ──────────
+    // ── Org broadcast: ask about sharing, then send to connections ─────────────
     if (isOrgAccount && currentUserId && !overrideText) {
       pushUser(originalText, !!media);
       setInput('');
@@ -827,7 +832,7 @@ export default function SearchScreen() {
         const conns = await r.json();
         connCount = Array.isArray(conns) ? conns.length : 0;
       } catch (_) {}
-      await handleBroadcastChoice({ text: originalText, connCount });
+      setConversation(prev => [...prev, { shareablePicker: true, text: originalText, connCount }]);
       return;
     }
 
@@ -1139,6 +1144,32 @@ export default function SearchScreen() {
               <View style={[styles.bubble, styles.aiBubble, { flexDirection: 'row', alignItems: 'center' }]}>
                 <Text style={styles.nameLabelAI}>NeedAI: </Text>
                 <BlueSpinner size={24} />
+              </View>
+            )}
+
+            {msg.shareablePicker && (
+              <View style={[styles.bubble, styles.aiBubble, { maxWidth: '95%' }]}>
+                <Text style={[IS_WEB ? { fontSize: 18 } : {}, { marginBottom: 4 }]}>
+                  <Text style={styles.nameLabelAI}>NeedAI: </Text>
+                  Allow your connections to share this Need?
+                </Text>
+                <Text style={{ fontSize: IS_WEB ? 14 : 12, color: '#6B7280', marginBottom: 14 }}>
+                  This allows your connections to share it with people they know.
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: '#2563EB', borderRadius: 12, paddingVertical: IS_WEB ? 12 : 10, alignItems: 'center' }}
+                    onPress={() => handleShareableChoice(true, { text: msg.text, connCount: msg.connCount })}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: IS_WEB ? 15 : 13 }}>Allow Sharing</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: '#F1F5F9', borderRadius: 12, paddingVertical: IS_WEB ? 12 : 10, alignItems: 'center' }}
+                    onPress={() => handleShareableChoice(false, { text: msg.text, connCount: msg.connCount })}
+                  >
+                    <Text style={{ color: '#374151', fontWeight: '700', fontSize: IS_WEB ? 15 : 13 }}>Don't Allow</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             )}
 

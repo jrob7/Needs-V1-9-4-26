@@ -396,6 +396,7 @@ export default function NeedInquiryView() {
                   idx={idx} isActive={idx === activeIndex}
                   isSessionNeed={item._id === latestNeedId}
                   autoOpenModal={openMatchModal && String(item._id) === String(openMatchModal)}
+                  currentUserId={currentUserId}
                   onOpenNeed={() => openNeed(item)}
                   onViewCreator={() => {
                     if (!item.creatorId) return;
@@ -793,10 +794,13 @@ function HorizontalNeedRow(props) {
   return <HorizontalNeedRowInner {...props} />;
 }
 
-function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, autoOpenModal, onOpenNeed, onViewCreator, onLayout }) {
+function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, autoOpenModal, onOpenNeed, onViewCreator, onLayout, currentUserId }) {
   const [matches, setMatches]           = useState([]);
   const [loaded, setLoaded]             = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
   const cached = getPillState(need?._id);
+
+  const isShareable = need?.needType === 'org_broadcast' && need?.shareable === true && need?.userId !== currentUserId;
   const [broadMatches, setBroadMatches] = useState(() => cached.broadMatches || []);
   const [showSwipeHint, setShowSwipeHint] = useState(() => !!cached.showSwipeHint);
   const [modalVisible, setModalVisible] = useState(false);
@@ -1054,7 +1058,146 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
         needText={need?.searchText}
         onClose={() => setModalVisible(false)}
       />
+
+      {/* ── Share button — only on shareable org broadcasts ── */}
+      {isShareable && (
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}
+          onPress={() => setShareModalVisible(true)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="share-social-outline" size={16} color="#2563EB" />
+          <Text style={{ fontSize: 13, color: '#2563EB', fontWeight: '700' }}>Share with your connections</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* ── Share connections picker modal ── */}
+      {isShareable && (
+        <ShareNeedModal
+          visible={shareModalVisible}
+          needId={need?._id}
+          needText={need?.searchText}
+          currentUserId={currentUserId}
+          onClose={() => setShareModalVisible(false)}
+        />
+      )}
     </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ShareNeedModal — pick connections to share a broadcast need with
+// ─────────────────────────────────────────────────────────────────────────────
+function ShareNeedModal({ visible, needId, needText, currentUserId, onClose }) {
+  const [connections, setConnections] = useState([]);
+  const [selected, setSelected]       = useState(new Set());
+  const [loading, setLoading]         = useState(false);
+  const [sharing, setSharing]         = useState(false);
+
+  useEffect(() => {
+    if (!visible || !currentUserId) return;
+    setLoading(true);
+    setSelected(new Set());
+    authFetch(`${API}/connections`)
+      .then(r => r.json())
+      .then(data => {
+        const conns = Array.isArray(data) ? data : [];
+        setConnections(conns);
+      })
+      .catch(() => setConnections([]))
+      .finally(() => setLoading(false));
+  }, [visible, currentUserId]);
+
+  const toggle = (uid) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(uid) ? next.delete(uid) : next.add(uid);
+      return next;
+    });
+  };
+
+  const handleShare = async () => {
+    if (selected.size === 0) return;
+    setSharing(true);
+    try {
+      await authFetch(`${API}/needRequests/${needId}/share`, {
+        method: 'POST',
+        body: JSON.stringify({ targetUserIds: [...selected] }),
+      });
+      Alert.alert('Shared!', `Sent to ${selected.size} connection${selected.size !== 1 ? 's' : ''}.`);
+      onClose();
+    } catch {
+      Alert.alert('Error', 'Could not share. Please try again.');
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '75%', paddingBottom: 32 }}>
+          {/* Header */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' }}>
+            <Text style={{ fontSize: 17, fontWeight: '800', color: '#111' }}>Share with connections</Text>
+            <TouchableOpacity onPress={onClose}><Ionicons name="close" size={22} color="#6B7280" /></TouchableOpacity>
+          </View>
+
+          {/* Need preview */}
+          <Text style={{ fontSize: 13, color: '#6B7280', paddingHorizontal: 18, paddingTop: 12, paddingBottom: 4 }} numberOfLines={2}>
+            "{needText}"
+          </Text>
+
+          {/* Connections list */}
+          {loading ? (
+            <View style={{ alignItems: 'center', padding: 32 }}><Text style={{ color: '#9CA3AF' }}>Loading…</Text></View>
+          ) : connections.length === 0 ? (
+            <View style={{ alignItems: 'center', padding: 32 }}><Text style={{ color: '#9CA3AF' }}>No connections yet.</Text></View>
+          ) : (
+            <ScrollView style={{ paddingHorizontal: 18, marginTop: 8 }}>
+              {connections.map(conn => {
+                const uid = conn.connectedUserId || conn._id || conn.userId;
+                const name = conn.firstName ? `${conn.firstName} ${conn.lastName || ''}`.trim() : (conn.organization || conn.name || 'Connection');
+                const pic = conn.profilePicture || conn.profileImageUrl || null;
+                const isSelected = selected.has(uid);
+                return (
+                  <TouchableOpacity
+                    key={uid}
+                    style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F9FAFB', gap: 12 }}
+                    onPress={() => toggle(uid)}
+                    activeOpacity={0.7}
+                  >
+                    {pic
+                      ? <Image source={{ uri: pic }} style={{ width: 40, height: 40, borderRadius: 20 }} />
+                      : <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ fontWeight: '700', color: '#6B7280' }}>{(name[0] || '?').toUpperCase()}</Text>
+                        </View>
+                    }
+                    <Text style={{ flex: 1, fontSize: 15, fontWeight: '600', color: '#111' }}>{name}</Text>
+                    <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: isSelected ? '#2563EB' : '#D1D5DB', backgroundColor: isSelected ? '#2563EB' : '#fff', alignItems: 'center', justifyContent: 'center' }}>
+                      {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              <View style={{ height: 16 }} />
+            </ScrollView>
+          )}
+
+          {/* Send button */}
+          <TouchableOpacity
+            style={{ marginHorizontal: 18, marginTop: 12, backgroundColor: selected.size > 0 ? '#2563EB' : '#E5E7EB', borderRadius: 14, paddingVertical: 14, alignItems: 'center' }}
+            onPress={handleShare}
+            disabled={selected.size === 0 || sharing}
+            activeOpacity={0.85}
+          >
+            <Text style={{ color: selected.size > 0 ? '#fff' : '#9CA3AF', fontWeight: '800', fontSize: 15 }}>
+              {sharing ? 'Sharing…' : selected.size > 0 ? `Share with ${selected.size} ${selected.size === 1 ? 'person' : 'people'}` : 'Select connections'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 }
 

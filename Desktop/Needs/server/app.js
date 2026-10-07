@@ -4074,7 +4074,7 @@ app.post('/connections/request', requireAuth, async (req, res) => {
     );
     const requesterName = requester?.organization || [requester?.firstName, requester?.lastName].filter(Boolean).join(' ') || 'Someone';
     await db.collection('Notifications').insertOne({
-      userId: targetId,
+      userId: ObjectId.isValid(targetId) ? new ObjectId(targetId) : targetId,
       type: 'connection_request',
       message: `${requesterName} wants to connect with you.`,
       connectionId: result.insertedId.toString(),
@@ -4108,7 +4108,7 @@ app.post('/connections/accept', requireAuth, async (req, res) => {
       );
       const accepterName = accepter?.organization || [accepter?.firstName, accepter?.lastName].filter(Boolean).join(' ') || 'Someone';
       await db.collection('Notifications').insertOne({
-        userId: conn.requesterId,
+        userId: ObjectId.isValid(conn.requesterId) ? new ObjectId(conn.requesterId) : conn.requesterId,
         type: 'connection_accepted',
         message: `${accepterName} accepted your connection request.`,
         read: false,

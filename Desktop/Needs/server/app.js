@@ -2287,16 +2287,42 @@ app.post('/detectOrgMention', requireAuth, async (req, res) => {
     const sigWords = (orgName) => (orgName || '').toLowerCase().split(/\s+/).filter(w => w.length >= 5 && !STOP_WORDS.has(w));
 
     const lower = text.toLowerCase();
-    const match = orgs.find(o => {
+
+    // Step 1: fast pre-filter — find all orgs with a word or name match (~10ms)
+    const candidates = orgs.filter(o => {
       const name = (o.orgName || '').toLowerCase();
-      // Exact substring match first
       if (name.length >= 3 && lower.includes(name)) return true;
-      // Significant-word match: any key word (4+ chars) from the org name found in the message
       const words = sigWords(o.orgName);
       return words.length > 0 && words.some(w => lower.includes(w));
     });
 
-    if (!match) return res.json({ org: null });
+    if (candidates.length === 0) return res.json({ org: null });
+
+    // Step 2: if candidates found, ask AI to confirm which one (if any) is actually being referenced
+    let match = candidates[0]; // default to first candidate
+    if (candidates.length >= 1) {
+      try {
+        const orgList = candidates.map(c => c.orgName).join(', ');
+        const prompt = `From this list of organizations: ${orgList}. Does the following message mention or refer to any of them? Message: "${text}". Reply with ONLY the exact organization name from the list if it is mentioned or referred to, or reply with the word null if none are referenced.`;
+        const aiRes = await fetch(`${FLASK_API}/ask`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: prompt }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (aiRes.ok) {
+          const aiData = await aiRes.json();
+          const aiText = (aiData?.response || aiData?.answer || aiData?.result || aiData?.text || '').trim();
+          if (!aiText || aiText.toLowerCase() === 'null' || aiText.toLowerCase() === 'none') {
+            return res.json({ org: null }); // AI says no org actually referenced
+          }
+          // Find the candidate whose name best matches the AI response
+          const aiLower = aiText.toLowerCase();
+          const confirmed = candidates.find(c => aiLower.includes((c.orgName || '').toLowerCase()) || (c.orgName || '').toLowerCase().includes(aiLower));
+          if (confirmed) match = confirmed;
+        }
+      } catch (_) { /* non-fatal — fall through to use first candidate */ }
+    }
 
     // Resolve the org's userId to get a clean user _id for notifications
     const orgUser = await database.collection('Users').findOne(

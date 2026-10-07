@@ -2275,8 +2275,16 @@ app.post('/detectOrgMention', requireAuth, async (req, res) => {
       { projection: { orgName: 1, userId: 1 } }
     ).toArray();
 
-    const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'our', 'your']);
-    const sigWords = (orgName) => (orgName || '').toLowerCase().split(/\s+/).filter(w => w.length >= 4 && !STOP_WORDS.has(w));
+    const STOP_WORDS = new Set([
+      'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'our', 'your',
+      // common words that appear in both org names and everyday speech
+      'family', 'community', 'services', 'service', 'resources', 'resource',
+      'center', 'centre', 'foundation', 'organization', 'group', 'network',
+      'association', 'help', 'care', 'hope', 'faith', 'grace', 'love', 'life',
+      'path', 'house', 'home', 'place', 'people', 'need', 'needs', 'local',
+      'health', 'food', 'relief', 'support', 'outreach', 'mission',
+    ]);
+    const sigWords = (orgName) => (orgName || '').toLowerCase().split(/\s+/).filter(w => w.length >= 5 && !STOP_WORDS.has(w));
 
     const lower = text.toLowerCase();
     const match = orgs.find(o => {

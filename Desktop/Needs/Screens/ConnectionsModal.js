@@ -24,7 +24,7 @@ const STATUS_LABEL = {
 };
 
 // ── Existing connection row ──────────────────────────────────────────────────
-function ConnectionRow({ item, isMuted, onDisconnect, onToggleMute, onViewProfile }) {
+function ConnectionRow({ item, isMuted, onDisconnect, onToggleMute, onViewProfile, onAccept }) {
   const status = STATUS_LABEL[item.status] || STATUS_LABEL.pending;
   const avatarUri = resolveImg(item.otherPic);
   const initials = (item.otherName || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -52,16 +52,37 @@ function ConnectionRow({ item, isMuted, onDisconnect, onToggleMute, onViewProfil
         {isMuted && <Text style={styles.mutedLabel}>Shared needs muted</Text>}
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.actionBtn} onPress={() => onToggleMute(item)} activeOpacity={0.8}>
-        <Ionicons
-          name={isMuted ? 'notifications-off-outline' : 'notifications-outline'}
-          size={17}
-          color={isMuted ? '#94A3B8' : '#2563EB'}
-        />
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.actionBtn} onPress={() => onDisconnect(item)} activeOpacity={0.8}>
-        <Ionicons name="person-remove-outline" size={17} color="#EF4444" />
-      </TouchableOpacity>
+      {item.role === 'received' && item.status === 'pending' ? (
+        <>
+          <TouchableOpacity
+            style={{ backgroundColor: '#2563EB', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, marginLeft: 4 }}
+            onPress={() => onAccept(item)}
+            activeOpacity={0.8}
+          >
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Accept</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, marginLeft: 6 }}
+            onPress={() => onDisconnect(item)}
+            activeOpacity={0.8}
+          >
+            <Text style={{ color: '#64748B', fontWeight: '700', fontSize: 13 }}>Decline</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <TouchableOpacity style={styles.actionBtn} onPress={() => onToggleMute(item)} activeOpacity={0.8}>
+            <Ionicons
+              name={isMuted ? 'notifications-off-outline' : 'notifications-outline'}
+              size={17}
+              color={isMuted ? '#94A3B8' : '#2563EB'}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionBtn} onPress={() => onDisconnect(item)} activeOpacity={0.8}>
+            <Ionicons name="person-remove-outline" size={17} color="#EF4444" />
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   );
 }
@@ -188,6 +209,18 @@ export default function ConnectionsModal() {
     }
   };
 
+  const handleAccept = async (item) => {
+    try {
+      await authFetch(`${NODE_API}/connections/accept`, {
+        method: 'POST',
+        body: JSON.stringify({ connectionId: String(item._id) }),
+      });
+      setConnections(prev => prev.map(c => String(c._id) === String(item._id) ? { ...c, status: 'connected', role: 'received' } : c));
+    } catch (_) {
+      Alert.alert('Error', 'Could not accept connection request.');
+    }
+  };
+
   const handleDisconnect = (item) => {
     Alert.alert(
       'Remove Connection',
@@ -303,6 +336,7 @@ export default function ConnectionsModal() {
                 onDisconnect={handleDisconnect}
                 onToggleMute={handleToggleMute}
                 onViewProfile={handleViewProfile}
+                onAccept={handleAccept}
               />
             )}
             contentContainerStyle={{ padding: 16 }}

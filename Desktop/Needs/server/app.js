@@ -4001,7 +4001,7 @@ app.post('/restaurantFollowUps/complete', requireAuth, async (req, res) => {
 // GET /connections — list all connections for the logged-in user
 app.get('/connections', requireAuth, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.userId;
     const conns = await db.collection('Connections').find({
       $or: [{ requesterId: userId }, { targetId: userId }],
     }).sort({ createdAt: -1 }).toArray();
@@ -4013,14 +4013,14 @@ app.get('/connections', requireAuth, async (req, res) => {
       try {
         other = await db.collection('Users').findOne(
           { _id: new ObjectId(otherId) },
-          { projection: { firstName: 1, lastName: 1, profilePicture: 1, profileImageUrl: 1 } }
+          { projection: { firstName: 1, lastName: 1, organization: 1, profilePicture: 1, profileImageUrl: 1 } }
         );
       } catch (_) {}
       return {
         ...c,
         role,
         otherId,
-        otherName: other ? [other.firstName, other.lastName].filter(Boolean).join(' ') : 'Unknown',
+        otherName: other ? (other.organization || [other.firstName, other.lastName].filter(Boolean).join(' ') || 'Unknown') : 'Unknown',
         otherPic:  other?.profilePicture || other?.profileImageUrl || null,
       };
     }));
@@ -4034,7 +4034,7 @@ app.get('/connections', requireAuth, async (req, res) => {
 // GET /connections/status/:targetId — check connection status between logged-in user and targetId
 app.get('/connections/status/:targetId', requireAuth, async (req, res) => {
   try {
-    const userId   = req.user.userId;
+    const userId   = req.userId;
     const targetId = req.params.targetId;
     const conn = await db.collection('Connections').findOne({
       $or: [
@@ -4066,6 +4066,23 @@ app.post('/connections/request', requireAuth, async (req, res) => {
 
     const doc = { requesterId, targetId, status: 'pending', createdAt: new Date() };
     const result = await db.collection('Connections').insertOne(doc);
+
+    // Notify the target user
+    const requester = await db.collection('Users').findOne(
+      { _id: new ObjectId(requesterId) },
+      { projection: { firstName: 1, lastName: 1, organization: 1 } }
+    );
+    const requesterName = requester?.organization || [requester?.firstName, requester?.lastName].filter(Boolean).join(' ') || 'Someone';
+    await db.collection('Notifications').insertOne({
+      userId: targetId,
+      type: 'connection_request',
+      message: `${requesterName} wants to connect with you.`,
+      connectionId: result.insertedId.toString(),
+      requesterId,
+      read: false,
+      createdAt: new Date(),
+    });
+
     res.json({ connection: { ...doc, _id: result.insertedId } });
   } catch (err) {
     console.error('POST /connections/request error:', err);
@@ -4076,12 +4093,28 @@ app.post('/connections/request', requireAuth, async (req, res) => {
 // POST /connections/accept — accept a pending request
 app.post('/connections/accept', requireAuth, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.userId;
     const { connectionId } = req.body;
-    await db.collection('Connections').updateOne(
+    const conn = await db.collection('Connections').findOneAndUpdate(
       { _id: new ObjectId(connectionId), targetId: userId, status: 'pending' },
-      { $set: { status: 'connected', connectedAt: new Date() } }
+      { $set: { status: 'connected', connectedAt: new Date() } },
+      { returnDocument: 'after' }
     );
+    // Notify the original requester that they were accepted
+    if (conn?.requesterId) {
+      const accepter = await db.collection('Users').findOne(
+        { _id: new ObjectId(userId) },
+        { projection: { firstName: 1, lastName: 1, organization: 1 } }
+      );
+      const accepterName = accepter?.organization || [accepter?.firstName, accepter?.lastName].filter(Boolean).join(' ') || 'Someone';
+      await db.collection('Notifications').insertOne({
+        userId: conn.requesterId,
+        type: 'connection_accepted',
+        message: `${accepterName} accepted your connection request.`,
+        read: false,
+        createdAt: new Date(),
+      });
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
@@ -4091,7 +4124,7 @@ app.post('/connections/accept', requireAuth, async (req, res) => {
 // DELETE /connections/:id — disconnect (either party can remove)
 app.delete('/connections/:id', requireAuth, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.userId;
     await db.collection('Connections').deleteOne({
       _id: new ObjectId(req.params.id),
       $or: [{ requesterId: userId }, { targetId: userId }],
@@ -4109,7 +4142,7 @@ app.delete('/connections/:id', requireAuth, async (req, res) => {
 // GET /connectionPreferences — get the logged-in user's connection preferences
 app.get('/connectionPreferences', requireAuth, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.userId;
     const user = await db.collection('Users').findOne(
       { _id: new ObjectId(userId) },
       { projection: { connectionPreferences: 1 } }
@@ -4124,7 +4157,7 @@ app.get('/connectionPreferences', requireAuth, async (req, res) => {
 // POST /connectionPreferences — update the logged-in user's connection preferences
 app.post('/connectionPreferences', requireAuth, async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.userId;
     const { services, restaurants, nonprofits } = req.body;
     const prefs = {};
     if (services   !== undefined) prefs['connectionPreferences.services']     = !!services;

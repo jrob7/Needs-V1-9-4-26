@@ -129,6 +129,7 @@ const AccountTabContent = () => {
   const [businessDoc, setBusinessDoc]         = useState(null);
   const [offersModalVisible, setOffersModal]  = useState(false);
   const [visitModalVisible, setVisitModal]   = useState(false);
+  const [pendingConnCount, setPendingConnCount] = useState(0);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarLoading, setCalendarLoading]     = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
@@ -239,7 +240,18 @@ const AccountTabContent = () => {
   };
 
   useFocusEffect(
-    React.useCallback(() => { fetchUserDetails(); }, [globalUserId, ctx.accountType, ctx.businessType])
+    React.useCallback(() => {
+      fetchUserDetails();
+      authFetch(`${NODE_API}/connections`)
+        .then(r => r.json())
+        .then(data => {
+          const count = Array.isArray(data)
+            ? data.filter(c => c.role === 'received' && c.status === 'pending').length
+            : 0;
+          setPendingConnCount(count);
+        })
+        .catch(() => {});
+    }, [globalUserId, ctx.accountType, ctx.businessType])
   );
 
   const handleLogout = async () => {
@@ -441,7 +453,7 @@ const AccountTabContent = () => {
       <View style={styles.menuWrap}>
 
         <Section icon="people" title="Connections" color="#2563EB">
-          <MenuItem icon="person-add-outline"    label="My Connections"         onPress={() => navigation.navigate('ConnectionsModal')} />
+          <MenuItem icon="person-add-outline"    label="My Connections"         badge={pendingConnCount > 0 ? pendingConnCount : null} onPress={() => navigation.navigate('ConnectionsModal')} />
           <MenuItem icon="options-outline"       label="Connection Preferences" onPress={() => navigation.navigate('ConnectionSettings')} />
           <MenuItem icon="bookmark-outline"      label="Saved Requests"    />
           <MenuItem icon="construct-outline"     label="Saved Services"    />

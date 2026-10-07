@@ -157,6 +157,49 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
   );
 };
 
+// Connection request / accepted notification row
+const ConnectionRequestRow = ({ item, onAccept, onDecline }) => {
+  const isAccepted = item.type === 'connection_accepted';
+  const isActioned = !!item._actioned;
+
+  return (
+    <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
+      <View style={[styles.iconWrap, { backgroundColor: '#EFF6FF' }]}>
+        <Ionicons name={isAccepted ? 'checkmark-circle' : 'person-add'} size={W ? 26 : 20} color="#2563EB" />
+      </View>
+      <View style={[styles.rowContent, { flex: 1 }]}>
+        <View style={styles.rowTop}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {isAccepted ? 'Connection Accepted' : 'Connection Request'}
+          </Text>
+          <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+        </View>
+        <Text style={styles.rowBody}>{item.message}</Text>
+        {!isAccepted && !isActioned && (
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+            <TouchableOpacity
+              style={{ backgroundColor: '#2563EB', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20 }}
+              onPress={() => onAccept(item)}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Accept</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20 }}
+              onPress={() => onDecline(item)}
+            >
+              <Text style={{ color: '#64748B', fontWeight: '700', fontSize: 13 }}>Decline</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {!isAccepted && isActioned && (
+          <Text style={{ fontSize: 12, color: '#10B981', fontWeight: '600', marginTop: 6 }}>Accepted ✓</Text>
+        )}
+      </View>
+      {!item.read && <View style={styles.unreadDot} />}
+    </View>
+  );
+};
+
 // A quote_request — auto-generated quote sent to a business for 1-tap response.
 // Business-facing quote_request row — Confirm/Edit open RespondToLeadModal (same as leads);
 // Ask sends the AI info-request to the user's Messages.
@@ -600,6 +643,27 @@ const NotificationsScreen = () => {
     navigation.navigate('SingleItemView', { item: need });
   };
 
+  const handleAcceptConnection = async (item) => {
+    try {
+      await authFetch(`${NODE_API}/connections/accept`, {
+        method: 'POST',
+        body: JSON.stringify({ connectionId: item.connectionId }),
+      });
+      setNotifications(prev => prev.map(n => n._id === item._id ? { ...n, _actioned: true, read: true } : n));
+    } catch (_) {
+      Alert.alert('Error', 'Could not accept connection request.');
+    }
+  };
+
+  const handleDeclineConnection = async (item) => {
+    try {
+      await authFetch(`${NODE_API}/connections/${item.connectionId}`, { method: 'DELETE' });
+      setNotifications(prev => prev.map(n => n._id === item._id ? { ...n, _actioned: true, read: true } : n));
+    } catch (_) {
+      Alert.alert('Error', 'Could not decline connection request.');
+    }
+  };
+
   const markAllRead = async () => {
     if (!userId) return;
     try {
@@ -695,13 +759,15 @@ const NotificationsScreen = () => {
   const filtered = notifications.filter(n => {
     if (activeTab === 'Messages') return n.type === 'message';
     if (activeTab === 'Matches')  return n.type === 'match' || n.type === 'lead' || n.type === 'quote_request'
+      || n.type === 'connection_request' || n.type === 'connection_accepted'
       || BUSINESS_QUOTE_TYPES.includes(n.type);
     return true;
   });
 
+  const CONNECTION_TYPES = ['connection_request', 'connection_accepted'];
   const unreadCount    = notifications.filter(n => !n.read).length;
   const messagesCount  = notifications.filter(n => n.type === 'message' && !n.read).length;
-  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request' || BUSINESS_QUOTE_TYPES.includes(n.type)) && !n.read).length;
+  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request' || CONNECTION_TYPES.includes(n.type) || BUSINESS_QUOTE_TYPES.includes(n.type)) && !n.read).length;
   const schedulerCount = appointments.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length;
   const TAB_META = {
     Messages:  { icon: 'chatbubbles-outline', count: messagesCount },
@@ -879,6 +945,12 @@ const NotificationsScreen = () => {
                     const qId = i.quoteId ? String(i.quoteId) : null;
                     if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'quote' });
                   }} />
+              : (item.type === 'connection_request' || item.type === 'connection_accepted')
+                ? <ConnectionRequestRow
+                    item={item}
+                    onAccept={handleAcceptConnection}
+                    onDecline={handleDeclineConnection}
+                  />
                 : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
           )}
           ItemSeparatorComponent={() => <View style={styles.sep} />}

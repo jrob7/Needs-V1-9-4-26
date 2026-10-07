@@ -3146,9 +3146,9 @@ app.get('/searchUsers', async (req, res) => {
     const { q = '', excludeId } = req.query;
     if (!q.trim()) return res.json([]);
     const regex = new RegExp(q.trim(), 'i');
-    const query = { $or: [{ firstName: regex }, { lastName: regex }, { email: regex }] };
+    const query = { $or: [{ firstName: regex }, { lastName: regex }, { email: regex }, { organization: regex }] };
     if (excludeId && ObjectId.isValid(excludeId)) query._id = { $ne: new ObjectId(excludeId) };
-    const users = await database.collection('Users').find(query).limit(20).project({ firstName: 1, lastName: 1, profilePicture: 1, memberSince: 1 }).toArray();
+    const users = await database.collection('Users').find(query).limit(20).project({ firstName: 1, lastName: 1, organization: 1, profilePicture: 1, accountType: 1, memberSince: 1 }).toArray();
     res.json(users.map(u => ({ ...u, _id: u._id.toString() })));
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
@@ -4051,7 +4051,7 @@ app.get('/connections/status/:targetId', requireAuth, async (req, res) => {
 // POST /connections/request — send a connection request
 app.post('/connections/request', requireAuth, async (req, res) => {
   try {
-    const requesterId = req.user.userId;
+    const requesterId = req.userId;
     const { targetId } = req.body;
     if (!targetId) return res.status(400).json({ error: 'targetId required' });
     if (requesterId === targetId) return res.status(400).json({ error: 'Cannot connect to yourself' });

@@ -478,21 +478,29 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
     const currentUserId = req.userId;
     const collection = database.collection('NeedRequests');
 
-    // Find orgs this user is connected to (for seeing org broadcasts)
-    const connections = await database.collection('Connections').find({
-      $or: [{ requesterId: currentUserId }, { targetId: currentUserId }],
-      status: 'connected',
-    }).toArray();
+    // Fetch connections and mute settings in parallel
+    const [connections, muteUser] = await Promise.all([
+      database.collection('Connections').find({
+        $or: [{ requesterId: currentUserId }, { targetId: currentUserId }],
+        status: 'connected',
+      }).toArray(),
+      database.collection('Users').findOne(
+        { _id: new ObjectId(currentUserId) },
+        { projection: { mutedSharedNeedsFrom: 1, mutedAllSharedNeeds: 1 } }
+      ),
+    ]);
     const connectedOrgIds = connections.map(c =>
       c.requesterId === currentUserId ? c.targetId : c.requesterId
     );
+    const mutedAll = !!muteUser?.mutedAllSharedNeeds;
+    const mutedFrom = muteUser?.mutedSharedNeedsFrom || [];
 
     // Visibility rules:
     // 1. Your own requests (any type)
     // 2. org_request directed to you (targetOrgId === you)
     // 3. org_broadcast from orgs you are connected to
     // 4. org_broadcast shared with you directly (viral share chain)
-    const docs = await collection.find({
+    const allDocs = await collection.find({
       archived: { $ne: true },
       $or: [
         { userId: currentUserId },
@@ -503,6 +511,20 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
         { needType: 'org_broadcast', sharedWith: currentUserId },
       ],
     }).sort({ date: -1 }).toArray();
+
+    // Apply mute filtering for shared org broadcasts
+    const docs = allDocs.filter(n => {
+      if (n.needType !== 'org_broadcast') return true; // never filter non-broadcasts
+      const isDirectConnection = connectedOrgIds.includes(String(n.userId));
+      if (isDirectConnection) return true; // direct org connection, never muted here
+      // This doc reached the user via a share — find who shared it to them
+      const shareEntry = (n.shareGraph || []).find(e => e.to === currentUserId);
+      const sharerId = shareEntry?.from;
+      if (!sharerId) return true; // no sharer info, show it
+      if (mutedAll) return false; // muted all shared needs
+      if (mutedFrom.includes(sharerId)) return false; // muted this specific sharer
+      return true;
+    });
 
     const toDataUri = (b64) => `data:image/jpeg;base64,${b64}`;
 
@@ -573,8 +595,10 @@ const result = hydrated.map(n => ({
   images: n.images || [],
   createdAt: n.createdAt,
   updatedAt: n.updatedAt,
-  location: n.location || null, // ✅ restore geocoordinates for map markers
-  initialMatchNames: n.initialMatchNames || [], // ← Tab2 exclusion list
+  location: n.location || null,
+  initialMatchNames: n.initialMatchNames || [],
+  shareable: !!n.shareable,
+  sharedWith: n.sharedWith || [],
 }));
 
 res.status(200).json(result);
@@ -4131,10 +4155,14 @@ app.post('/needRequests/:id/share', requireAuth, async (req, res) => {
     if (!need) return res.status(404).json({ error: 'Not found' });
     if (!need.shareable) return res.status(403).json({ error: 'Not shareable' });
 
-    // Add new recipients to sharedWith (avoid duplicates with $addToSet)
+    // Add recipients to sharedWith and record who shared with whom (shareGraph)
+    const graphEntries = targetUserIds.map(uid => ({ from: currentUserId, to: uid, at: new Date() }));
     await database.collection('NeedRequests').updateOne(
       { _id: new ObjectId(id) },
-      { $addToSet: { sharedWith: { $each: targetUserIds } } }
+      {
+        $addToSet: { sharedWith: { $each: targetUserIds } },
+        $push: { shareGraph: { $each: graphEntries } },
+      }
     );
 
     // Notify each new recipient
@@ -4159,6 +4187,62 @@ app.post('/needRequests/:id/share', requireAuth, async (req, res) => {
     res.json({ success: true, sharedCount: targetUserIds.length });
   } catch (err) {
     console.error('POST /needRequests/:id/share error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /muteSettings — get current user's shared-need mute preferences
+app.get('/muteSettings', requireAuth, async (req, res) => {
+  try {
+    const user = await database.collection('Users').findOne(
+      { _id: new ObjectId(req.userId) },
+      { projection: { mutedSharedNeedsFrom: 1, mutedAllSharedNeeds: 1 } }
+    );
+    res.json({
+      mutedAll: !!user?.mutedAllSharedNeeds,
+      mutedFrom: user?.mutedSharedNeedsFrom || [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /muteSettings — update mute preferences
+app.post('/muteSettings', requireAuth, async (req, res) => {
+  try {
+    const { mutedAll, mutedFrom } = req.body;
+    const update = {};
+    if (mutedAll !== undefined) update.mutedAllSharedNeeds = !!mutedAll;
+    if (Array.isArray(mutedFrom)) update.mutedSharedNeedsFrom = mutedFrom;
+    await database.collection('Users').updateOne(
+      { _id: new ObjectId(req.userId) },
+      { $set: update }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /muteConnection/:targetId — toggle mute for a single connection's shared needs
+app.post('/muteConnection/:targetId', requireAuth, async (req, res) => {
+  try {
+    const { targetId } = req.params;
+    const user = await database.collection('Users').findOne(
+      { _id: new ObjectId(req.userId) },
+      { projection: { mutedSharedNeedsFrom: 1 } }
+    );
+    const current = user?.mutedSharedNeedsFrom || [];
+    const isMuted = current.includes(targetId);
+    const updated = isMuted
+      ? current.filter(id => id !== targetId)
+      : [...current, targetId];
+    await database.collection('Users').updateOne(
+      { _id: new ObjectId(req.userId) },
+      { $set: { mutedSharedNeedsFrom: updated } }
+    );
+    res.json({ success: true, muted: !isMuted });
+  } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

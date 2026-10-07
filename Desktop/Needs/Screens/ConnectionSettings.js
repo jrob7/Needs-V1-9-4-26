@@ -18,15 +18,21 @@ const TOGGLES = [
 
 export default function ConnectionSettings() {
   const navigation = useNavigation();
-  const [prefs, setPrefs]     = useState({ services: true, restaurants: true, nonprofits: true });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving]   = useState(false);
+  const [prefs, setPrefs]       = useState({ services: true, restaurants: true, nonprofits: true });
+  const [mutedAll, setMutedAll] = useState(false);
+  const [loading, setLoading]   = useState(true);
+  const [saving, setSaving]     = useState(false);
 
   const fetchPrefs = useCallback(async () => {
     try {
-      const r = await authFetch(`${NODE_API}/connectionPreferences`);
-      const d = await r.json();
-      if (!d.error) setPrefs(d);
+      const [prefRes, muteRes] = await Promise.all([
+        authFetch(`${NODE_API}/connectionPreferences`),
+        authFetch(`${NODE_API}/muteSettings`),
+      ]);
+      const prefData = await prefRes.json();
+      const muteData = await muteRes.json();
+      if (!prefData.error) setPrefs(prefData);
+      setMutedAll(!!muteData?.mutedAll);
     } catch (_) {}
     setLoading(false);
   }, []);
@@ -44,6 +50,18 @@ export default function ConnectionSettings() {
       });
     } catch (_) {}
     setSaving(false);
+  };
+
+  const toggleMuteAll = async (value) => {
+    setMutedAll(value);
+    try {
+      await authFetch(`${NODE_API}/muteSettings`, {
+        method: 'POST',
+        body: JSON.stringify({ mutedAll: value }),
+      });
+    } catch (_) {
+      setMutedAll(!value);
+    }
   };
 
   return (
@@ -66,23 +84,47 @@ export default function ConnectionSettings() {
 
         {loading
           ? <ActivityIndicator style={{ marginTop: 32 }} color="#2563EB" />
-          : TOGGLES.map(({ key, icon, label, desc }) => (
-            <View key={key} style={styles.row}>
-              <View style={[styles.iconWrap, { backgroundColor: prefs[key] ? '#EFF6FF' : '#F1F5F9' }]}>
-                <Ionicons name={icon} size={20} color={prefs[key] ? '#2563EB' : '#94A3B8'} />
+          : <>
+              {TOGGLES.map(({ key, icon, label, desc }) => (
+                <View key={key} style={styles.row}>
+                  <View style={[styles.iconWrap, { backgroundColor: prefs[key] ? '#EFF6FF' : '#F1F5F9' }]}>
+                    <Ionicons name={icon} size={20} color={prefs[key] ? '#2563EB' : '#94A3B8'} />
+                  </View>
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowLabel}>{label}</Text>
+                    <Text style={styles.rowDesc}>{desc}</Text>
+                  </View>
+                  <Switch
+                    value={!!prefs[key]}
+                    onValueChange={v => toggle(key, v)}
+                    trackColor={{ false: '#E2E8F0', true: '#2563EB' }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              ))}
+
+              <Text style={[styles.sectionNote, { marginTop: 24 }]}>
+                Shared Need Requests
+              </Text>
+
+              <View style={styles.row}>
+                <View style={[styles.iconWrap, { backgroundColor: mutedAll ? '#FEF2F2' : '#F1F5F9' }]}>
+                  <Ionicons name="notifications-off-outline" size={20} color={mutedAll ? '#EF4444' : '#94A3B8'} />
+                </View>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>Mute all shared needs</Text>
+                  <Text style={styles.rowDesc}>
+                    Stop seeing needs that connections have shared with you. You can also mute individual connections in My Connections.
+                  </Text>
+                </View>
+                <Switch
+                  value={!!mutedAll}
+                  onValueChange={toggleMuteAll}
+                  trackColor={{ false: '#E2E8F0', true: '#EF4444' }}
+                  thumbColor="#fff"
+                />
               </View>
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>{label}</Text>
-                <Text style={styles.rowDesc}>{desc}</Text>
-              </View>
-              <Switch
-                value={!!prefs[key]}
-                onValueChange={v => toggle(key, v)}
-                trackColor={{ false: '#E2E8F0', true: '#2563EB' }}
-                thumbColor="#fff"
-              />
-            </View>
-          ))
+            </>
         }
       </View>
     </SafeAreaView>

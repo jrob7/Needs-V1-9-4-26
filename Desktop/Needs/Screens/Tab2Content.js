@@ -33,6 +33,7 @@ import { useAuthModal } from './AuthModalContext';
 import { RestaurantDetail } from './MatchResults';
 import ServiceMatchesModal from './MatchesModal';
 import { NODE_API as API, FLASK_API } from '../config';
+import { authFetch } from '../server/api';
 import { webContainer, IS_WEB, WEB_HEADER_HEIGHT, WEB_MAX_WIDTH } from '../webLayout';
 import NeedsMapView from './NeedsMapView';
 const windowH = Dimensions.get('window').height;
@@ -182,7 +183,7 @@ export default function NeedInquiryView() {
     setLoading(true);
     try {
       const [needsRes, frRes] = await Promise.all([
-        fetch(`${API}/createNeedRequest`),
+        authFetch(`${API}/createNeedRequest`),
         fetch(`${API}/fundraisers`),
       ]);
       const needsJson = await needsRes.json();

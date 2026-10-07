@@ -472,11 +472,35 @@ app.post('/login', async (req, res) => {
      
 
 
-      // GET /createNeedRequest  -> return NeedRequests with a usable `media` for Tab2
-app.get('/createNeedRequest', async (req, res) => {
+      // GET /createNeedRequest  -> return NeedRequests visible to the current user
+app.get('/createNeedRequest', requireAuth, async (req, res) => {
   try {
+    const currentUserId = req.userId;
     const collection = database.collection('NeedRequests');
-    const docs = await collection.find({ archived: { $ne: true } }).sort({ date: -1 }).toArray();
+
+    // Find orgs this user is connected to (for seeing org broadcasts)
+    const connections = await database.collection('Connections').find({
+      $or: [{ requesterId: currentUserId }, { targetId: currentUserId }],
+      status: 'connected',
+    }).toArray();
+    const connectedOrgIds = connections.map(c =>
+      c.requesterId === currentUserId ? c.targetId : c.requesterId
+    );
+
+    // Visibility rules:
+    // 1. Your own requests (any type)
+    // 2. org_request directed to you (targetOrgId === you)
+    // 3. org_broadcast from orgs you are connected to
+    const docs = await collection.find({
+      archived: { $ne: true },
+      $or: [
+        { userId: currentUserId },
+        { userId: ObjectId.isValid(currentUserId) ? new ObjectId(currentUserId) : null },
+        { needType: 'org_request', targetOrgId: currentUserId },
+        { needType: 'org_broadcast', userId: { $in: connectedOrgIds } },
+        { needType: 'org_broadcast', userId: { $in: connectedOrgIds.map(id => ObjectId.isValid(id) ? new ObjectId(id) : id) } },
+      ],
+    }).sort({ date: -1 }).toArray();
 
     const toDataUri = (b64) => `data:image/jpeg;base64,${b64}`;
 
@@ -4095,15 +4119,15 @@ app.post('/connectionPreferences', requireAuth, async (req, res) => {
 app.post('/orgBroadcast', requireAuth, async (req, res) => {
   try {
     const orgId = req.userId;
-    const { text, scope } = req.body; // scope: 'connections' | 'public'
+    const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });
 
-    // Save as a NeedRequest
+    // Save as a NeedRequest — always connections-only
     const needDoc = {
       searchText: text,
       needType: 'org_broadcast',
       isBroadcast: true,
-      broadcastScope: scope || 'public',
+      broadcastScope: 'connections',
       userId: orgId,
       createdAt: new Date(),
       status: 'active',
@@ -4111,8 +4135,8 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
     const needResult = await db.collection('NeedRequests').insertOne(needDoc);
     const needId = needResult.insertedId;
 
-    // Fan out notifications to connections if scope === 'connections'
-    if (scope === 'connections') {
+    // Fan out notifications to all connections
+    {
       const conns = await db.collection('Connections').find({
         $or: [{ requesterId: orgId }, { targetId: orgId }],
         status: 'connected',

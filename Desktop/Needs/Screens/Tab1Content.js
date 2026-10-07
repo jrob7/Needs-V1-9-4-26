@@ -209,24 +209,18 @@ export default function SearchScreen() {
     } catch (_) {}
   };
 
-  const handleBroadcastChoice = async (scope, broadcastData) => {
-    setConversation(prev => prev.filter(m => !m.broadcastPicker));
-    const label = scope === 'connections'
-      ? `Send to my ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}`
-      : 'Make it available to everyone';
-    pushUser(label);
+  const handleBroadcastChoice = async (broadcastData) => {
     setConversation(prev => [...prev, { aiThinking: true }]);
     try {
       await authFetch(`${NODE_API}/orgBroadcast`, {
         method: 'POST',
-        body: JSON.stringify({ text: broadcastData.text, scope, userId: currentUserId }),
+        body: JSON.stringify({ text: broadcastData.text, userId: currentUserId }),
       });
       setConversation(prev => prev.filter(m => !m.aiThinking));
-      if (scope === 'connections') {
-        pushAI(`Done! Your request has been sent to your ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}. You'll be notified when someone responds.`);
-      } else {
-        pushAI("Done! Your request is now available to everyone on Needs. You'll be notified when someone responds.");
-      }
+      const connLabel = broadcastData.connCount > 0
+        ? `your ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}`
+        : 'your connections';
+      pushAI(`Done! Your request has been sent to ${connLabel}. You'll be notified when someone responds.`);
     } catch (_) {
       setConversation(prev => prev.filter(m => !m.aiThinking));
       pushAI('Something went wrong. Please try again.');
@@ -823,20 +817,17 @@ export default function SearchScreen() {
     const originalText = overrideText || (input || '').trim();
     if (!originalText) return;
 
-    // ── Org broadcast: always ask scope before doing anything else ────────────
+    // ── Org broadcast: send directly to connections, no picker needed ──────────
     if (isOrgAccount && currentUserId && !overrideText) {
       pushUser(originalText, !!media);
       setInput('');
-      setConversation(prev => [...prev, { aiThinking: true }]);
       let connCount = 0;
       try {
         const r = await authFetch(`${NODE_API}/connections`);
         const conns = await r.json();
         connCount = Array.isArray(conns) ? conns.length : 0;
       } catch (_) {}
-      setConversation(prev => prev.filter(m => !m.aiThinking));
-      setPendingBroadcast({ text: originalText, connCount });
-      setConversation(prev => [...prev, { broadcastPicker: true, text: originalText, connCount }]);
+      await handleBroadcastChoice({ text: originalText, connCount });
       return;
     }
 
@@ -1143,42 +1134,6 @@ export default function SearchScreen() {
       >
         {conversation.map((msg, i) => (
           <View key={i} style={styles.chatMessage}>
-            {msg.broadcastPicker && (
-              <View style={[styles.bubble, styles.aiBubble, { maxWidth: '95%' }]}>
-                <Text style={[IS_WEB ? { fontSize: 18 } : {}, { marginBottom: 14 }]}>
-                  <Text style={styles.nameLabelAI}>NeedAI: </Text>
-                  Who should see this request?
-                </Text>
-
-                {/* Your Connections option */}
-                <TouchableOpacity
-                  style={{ backgroundColor: '#2563EB', borderRadius: 12, padding: IS_WEB ? 14 : 12, marginBottom: 10 }}
-                  onPress={() => handleBroadcastChoice('connections', { text: msg.text, connCount: msg.connCount })}
-                >
-                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: IS_WEB ? 16 : 14, marginBottom: 3 }}>
-                    Your Connections
-                  </Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: IS_WEB ? 14 : 12 }}>
-                    {msg.connCount > 0
-                      ? `Only the ${msg.connCount} ${msg.connCount === 1 ? 'person' : 'people'} connected with your organization.`
-                      : 'Only people connected with your organization.'}
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Anyone Who Can Help option */}
-                <TouchableOpacity
-                  style={{ backgroundColor: '#0F172A', borderRadius: 12, padding: IS_WEB ? 14 : 12 }}
-                  onPress={() => handleBroadcastChoice('public', { text: msg.text, connCount: msg.connCount })}
-                >
-                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: IS_WEB ? 16 : 14, marginBottom: 3 }}>
-                    Anyone Who Can Help
-                  </Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: IS_WEB ? 14 : 12 }}>
-                    Make this request available to anyone on Needs who may be able to help.
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
 
             {msg.aiThinking && (
               <View style={[styles.bubble, styles.aiBubble, { flexDirection: 'row', alignItems: 'center' }]}>

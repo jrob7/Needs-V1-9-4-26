@@ -824,6 +824,8 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
   const cached = getPillState(need?._id);
 
   const isShareable = need?.needType === 'org_broadcast' && need?.shareable === true && need?.userId !== currentUserId;
+  const isOrgBroadcast = need?.needType === 'org_broadcast';
+  const [broadcastTally, setBroadcastTally] = useState(null); // { volunteersConfirmed, supplyTotals }
   const [broadMatches, setBroadMatches] = useState(() => cached.broadMatches || []);
   const [showSwipeHint, setShowSwipeHint] = useState(() => !!cached.showSwipeHint);
   const [modalVisible, setModalVisible] = useState(false);
@@ -882,6 +884,15 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
       setModalVisible(true);
     }
   }, [autoOpenModal, broadMatches.length, matches.length]);
+
+  // Fetch broadcast response tally for org_broadcast cards
+  useEffect(() => {
+    if (!isOrgBroadcast || !need?._id) return;
+    authFetch(`${API}/orgBroadcastResponses/${need._id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setBroadcastTally(d); })
+      .catch(() => {});
+  }, [isOrgBroadcast, need?._id]);
 
   // Existing item matches (silent background fetch)
   useEffect(() => {
@@ -995,6 +1006,22 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
   // URIs, so `media` here is either a valid http/data URI or null.
   const webMedia = media;
 
+  // Build tally label for org_broadcast cards
+  const broadcastPillLabel = (() => {
+    if (!isOrgBroadcast || !broadcastTally) return null;
+    const parts = [];
+    if (need?.requestType === 'volunteer' || need?.requestType === 'both') {
+      const confirmed = broadcastTally.volunteersConfirmed ?? 0;
+      const needed = need?.volunteersNeeded;
+      parts.push(needed ? `${confirmed}/${needed} Vol` : `${confirmed} Vol`);
+    }
+    if ((need?.requestType === 'supplies' || need?.requestType === 'both') && broadcastTally.supplyTotals) {
+      const count = Object.keys(broadcastTally.supplyTotals).length;
+      if (count > 0) parts.push(`${count} Supply`);
+    }
+    return parts.length ? parts.join(' · ') : null;
+  })();
+
   // On web the pill lives inside the Card's topRow (not absolute) so it sits
   // in the text column and never overlaps the right-side image.
   const pillNode = (isSessionNeed && hasAnyMatches) ? (
@@ -1045,14 +1072,25 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
           creatorPic={need.profilePicture}
           onViewCreator={onViewCreator}
           rightSlot={isShareable ? (
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-              onPress={() => setShareModalVisible(true)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="share-social-outline" size={23} color="#2563EB" />
-              <Text style={{ fontSize: 18, color: '#2563EB', fontWeight: '700' }}>Share</Text>
-            </TouchableOpacity>
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                onPress={() => setShareModalVisible(true)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="share-social-outline" size={23} color="#2563EB" />
+                <Text style={{ fontSize: 18, color: '#2563EB', fontWeight: '700' }}>Share</Text>
+              </TouchableOpacity>
+              {!!broadcastPillLabel && (
+                <View style={{ backgroundColor: '#DCFCE7', borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D' }}>{broadcastPillLabel}</Text>
+                </View>
+              )}
+            </View>
+          ) : isOrgBroadcast && !!broadcastPillLabel ? (
+            <View style={{ backgroundColor: '#DCFCE7', borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10 }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D' }}>{broadcastPillLabel}</Text>
+            </View>
           ) : (IS_WEB ? pillNode : undefined)}
           bottomSlot={undefined}
         />

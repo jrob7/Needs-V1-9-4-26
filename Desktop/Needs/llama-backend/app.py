@@ -302,6 +302,94 @@ Assistant:"""
 
     return jsonify({"reply": raw, "cannotAnswer": cannot_answer})
 
+import json as _json
+
+def _ask_binary(question: str, text: str) -> bool:
+    prompt = (
+        f"Answer only YES or NO, nothing else.\n"
+        f"Question: {question}\n"
+        f"Text: \"{text}\"\n"
+        f"Answer:"
+    )
+    raw = generate_response(prompt).strip().upper()
+    return raw.startswith("YES")
+
+def _ask_number(question: str, text: str):
+    prompt = (
+        f"Answer only with a whole number or the word NULL, nothing else.\n"
+        f"Question: {question}\n"
+        f"Text: \"{text}\"\n"
+        f"Answer:"
+    )
+    raw = generate_response(prompt).strip()
+    try:
+        return int(''.join(c for c in raw if c.isdigit()))
+    except:
+        return None
+
+def _ask_text(question: str, text: str):
+    prompt = (
+        f"Answer with a short phrase only, or the word NULL if not present.\n"
+        f"Question: {question}\n"
+        f"Text: \"{text}\"\n"
+        f"Answer:"
+    )
+    raw = generate_response(prompt).strip()
+    return None if raw.upper() == "NULL" or not raw else raw
+
+def _ask_supplies(text: str):
+    prompt = (
+        f"Extract physical items needed from this text as a JSON array.\n"
+        f"Format: [{{\"item\": \"name\", \"qty\": number_or_null, \"unit\": \"unit_or_null\"}}]\n"
+        f"Return ONLY the JSON array, nothing else. Return [] if no items found.\n"
+        f"Text: \"{text}\"\n"
+        f"Answer:"
+    )
+    raw = generate_response(prompt).strip()
+    match = re.search(r'\[.*\]', raw, re.DOTALL)
+    if match:
+        try:
+            return _json.loads(match.group())
+        except:
+            pass
+    return []
+
+@app.route("/classify-org-broadcast", methods=["POST"])
+def classify_org_broadcast():
+    body = request.json or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text required"}), 400
+
+    is_volunteer = _ask_binary(
+        "Does this request need volunteers or people to show up and help?", text)
+    is_supplies = _ask_binary(
+        "Does this request need people to donate or bring physical items, goods, toys, food, clothing, or any other tangible things?", text)
+
+    if not is_volunteer and not is_supplies:
+        is_volunteer = True
+
+    request_type = "both" if (is_volunteer and is_supplies) else ("volunteer" if is_volunteer else "supplies")
+
+    result = {"requestType": request_type, "isVolunteer": is_volunteer, "isSupplies": is_supplies}
+
+    if is_volunteer:
+        result["volunteersNeeded"] = _ask_number(
+            "How many volunteers are needed? Give only the number.", text)
+        result["eventDate"] = _ask_text(
+            "What is the date of the event or when are volunteers needed?", text)
+        result["eventTime"] = _ask_text(
+            "What is the start and end time of the event?", text)
+
+    if is_supplies:
+        result["supplies"] = _ask_supplies(text)
+        if not result["eventDate"]:
+            result["eventDate"] = _ask_text(
+                "When are the supplies or items needed by?", text)
+
+    logging.info(f"[classify-org-broadcast] result={result}")
+    return jsonify(result)
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
     app.run(debug=False, port=port, host='0.0.0.0')

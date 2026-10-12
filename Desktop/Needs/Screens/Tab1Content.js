@@ -219,7 +219,16 @@ export default function SearchScreen() {
     try {
       const r = await authFetch(`${NODE_API}/orgBroadcast`, {
         method: 'POST',
-        body: JSON.stringify({ text: broadcastData.text, shareable: !!broadcastData.shareable, userId: currentUserId }),
+        body: JSON.stringify({
+          text: broadcastData.text,
+          shareable: !!broadcastData.shareable,
+          userId: currentUserId,
+          requestType: broadcastData.requestType,
+          volunteersNeeded: broadcastData.volunteersNeeded,
+          eventDate: broadcastData.eventDate,
+          eventTime: broadcastData.eventTime,
+          supplies: broadcastData.supplies,
+        }),
       });
       setConversation(prev => prev.filter(m => !m.aiThinking));
       if (!r.ok) {
@@ -235,6 +244,16 @@ export default function SearchScreen() {
       pushAI('Something went wrong. Please try again.');
     }
     setPendingBroadcast(null);
+  };
+
+  const handleBroadcastPreviewConfirm = (previewData, shareable) => {
+    setConversation(prev => prev.filter(m => !m.broadcastPreview));
+    handleBroadcastChoice({ ...previewData, shareable });
+  };
+
+  const handleBroadcastPreviewEdit = () => {
+    setConversation(prev => prev.filter(m => !m.broadcastPreview && !m.aiThinking));
+    pushAI('Sure — describe your request again and I\'ll re-analyze it.');
   };
 
   useEffect(() => { inputRef.current = input; }, [input]);
@@ -826,17 +845,33 @@ export default function SearchScreen() {
     const originalText = overrideText || (input || '').trim();
     if (!originalText) return;
 
-    // ── Org broadcast: ask about sharing, then send to connections ─────────────
+    // ── Org broadcast: classify → preview → confirm → send ────────────────────
     if (isOrgAccount && currentUserId && !overrideText) {
       pushUser(originalText, !!media);
       setInput('');
+      setConversation(prev => [...prev, { aiThinking: true }]);
       let connCount = 0;
+      let classification = { requestType: 'volunteer', isVolunteer: true, isSupplies: false };
       try {
-        const r = await authFetch(`${NODE_API}/connections`);
-        const conns = await r.json();
+        const [connRes, classRes] = await Promise.all([
+          authFetch(`${NODE_API}/connections`),
+          fetch(`${FLASK_API}/classify-org-broadcast`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: originalText }),
+          }),
+        ]);
+        const conns = await connRes.json();
         connCount = Array.isArray(conns) ? conns.length : 0;
+        if (classRes.ok) classification = await classRes.json();
       } catch (_) {}
-      setConversation(prev => [...prev, { shareablePicker: true, text: originalText, connCount }]);
+      setConversation(prev => prev.filter(m => !m.aiThinking));
+      setConversation(prev => [...prev, {
+        broadcastPreview: true,
+        text: originalText,
+        connCount,
+        ...classification,
+      }]);
       return;
     }
 
@@ -1148,6 +1183,70 @@ export default function SearchScreen() {
               <View style={[styles.bubble, styles.aiBubble, { flexDirection: 'row', alignItems: 'center' }]}>
                 <Text style={styles.nameLabelAI}>NeedAI: </Text>
                 <BlueSpinner size={24} />
+              </View>
+            )}
+
+            {msg.broadcastPreview && (
+              <View style={[styles.bubble, styles.aiBubble, { maxWidth: '95%' }]}>
+                <Text style={[styles.nameLabelAI, { marginBottom: 10 }]}>NeedAI: Here's what I detected</Text>
+                {/* Type badge */}
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+                  {msg.isVolunteer && (
+                    <View style={{ backgroundColor: '#DBEAFE', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <Ionicons name="people-outline" size={14} color="#1D4ED8" />
+                      <Text style={{ color: '#1D4ED8', fontWeight: '700', fontSize: 13 }}>
+                        Volunteers{msg.volunteersNeeded ? ` · ${msg.volunteersNeeded} needed` : ''}
+                      </Text>
+                    </View>
+                  )}
+                  {msg.isSupplies && (
+                    <View style={{ backgroundColor: '#DCFCE7', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <Ionicons name="cube-outline" size={14} color="#15803D" />
+                      <Text style={{ color: '#15803D', fontWeight: '700', fontSize: 13 }}>Supplies</Text>
+                    </View>
+                  )}
+                </View>
+                {/* Event details */}
+                {(msg.eventDate || msg.eventTime) && (
+                  <View style={{ backgroundColor: '#F8FAFC', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+                    {!!msg.eventDate && <Text style={{ fontSize: 13, color: '#374151' }}>📅  {msg.eventDate}</Text>}
+                    {!!msg.eventTime && <Text style={{ fontSize: 13, color: '#374151', marginTop: 3 }}>🕐  {msg.eventTime}</Text>}
+                  </View>
+                )}
+                {/* Supplies list */}
+                {msg.isSupplies && Array.isArray(msg.supplies) && msg.supplies.length > 0 && (
+                  <View style={{ backgroundColor: '#F0FDF4', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+                    {msg.supplies.map((s, idx) => (
+                      <Text key={idx} style={{ fontSize: 13, color: '#374151' }}>
+                        • {s.qty ? `${s.qty} ${s.unit || ''}` : ''} {s.item}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+                  Does this look right? You can edit or confirm to send to your connections.
+                </Text>
+                {/* Allow sharing question */}
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 }}>
+                  Allow your connections to share this?
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: '#2563EB', borderRadius: 12, paddingVertical: 10, alignItems: 'center' }}
+                    onPress={() => handleBroadcastPreviewConfirm(msg, true)}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>Confirm & Allow Sharing</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1, backgroundColor: '#F1F5F9', borderRadius: 12, paddingVertical: 10, alignItems: 'center' }}
+                    onPress={() => handleBroadcastPreviewConfirm(msg, false)}
+                  >
+                    <Text style={{ color: '#374151', fontWeight: '700', fontSize: 13 }}>Confirm</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity onPress={handleBroadcastPreviewEdit}>
+                  <Text style={{ fontSize: 12, color: '#6B7280', textAlign: 'center', textDecorationLine: 'underline' }}>Edit request</Text>
+                </TouchableOpacity>
               </View>
             )}
 

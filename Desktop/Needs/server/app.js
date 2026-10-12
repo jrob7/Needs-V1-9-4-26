@@ -4295,7 +4295,7 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
   try {
     const db = client.db('Need');
     const orgId = req.userId;
-    const { text, shareable } = req.body;
+    const { text, shareable, requestType, volunteersNeeded, eventDate, eventTime, supplies } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });
 
     // Save as a NeedRequest — always connections-only
@@ -4309,6 +4309,12 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
       userId: orgId,
       createdAt: new Date(),
       status: 'active',
+      // Structured classification fields
+      requestType: requestType || 'volunteer',
+      volunteersNeeded: volunteersNeeded || null,
+      eventDate: eventDate || null,
+      eventTime: eventTime || null,
+      supplies: Array.isArray(supplies) ? supplies : [],
     };
     const needResult = await db.collection('NeedRequests').insertOne(needDoc);
     const needId = needResult.insertedId;
@@ -4347,6 +4353,66 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
     res.json({ success: true, needId: String(needId) });
   } catch (err) {
     console.error('POST /orgBroadcast error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /orgBroadcastResponse — connected user commits to volunteer or supply donation
+app.post('/orgBroadcastResponse', requireAuth, async (req, res) => {
+  try {
+    const db = client.db('Need');
+    const userId = req.userId;
+    const { needId, type, volunteering, supplies } = req.body;
+    if (!needId || !type) return res.status(400).json({ error: 'needId and type required' });
+
+    const col = db.collection('OrgBroadcastResponses');
+    // Upsert — one response per user per need per type
+    await col.updateOne(
+      { needId, userId, type },
+      { $set: { needId, userId, type, volunteering: !!volunteering, supplies: supplies || [], updatedAt: new Date() },
+        $setOnInsert: { createdAt: new Date() } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /orgBroadcastResponse error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /orgBroadcastResponses/:needId — get all responses + tally for a need
+app.get('/orgBroadcastResponses/:needId', requireAuth, async (req, res) => {
+  try {
+    const db = client.db('Need');
+    const { needId } = req.params;
+    const currentUserId = req.userId;
+
+    const responses = await db.collection('OrgBroadcastResponses').find({ needId }).toArray();
+
+    const volunteerResponses = responses.filter(r => r.type === 'volunteer' && r.volunteering);
+    const supplyResponses    = responses.filter(r => r.type === 'supplies' && r.supplies?.length > 0);
+
+    // Tally committed supplies per item
+    const supplyTotals = {};
+    supplyResponses.forEach(r => {
+      (r.supplies || []).forEach(s => {
+        const key = (s.item || '').toLowerCase();
+        supplyTotals[key] = (supplyTotals[key] || 0) + (Number(s.qty) || 0);
+      });
+    });
+
+    // Current user's own response
+    const myVolunteer = responses.find(r => r.userId === currentUserId && r.type === 'volunteer');
+    const mySupplies  = responses.find(r => r.userId === currentUserId && r.type === 'supplies');
+
+    res.json({
+      volunteersConfirmed: volunteerResponses.length,
+      supplyTotals,
+      myVolunteer: myVolunteer || null,
+      mySupplies:  mySupplies  || null,
+    });
+  } catch (err) {
+    console.error('GET /orgBroadcastResponses error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

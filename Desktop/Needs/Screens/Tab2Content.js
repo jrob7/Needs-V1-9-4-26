@@ -226,7 +226,6 @@ export default function NeedInquiryView() {
               const rawPic =
                 u?.profilePicture || u?.profileImageUrl || u?.profileImage ||
                 u?.logo || u?.image || (Array.isArray(u?.images) ? u.images[0] : null) || null;
-              console.log(`[hydrate] userId=${n.userId} org="${u?.organization}" rawPic=${rawPic}`);
               enriched.profilePicture = rawPic
                 ? (rawPic.startsWith('http') ? rawPic
                   : /^[0-9a-f]{24}$/i.test(rawPic) ? `${API}/images/${rawPic}`
@@ -1704,6 +1703,18 @@ const mStyles = StyleSheet.create({
   ctaPrimaryText: { fontSize: 18, fontWeight: '800', color: '#fff' },
 });
 
+function CreatorAvatar({ pic, name, avatarStyle, fallbackStyle, initialStyle }) {
+  const [failed, setFailed] = React.useState(false);
+  if (!pic || failed) {
+    return (
+      <View style={[avatarStyle, fallbackStyle]}>
+        <Text style={initialStyle}>{(name?.[0] || '?').toUpperCase()}</Text>
+      </View>
+    );
+  }
+  return <Image source={{ uri: pic }} style={avatarStyle} onError={() => setFailed(true)} />;
+}
+
 function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, media, compact, onPress, isActive, onLayout, creatorName, creatorPic, onViewCreator, rightSlot, cardStyle, bottomSlot }) {
   const isVideo = media?.type === 'video' || (media?.uri || '').toLowerCase().endsWith('.mp4');
   const player = useVideoPlayer(isVideo ? (media?.uri ?? null) : null, p => {
@@ -1749,11 +1760,12 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16 }}
                 onPress={onViewCreator} activeOpacity={0.8}
               >
-                {creatorPic
-                  ? <Image source={{ uri: creatorPic }} style={styles.webCreatorAvatar} />
-                  : <View style={[styles.webCreatorAvatar, styles.creatorCircleFallback]}>
-                      <Text style={styles.creatorCircleInitial}>{(creatorName[0] || '?').toUpperCase()}</Text>
-                    </View>}
+                <CreatorAvatar
+                  pic={creatorPic} name={creatorName}
+                  avatarStyle={styles.webCreatorAvatar}
+                  fallbackStyle={styles.creatorCircleFallback}
+                  initialStyle={styles.creatorCircleInitial}
+                />
                 <Text style={styles.creatorCircleName}>{creatorName}</Text>
               </TouchableOpacity>
             )}
@@ -1797,14 +1809,12 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
         )}
         {!!creatorName && (
           <TouchableOpacity style={styles.creatorCircleWrap} onPress={onViewCreator} activeOpacity={0.8}>
-            {(() => {
-              const resolvedPic = creatorPic || null;
-              return resolvedPic
-                ? <Image source={{ uri: resolvedPic }} style={styles.creatorCircleAvatar} />
-                : <View style={[styles.creatorCircleAvatar, styles.creatorCircleFallback]}>
-                    <Text style={styles.creatorCircleInitial}>{(creatorName[0] || '?').toUpperCase()}</Text>
-                  </View>;
-            })()}
+            <CreatorAvatar
+              pic={creatorPic} name={creatorName}
+              avatarStyle={styles.creatorCircleAvatar}
+              fallbackStyle={styles.creatorCircleFallback}
+              initialStyle={styles.creatorCircleInitial}
+            />
             <Text style={styles.creatorCircleName}>{creatorName}</Text>
           </TouchableOpacity>
         )}

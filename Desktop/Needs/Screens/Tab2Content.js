@@ -169,7 +169,7 @@ export default function NeedInquiryView() {
       const poll = setInterval(() => {
         invalidateTab2Cache();
         loadAll();
-      }, 45000);
+      }, 10000);
       return () => {
         console.log('🔴 Tab2Content unfocused');
         clearInterval(poll);

@@ -234,16 +234,22 @@ export default function SearchScreen() {
         body: JSON.stringify(payload),
       });
       setConversation(prev => prev.filter(m => !m.aiThinking));
+      console.log('[handleBroadcastChoice] /orgBroadcast response status=' + r.status + ' ok=' + r.ok);
       if (!r.ok) {
+        const errBody = await r.text().catch(() => '');
+        console.log('[handleBroadcastChoice] /orgBroadcast ERROR body:', errBody);
         pushAI('Something went wrong sending your request. Please try again.');
       } else {
+        const resJson = await r.json().catch(() => ({}));
+        console.log('[handleBroadcastChoice] /orgBroadcast SUCCESS:', JSON.stringify(resJson));
         const connLabel = broadcastData.connCount > 0
           ? `your ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}`
           : 'your connections';
         invalidateTab2Cache();
         pushAI(`Done! Your request has been sent to ${connLabel}. You'll be notified when someone responds.`);
       }
-    } catch (_) {
+    } catch (e) {
+      console.log('[handleBroadcastChoice] CAUGHT ERROR:', e?.message || e);
       setConversation(prev => prev.filter(m => !m.aiThinking));
       pushAI('Something went wrong. Please try again.');
     }

@@ -161,12 +161,32 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
 const ConnectionRequestRow = ({ item, onAccept, onDecline }) => {
   const isAccepted = item.type === 'connection_accepted';
   const isActioned = !!item._actioned;
+  const senderId = item.requesterId || item.fromUserId;
+
+  const [avatarUri, setAvatarUri] = React.useState(null);
+  const [initials, setInitials]   = React.useState('?');
+
+  React.useEffect(() => {
+    if (!senderId) return;
+    fetch(`${NODE_API}/getUserDetails?userId=${senderId}`)
+      .then(r => r.json())
+      .then(u => {
+        const pic  = u?.profilePicture || u?.profileImageUrl;
+        const name = u?.organization || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || '?';
+        setAvatarUri(pic ? resolveImg(pic) : null);
+        setInitials(name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?');
+      })
+      .catch(() => {});
+  }, [senderId]);
 
   return (
     <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
-      <View style={[styles.iconWrap, { backgroundColor: '#EFF6FF' }]}>
-        <Ionicons name={isAccepted ? 'checkmark-circle' : 'person-add'} size={W ? 26 : 20} color="#2563EB" />
-      </View>
+      {avatarUri
+        ? <Image source={{ uri: avatarUri }} style={styles.leadAvatarImg} />
+        : <View style={[styles.leadAvatarImg, styles.avatarFallback]}>
+            <Text style={styles.avatarInitial}>{initials}</Text>
+          </View>
+      }
       <View style={[styles.rowContent, { flex: 1 }]}>
         <View style={styles.rowTop}>
           <Text style={styles.rowTitle} numberOfLines={1}>

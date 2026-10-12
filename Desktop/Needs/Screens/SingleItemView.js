@@ -36,6 +36,10 @@ const SingleItemView = ({ route }) => {
   const [supplyQtys, setSupplyQtys] = useState({});         // { [item]: qty string }
   const isOrgBroadcast = item?.needType === 'org_broadcast';
   const isMyOwnBroadcast = isOrgBroadcast && item?.userId && String(item.userId) === String(item?._currentUserId);
+  // Fallback: older broadcasts saved without requestType default to 'volunteer'
+  const requestType = item?.requestType || (isOrgBroadcast ? 'volunteer' : null);
+  const showVolunteer = isOrgBroadcast && (requestType === 'volunteer' || requestType === 'both');
+  const showSupplies  = isOrgBroadcast && (requestType === 'supplies'  || requestType === 'both') && Array.isArray(item?.supplies) && item.supplies.length > 0;
   // --- NORMALIZER: supports NeedRequest + UploadedItem + Fundraiser ---
   const normalized = {
     // Full description — context holds the richer text on need requests
@@ -188,7 +192,7 @@ const SingleItemView = ({ route }) => {
               <Text style={styles.respondTitle}>How would you like to help?</Text>
 
               {/* ── Volunteer ── */}
-              {(item?.requestType === 'volunteer' || item?.requestType === 'both') && (
+              {showVolunteer && (
                 <View style={styles.respondBlock}>
                   <View style={styles.respondBlockHeader}>
                     <Ionicons name="people-outline" size={20} color="#1D4ED8" />
@@ -228,7 +232,7 @@ const SingleItemView = ({ route }) => {
               )}
 
               {/* ── Supplies ── */}
-              {(item?.requestType === 'supplies' || item?.requestType === 'both') && Array.isArray(item?.supplies) && item.supplies.length > 0 && (
+              {showSupplies && (
                 <View style={styles.respondBlock}>
                   <View style={styles.respondBlockHeader}>
                     <Ionicons name="cube-outline" size={20} color="#15803D" />

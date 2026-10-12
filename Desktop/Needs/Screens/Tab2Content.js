@@ -55,6 +55,7 @@ const activeVideos = new Set();
 // so it auto-invalidates on account switch.
 let _tab2Cache = {
   userId: null, needs: [], fundraisers: [], latestNeedId: null,
+  fetchedAt: 0,
   // Per-need pill UI state keyed by need._id
   pillState: {},
 };
@@ -186,7 +187,9 @@ export default function NeedInquiryView() {
     // Cache hit — same user, data already loaded. Restore instantly with no
     // spinner. This covers remounts caused by the native stack detaching the
     // screen when SingleItemView is pushed, so the back button feels instant.
-    if (_tab2Cache.userId === currentUserId && _tab2Cache.needs.length > 0) {
+    const CACHE_TTL_MS = 60_000; // 60 s — re-fetch if another user posted something new
+    const cacheAge = Date.now() - (_tab2Cache.fetchedAt || 0);
+    if (_tab2Cache.userId === currentUserId && _tab2Cache.needs.length > 0 && cacheAge < CACHE_TTL_MS) {
       console.log('⚡ Tab2 cache hit — skipping network fetch');
       setNeeds(_tab2Cache.needs);
       setFundraisers(_tab2Cache.fundraisers);
@@ -248,7 +251,7 @@ export default function NeedInquiryView() {
       );
 
       // Save to module-level cache so the next remount is instant
-      _tab2Cache = { userId: currentUserId, needs: hydratedNeeds, fundraisers: frJson, latestNeedId: latestId, pillState: _tab2Cache.pillState || {} };
+      _tab2Cache = { userId: currentUserId, needs: hydratedNeeds, fundraisers: frJson, latestNeedId: latestId, fetchedAt: Date.now(), pillState: _tab2Cache.pillState || {} };
 
       setNeeds(hydratedNeeds || []);
       setFundraisers(frJson || []);
@@ -291,7 +294,10 @@ export default function NeedInquiryView() {
     stopAllVideos();
     isActiveScreen.current = false;
     setActiveIndex(-1);
-    navigation.navigate('SingleItemView', { item, fromNeedInquiry: true });
+    navigation.navigate('SingleItemView', {
+      item: { ...item, _currentUserId: currentUserId },
+      fromNeedInquiry: true,
+    });
   };
 
   const openFundraiser = async (item) => {

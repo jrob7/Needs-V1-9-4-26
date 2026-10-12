@@ -11,6 +11,7 @@ import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
 const resolveImg = (uri) => {
   if (!uri) return null;
   if (uri.startsWith('http') || uri.startsWith('data:')) return uri;
+  if (/^[0-9a-f]{24}$/i.test(uri)) return `${NODE_API}/images/${uri}`;
   return `${NODE_API}/uploads/${uri}`;
 };
 
@@ -28,6 +29,7 @@ const SingleItemView = ({ route }) => {
   const { item, fromNeedInquiry } = route.params || {};
   const navigation = useNavigation();
   const [userProfile, setUserProfile] = useState(null);
+  const [avatarError, setAvatarError] = useState(false);
   // --- NORMALIZER: supports NeedRequest + UploadedItem + Fundraiser ---
   const normalized = {
     // Full description — context holds the richer text on need requests
@@ -158,8 +160,8 @@ const SingleItemView = ({ route }) => {
             })}
             activeOpacity={0.8}
           >
-            {creatorPic
-              ? <Image source={{ uri: creatorPic }} style={styles.creatorAvatar} />
+            {creatorPic && !avatarError
+              ? <Image source={{ uri: creatorPic }} style={styles.creatorAvatar} onError={() => setAvatarError(true)} />
               : <View style={[styles.creatorAvatar, styles.creatorAvatarFallback]}>
                   <Text style={styles.creatorInitial}>{(creatorName?.[0] || '?').toUpperCase()}</Text>
                 </View>

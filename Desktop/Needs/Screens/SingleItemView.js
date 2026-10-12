@@ -27,8 +27,10 @@ const memberSinceLabel = (id) => {
 };
 
 const SingleItemView = ({ route }) => {
-  const { item, fromNeedInquiry } = route.params || {};
+  const { item: initialItem, fromNeedInquiry } = route.params || {};
   const navigation = useNavigation();
+  const [liveItem, setLiveItem] = useState(null); // fresh copy from server
+  const item = liveItem || initialItem;           // prefer live data
   const [userProfile, setUserProfile] = useState(null);
   const [avatarError, setAvatarError] = useState(false);
   const [responseData, setResponseData] = useState(null);   // { volunteersConfirmed, supplyTotals, myVolunteer, mySupplies }
@@ -37,8 +39,8 @@ const SingleItemView = ({ route }) => {
   const isOrgBroadcast = item?.needType === 'org_broadcast';
   const isMyOwnBroadcast = isOrgBroadcast && item?.userId && String(item.userId) === String(item?._currentUserId);
   console.log('[SingleItemView] needType=' + item?.needType + ' requestType=' + item?.requestType + ' isVolunteer=' + item?.isVolunteer + ' isSupplies=' + item?.isSupplies + ' isOrgBroadcast=' + isOrgBroadcast + ' isMyOwnBroadcast=' + isMyOwnBroadcast + ' userId=' + item?.userId + ' _currentUserId=' + item?._currentUserId);
-  // Derive flags from requestType, with isVolunteer/isSupplies as fallbacks
-  // (older docs may only have requestType; newer also store isVolunteer/isSupplies)
+  // Derive flags — requestType first, then isVolunteer/isSupplies, then fallback to 'volunteer'
+  const hasSupplyItems = Array.isArray(item?.supplies) && item.supplies.length > 0;
   const requestType = item?.requestType || (isOrgBroadcast ? 'volunteer' : null);
   const showVolunteer = isOrgBroadcast && (
     requestType === 'volunteer' || requestType === 'both' || item?.isVolunteer === true
@@ -47,7 +49,6 @@ const SingleItemView = ({ route }) => {
     requestType === 'supplies' || requestType === 'both' || item?.isSupplies === true
   );
   console.log('[SingleItemView] requestType=' + requestType + ' showVolunteer=' + showVolunteer + ' showSupplies=' + showSupplies + ' hasSupplyItems=' + hasSupplyItems);
-  const hasSupplyItems = Array.isArray(item?.supplies) && item.supplies.length > 0;
   // --- NORMALIZER: supports NeedRequest + UploadedItem + Fundraiser ---
   const normalized = {
     // Full description — context holds the richer text on need requests
@@ -91,6 +92,22 @@ const SingleItemView = ({ route }) => {
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
+
+  // For org_broadcasts: re-fetch from server to get the latest fields
+  // (cached items in Tab2 may be missing requestType/isVolunteer/isSupplies)
+  useEffect(() => {
+    const needId = initialItem?._id;
+    if (!needId || initialItem?.needType !== 'org_broadcast') return;
+    authFetch(`${NODE_API}/needRequest/${needId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && d._id) {
+          console.log('[SingleItemView] live fetch needType=' + d.needType + ' requestType=' + d.requestType + ' isVolunteer=' + d.isVolunteer + ' isSupplies=' + d.isSupplies);
+          setLiveItem({ ...initialItem, ...d });
+        }
+      })
+      .catch(() => {});
+  }, [initialItem?._id]);
 
   // Fetch creator profile using getUserDetails (has profilePicture field)
   useEffect(() => {

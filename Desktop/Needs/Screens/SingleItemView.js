@@ -121,17 +121,9 @@ const SingleItemView = ({ route }) => {
         </View>
         <View style={styles.divider} />
 
-        {/* --- OFFER --- */}
-        <View style={styles.row}>
-          <Ionicons name="cash-outline" size={27} color="#2563EB" />
-          <Text style={styles.rowLabel}>Offer</Text>
-          <Text style={styles.rowValue}>${normalized.price}</Text>
-        </View>
-        <View style={styles.divider} />
-
         {/* --- DETAILS --- */}
         <View style={styles.sectionHeaderRow}>
-          <Ionicons name="document-text-outline" size={23} color="#2563EB" />
+          <Ionicons name="document-text-outline" size={26} color="#2563EB" />
           <Text style={styles.sectionHeaderText}>Details</Text>
         </View>
         <Text style={styles.detailsText}>{normalized.details}</Text>
@@ -222,8 +214,8 @@ const styles = StyleSheet.create({
   dividerNoMedia: { marginTop: 150 },
 
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 13 },
-  sectionHeaderText: { fontSize: 21, fontWeight: '800', color: '#0F172A', marginLeft: 10 },
-  detailsText: { fontSize: 22, color: '#1F2937', lineHeight: 34, marginBottom: 10 },
+  sectionHeaderText: { fontSize: 24, fontWeight: '800', color: '#0F172A', marginLeft: 10 },
+  detailsText: { fontSize: 26, color: '#1F2937', lineHeight: 38, marginBottom: 10 },
 
   media: {
     width: '100%',

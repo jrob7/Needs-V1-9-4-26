@@ -36,10 +36,15 @@ const SingleItemView = ({ route }) => {
   const [supplyQtys, setSupplyQtys] = useState({});         // { [item]: qty string }
   const isOrgBroadcast = item?.needType === 'org_broadcast';
   const isMyOwnBroadcast = isOrgBroadcast && item?.userId && String(item.userId) === String(item?._currentUserId);
-  // Fallback: older broadcasts saved without requestType default to 'volunteer'
+  // Derive flags from requestType, with isVolunteer/isSupplies as fallbacks
+  // (older docs may only have requestType; newer also store isVolunteer/isSupplies)
   const requestType = item?.requestType || (isOrgBroadcast ? 'volunteer' : null);
-  const showVolunteer = isOrgBroadcast && (requestType === 'volunteer' || requestType === 'both');
-  const showSupplies  = isOrgBroadcast && (requestType === 'supplies'  || requestType === 'both');
+  const showVolunteer = isOrgBroadcast && (
+    requestType === 'volunteer' || requestType === 'both' || item?.isVolunteer === true
+  );
+  const showSupplies = isOrgBroadcast && (
+    requestType === 'supplies' || requestType === 'both' || item?.isSupplies === true
+  );
   const hasSupplyItems = Array.isArray(item?.supplies) && item.supplies.length > 0;
   // --- NORMALIZER: supports NeedRequest + UploadedItem + Fundraiser ---
   const normalized = {

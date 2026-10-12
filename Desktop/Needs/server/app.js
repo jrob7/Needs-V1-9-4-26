@@ -4311,6 +4311,8 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
       status: 'active',
       // Structured classification fields
       requestType: requestType || 'volunteer',
+      isVolunteer: requestType === 'volunteer' || requestType === 'both',
+      isSupplies:  requestType === 'supplies'  || requestType === 'both',
       volunteersNeeded: volunteersNeeded || null,
       eventDate: eventDate || null,
       eventTime: eventTime || null,

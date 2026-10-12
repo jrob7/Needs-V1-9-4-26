@@ -4001,6 +4001,7 @@ app.post('/restaurantFollowUps/complete', requireAuth, async (req, res) => {
 // GET /connections — list all connections for the logged-in user
 app.get('/connections', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const userId = req.userId;
     const conns = await db.collection('Connections').find({
       $or: [{ requesterId: userId }, { targetId: userId }],
@@ -4034,6 +4035,7 @@ app.get('/connections', requireAuth, async (req, res) => {
 // GET /connections/status/:targetId — check connection status between logged-in user and targetId
 app.get('/connections/status/:targetId', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const userId   = req.userId;
     const targetId = req.params.targetId;
     const conn = await db.collection('Connections').findOne({
@@ -4051,6 +4053,7 @@ app.get('/connections/status/:targetId', requireAuth, async (req, res) => {
 // POST /connections/request — send a connection request
 app.post('/connections/request', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const requesterId = req.userId;
     const { targetId } = req.body;
     if (!targetId) return res.status(400).json({ error: 'targetId required' });
@@ -4093,6 +4096,7 @@ app.post('/connections/request', requireAuth, async (req, res) => {
 // POST /connections/accept — accept a pending request
 app.post('/connections/accept', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const userId = req.userId;
     const { connectionId } = req.body;
     const conn = await db.collection('Connections').findOneAndUpdate(
@@ -4124,6 +4128,7 @@ app.post('/connections/accept', requireAuth, async (req, res) => {
 // DELETE /connections/:id — disconnect (either party can remove)
 app.delete('/connections/:id', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const userId = req.userId;
     await db.collection('Connections').deleteOne({
       _id: new ObjectId(req.params.id),
@@ -4142,6 +4147,7 @@ app.delete('/connections/:id', requireAuth, async (req, res) => {
 // GET /connectionPreferences — get the logged-in user's connection preferences
 app.get('/connectionPreferences', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const userId = req.userId;
     const user = await db.collection('Users').findOne(
       { _id: new ObjectId(userId) },
@@ -4157,6 +4163,7 @@ app.get('/connectionPreferences', requireAuth, async (req, res) => {
 // POST /connectionPreferences — update the logged-in user's connection preferences
 app.post('/connectionPreferences', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const userId = req.userId;
     const { services, restaurants, nonprofits } = req.body;
     const prefs = {};
@@ -4283,6 +4290,7 @@ app.post('/muteConnection/:targetId', requireAuth, async (req, res) => {
 // POST /orgBroadcast — org sends a request to their connections
 app.post('/orgBroadcast', requireAuth, async (req, res) => {
   try {
+    const db = client.db('Need');
     const orgId = req.userId;
     const { text, shareable } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });

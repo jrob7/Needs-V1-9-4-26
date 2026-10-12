@@ -492,6 +492,7 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
     const connectedOrgIds = connections.map(c =>
       c.requesterId === currentUserId ? c.targetId : c.requesterId
     );
+    console.log(`[createNeedRequest] userId=${currentUserId} connections=${connections.length} connectedOrgIds=${JSON.stringify(connectedOrgIds)}`);
     const mutedAll = !!muteUser?.mutedAllSharedNeeds;
     const mutedFrom = muteUser?.mutedSharedNeedsFrom || [];
 
@@ -511,6 +512,7 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
         { needType: 'org_broadcast', sharedWith: currentUserId },
       ],
     }).sort({ date: -1 }).toArray();
+    console.log(`[createNeedRequest] allDocs=${allDocs.length} (types: ${allDocs.map(d=>d.needType||'item').join(',')})`);
 
     // Apply mute filtering for shared org broadcasts
     const docs = allDocs.filter(n => {
@@ -4326,7 +4328,7 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
       const notifications = conns.map(c => {
         const recipientId = c.requesterId === orgId ? c.targetId : c.requesterId;
         return {
-          userId: recipientId,
+          userId: ObjectId.isValid(recipientId) ? new ObjectId(recipientId) : recipientId,
           type: 'org_broadcast',
           message: `${orgName}: ${text}`,
           orgId,

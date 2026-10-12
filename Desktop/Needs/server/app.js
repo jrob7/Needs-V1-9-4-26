@@ -511,7 +511,7 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
         { needType: 'org_broadcast', userId: { $in: connectedOrgIds.map(id => ObjectId.isValid(id) ? new ObjectId(id) : id) } },
         { needType: 'org_broadcast', sharedWith: currentUserId },
       ],
-    }).sort({ date: -1 }).toArray();
+    }).sort({ createdAt: -1 }).toArray();
     console.log(`[createNeedRequest] allDocs=${allDocs.length} (types: ${allDocs.map(d=>d.needType||'item').join(',')})`);
 
     // Apply mute filtering for shared org broadcasts

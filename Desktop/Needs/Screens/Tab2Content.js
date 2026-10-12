@@ -168,7 +168,7 @@ export default function NeedInquiryView() {
       // Poll every 45s for new incoming needs (org broadcasts, shared needs)
       const poll = setInterval(() => {
         invalidateTab2Cache();
-        loadAll();
+        loadAll(true); // silent — no spinner
       }, 10000);
       return () => {
         console.log('🔴 Tab2Content unfocused');
@@ -180,7 +180,7 @@ export default function NeedInquiryView() {
     }, [])  // eslint-disable-line react-hooks/exhaustive-deps
   );
 
-  const loadAll = async () => {
+  const loadAll = async (silent = false) => {
     console.log('🔄 loadAll started');
 
     // Cache hit — same user, data already loaded. Restore instantly with no
@@ -195,7 +195,7 @@ export default function NeedInquiryView() {
       return;
     }
 
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const [needsRes, frRes] = await Promise.all([
         authFetch(`${API}/createNeedRequest`),
@@ -250,11 +250,12 @@ export default function NeedInquiryView() {
     } catch (e) {
       console.log('loadAll error', e);
     } finally {
-      if (IS_WEB) {
-        // On web, wait two paint cycles so content is visible before hiding the spinner
-        requestAnimationFrame(() => requestAnimationFrame(() => setLoading(false)));
-      } else {
-        setLoading(false);
+      if (!silent) {
+        if (IS_WEB) {
+          requestAnimationFrame(() => requestAnimationFrame(() => setLoading(false)));
+        } else {
+          setLoading(false);
+        }
       }
     }
   };

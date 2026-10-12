@@ -226,6 +226,7 @@ export default function NeedInquiryView() {
               const rawPic =
                 u?.profilePicture || u?.profileImageUrl || u?.profileImage ||
                 u?.logo || u?.image || (Array.isArray(u?.images) ? u.images[0] : null) || null;
+              console.log(`[hydrate] userId=${n.userId} org="${u?.organization}" rawPic=${rawPic}`);
               enriched.profilePicture = rawPic
                 ? (rawPic.startsWith('http') ? rawPic
                   : /^[0-9a-f]{24}$/i.test(rawPic) ? `${API}/images/${rawPic}`
@@ -1046,12 +1047,12 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
           onViewCreator={onViewCreator}
           rightSlot={isShareable ? (
             <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
               onPress={() => setShareModalVisible(true)}
               activeOpacity={0.7}
             >
-              <Ionicons name="share-social-outline" size={15} color="#2563EB" />
-              <Text style={{ fontSize: 12, color: '#2563EB', fontWeight: '700' }}>Share</Text>
+              <Ionicons name="share-social-outline" size={18} color="#2563EB" />
+              <Text style={{ fontSize: 14, color: '#2563EB', fontWeight: '700' }}>Share</Text>
             </TouchableOpacity>
           ) : (IS_WEB ? pillNode : undefined)}
           bottomSlot={undefined}

@@ -225,9 +225,11 @@ export default function NeedInquiryView() {
                 || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || '';
               const rawPic =
                 u?.profilePicture || u?.profileImageUrl || u?.profileImage ||
-                u?.image || (Array.isArray(u?.images) ? u.images[0] : null) || null;
+                u?.logo || u?.image || (Array.isArray(u?.images) ? u.images[0] : null) || null;
               enriched.profilePicture = rawPic
-                ? (rawPic.startsWith('http') ? rawPic : `${API}/uploads/${rawPic}`)
+                ? (rawPic.startsWith('http') ? rawPic
+                  : /^[0-9a-f]{24}$/i.test(rawPic) ? `${API}/images/${rawPic}`
+                  : `${API}/uploads/${rawPic}`)
                 : null;
               enriched.creatorId = n.userId;
             } else {
@@ -1042,17 +1044,17 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
           creatorName={need.creatorName || [need.firstName, need.lastName].filter(Boolean).join(' ') || null}
           creatorPic={need.profilePicture}
           onViewCreator={onViewCreator}
-          rightSlot={IS_WEB ? pillNode : undefined}
-          bottomSlot={isShareable ? (
+          rightSlot={isShareable ? (
             <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
               onPress={() => setShareModalVisible(true)}
               activeOpacity={0.7}
             >
-              <Ionicons name="share-social-outline" size={16} color="#2563EB" />
-              <Text style={{ fontSize: 13, color: '#2563EB', fontWeight: '700' }}>Share with your connections</Text>
+              <Ionicons name="share-social-outline" size={15} color="#2563EB" />
+              <Text style={{ fontSize: 12, color: '#2563EB', fontWeight: '700' }}>Share</Text>
             </TouchableOpacity>
-          ) : undefined}
+          ) : (IS_WEB ? pillNode : undefined)}
+          bottomSlot={undefined}
         />
 
         {/* Matches pill — native only; on web it lives inside the Card topRow
@@ -1775,7 +1777,7 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
           <View style={[styles.badge, { backgroundColor: badgeColor }]}>
             <Text style={styles.badgeText}>{badgeLabel}</Text>
           </View>
-          {!!metaRight && <Text style={styles.meta}>{metaRight}</Text>}
+          {rightSlot || (!!metaRight && <Text style={styles.meta}>{metaRight}</Text>)}
         </View>
         {!!title && <Text style={styles.title}>{title}</Text>}
         {!!subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}

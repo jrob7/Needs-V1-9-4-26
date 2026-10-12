@@ -86,11 +86,11 @@ const SingleItemView = ({ route }) => {
   }, [normalized.userId]);
 
   const creatorName = userProfile
-    ? [userProfile.firstName, userProfile.lastName].filter(Boolean).join(' ') || userProfile.name || 'Anonymous'
+    ? userProfile.organization || [userProfile.firstName, userProfile.lastName].filter(Boolean).join(' ') || userProfile.name || 'Anonymous'
     : null;
 
   const creatorPic = userProfile
-    ? resolveImg(userProfile.profilePicture || userProfile.profileImageUrl)
+    ? resolveImg(userProfile.profilePicture || userProfile.profileImageUrl || userProfile.profileImage || userProfile.logo)
     : null;
 
   return (

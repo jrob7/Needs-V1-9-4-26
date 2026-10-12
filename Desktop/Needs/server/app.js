@@ -4364,14 +4364,13 @@ app.post('/orgBroadcastResponse', requireAuth, async (req, res) => {
   try {
     const db = client.db('Need');
     const userId = req.userId;
-    const { needId, type, volunteering, supplies } = req.body;
+    const { needId, type, volunteering, supplies, whenBringing } = req.body;
     if (!needId || !type) return res.status(400).json({ error: 'needId and type required' });
 
     const col = db.collection('OrgBroadcastResponses');
-    // Upsert — one response per user per need per type
     await col.updateOne(
       { needId, userId, type },
-      { $set: { needId, userId, type, volunteering: !!volunteering, supplies: supplies || [], updatedAt: new Date() },
+      { $set: { needId, userId, type, volunteering: !!volunteering, supplies: supplies || [], whenBringing: whenBringing || null, updatedAt: new Date() },
         $setOnInsert: { createdAt: new Date() } },
       { upsert: true }
     );
@@ -4382,7 +4381,7 @@ app.post('/orgBroadcastResponse', requireAuth, async (req, res) => {
   }
 });
 
-// GET /orgBroadcastResponses/:needId — get all responses + tally for a need
+// GET /orgBroadcastResponses/:needId — get all responses + tally + full lists with names
 app.get('/orgBroadcastResponses/:needId', requireAuth, async (req, res) => {
   try {
     const db = client.db('Need');
@@ -4392,7 +4391,30 @@ app.get('/orgBroadcastResponses/:needId', requireAuth, async (req, res) => {
     const responses = await db.collection('OrgBroadcastResponses').find({ needId }).toArray();
 
     const volunteerResponses = responses.filter(r => r.type === 'volunteer' && r.volunteering);
-    const supplyResponses    = responses.filter(r => r.type === 'supplies' && r.supplies?.length > 0);
+    const supplyResponses    = responses.filter(r => r.type === 'supplies');
+
+    // Fetch display names for all respondents
+    const userIds = [...new Set(responses.map(r => r.userId).filter(Boolean))];
+    const userObjs = userIds.map(id => { try { return new ObjectId(id); } catch { return null; } }).filter(Boolean);
+    const usersRaw = userObjs.length ? await db.collection('Users').find({ _id: { $in: userObjs } }, { projection: { firstName: 1, lastName: 1, organization: 1, name: 1 } }).toArray() : [];
+    const userMap = {};
+    usersRaw.forEach(u => { userMap[String(u._id)] = u.organization || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || 'Anonymous'; });
+
+    const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+
+    // Full volunteer list
+    const volunteerList = volunteerResponses.map(r => ({
+      name: userMap[r.userId] || 'Anonymous',
+      date: formatDate(r.updatedAt || r.createdAt),
+    }));
+
+    // Full supply donor list (include all supply responses, even general pledges)
+    const supplyList = supplyResponses.map(r => ({
+      name: userMap[r.userId] || 'Anonymous',
+      supplies: r.supplies || [],
+      whenBringing: r.whenBringing || null,
+      date: formatDate(r.updatedAt || r.createdAt),
+    }));
 
     // Tally committed supplies per item
     const supplyTotals = {};
@@ -4409,7 +4431,10 @@ app.get('/orgBroadcastResponses/:needId', requireAuth, async (req, res) => {
 
     res.json({
       volunteersConfirmed: volunteerResponses.length,
+      supplyDonors: supplyResponses.length,
       supplyTotals,
+      volunteerList,
+      supplyList,
       myVolunteer: myVolunteer || null,
       mySupplies:  mySupplies  || null,
     });

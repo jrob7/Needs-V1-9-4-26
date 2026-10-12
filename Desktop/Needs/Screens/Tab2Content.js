@@ -1021,9 +1021,9 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
       const needed = need?.volunteersNeeded;
       parts.push(needed ? `${confirmed}/${needed} Vol` : `${confirmed} Vol`);
     }
-    if ((need?.requestType === 'supplies' || need?.requestType === 'both') && broadcastTally.supplyTotals) {
-      const count = Object.keys(broadcastTally.supplyTotals).length;
-      if (count > 0) parts.push(`${count} Supply`);
+    if (need?.requestType === 'supplies' || need?.requestType === 'both') {
+      const donors = broadcastTally.supplyDonors ?? 0;
+      if (donors > 0) parts.push(`${donors} Donor${donors !== 1 ? 's' : ''}`);
     }
     return parts.length ? parts.join(' · ') : null;
   })();

@@ -36,6 +36,9 @@ const SingleItemView = ({ route }) => {
   const [responseData, setResponseData] = useState(null);   // { volunteersConfirmed, supplyTotals, myVolunteer, mySupplies }
   const [submitting, setSubmitting] = useState(false);
   const [supplyQtys, setSupplyQtys] = useState({});         // { [item]: qty string }
+  const [donateItem, setDonateItem] = useState('');
+  const [donateQty, setDonateQty] = useState('');
+  const [donateWhen, setDonateWhen] = useState('');
   const isOrgBroadcast = item?.needType === 'org_broadcast';
   const isMyOwnBroadcast = isOrgBroadcast && item?.userId && String(item.userId) === String(item?._currentUserId);
   console.log('[SingleItemView] needType=' + item?.needType + ' requestType=' + item?.requestType + ' isVolunteer=' + item?.isVolunteer + ' isSupplies=' + item?.isSupplies + ' isOrgBroadcast=' + isOrgBroadcast + ' isMyOwnBroadcast=' + isMyOwnBroadcast + ' userId=' + item?.userId + ' _currentUserId=' + item?._currentUserId);
@@ -148,7 +151,7 @@ const SingleItemView = ({ route }) => {
     setSubmitting(false);
   };
 
-  const submitSupplies = async () => {
+  const submitSupplies = async (whenBringing) => {
     if (!item?._id) return;
     const suppliesArr = (item.supplies || []).map(s => ({
       item: s.item,
@@ -160,7 +163,23 @@ const SingleItemView = ({ route }) => {
     try {
       await authFetch(`${NODE_API}/orgBroadcastResponse`, {
         method: 'POST',
-        body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: suppliesArr }),
+        body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: suppliesArr, whenBringing: whenBringing || null }),
+      });
+      const r = await authFetch(`${NODE_API}/orgBroadcastResponses/${item._id}`);
+      if (r.ok) setResponseData(await r.json());
+    } catch {}
+    setSubmitting(false);
+  };
+
+  const submitGeneralDonation = async () => {
+    if (!item?._id) return;
+    if (!donateItem.trim()) { Alert.alert('Please describe what you can bring'); return; }
+    const suppliesArr = [{ item: donateItem.trim(), qty: parseFloat(donateQty) || 1, unit: '' }];
+    setSubmitting(true);
+    try {
+      await authFetch(`${NODE_API}/orgBroadcastResponse`, {
+        method: 'POST',
+        body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: suppliesArr, whenBringing: donateWhen.trim() || null }),
       });
       const r = await authFetch(`${NODE_API}/orgBroadcastResponses/${item._id}`);
       if (r.ok) setResponseData(await r.json());
@@ -270,7 +289,11 @@ const SingleItemView = ({ route }) => {
                         {(responseData.mySupplies.supplies || []).length > 0
                           ? `Committed: ${responseData.mySupplies.supplies.map(s => `${s.qty} ${s.unit || ''} ${s.item}`).join(', ')}`
                           : "You're donating ✓"}
+                        {responseData.mySupplies.whenBringing ? `  ·  ${responseData.mySupplies.whenBringing}` : ''}
                       </Text>
+                      <TouchableOpacity onPress={() => { setDonateItem(''); setDonateQty(''); setDonateWhen(''); /* clear committed to allow re-entry */ authFetch(`${NODE_API}/orgBroadcastResponse`, { method: 'POST', body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: [], whenBringing: null }) }).then(() => authFetch(`${NODE_API}/orgBroadcastResponses/${item._id}`).then(r => r.ok ? r.json() : null).then(d => { if (d) setResponseData(d); })).catch(() => {}); }}>
+                        <Text style={styles.changeLink}>Change</Text>
+                      </TouchableOpacity>
                     </View>
                   ) : hasSupplyItems ? (
                     <View>
@@ -291,32 +314,113 @@ const SingleItemView = ({ route }) => {
                           />
                         </View>
                       ))}
+                      <Text style={styles.supplyFormLabel}>When can you bring it?</Text>
+                      <TextInput
+                        style={styles.supplyFormInput}
+                        placeholder="e.g. Fri, Oct 16 at 3:00 PM"
+                        value={donateWhen}
+                        onChangeText={setDonateWhen}
+                      />
                       <TouchableOpacity
                         style={[styles.respondBtn, { backgroundColor: '#16A34A', marginTop: 10 }]}
-                        onPress={submitSupplies}
+                        onPress={() => submitSupplies(donateWhen)}
                         disabled={submitting}
                       >
                         {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    /* No specific items listed — general pledge button */
-                    <TouchableOpacity
-                      style={[styles.respondBtn, { backgroundColor: '#16A34A' }]}
-                      onPress={() => {
-                        authFetch(`${NODE_API}/orgBroadcastResponse`, {
-                          method: 'POST',
-                          body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: [] }),
-                        }).then(() =>
-                          authFetch(`${NODE_API}/orgBroadcastResponses/${item._id}`)
-                            .then(r => r.ok ? r.json() : null)
-                            .then(d => { if (d) setResponseData(d); })
-                        ).catch(() => {});
-                      }}
-                      disabled={submitting}
-                    >
-                      {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>I Can Donate</Text>}
-                    </TouchableOpacity>
+                    /* No specific items listed — general donation form */
+                    <View>
+                      <Text style={styles.supplyFormLabel}>What can you bring?</Text>
+                      <TextInput
+                        style={styles.supplyFormInput}
+                        placeholder="e.g. 2 cases of bottled water"
+                        value={donateItem}
+                        onChangeText={setDonateItem}
+                      />
+                      <Text style={styles.supplyFormLabel}>Quantity</Text>
+                      <TextInput
+                        style={styles.supplyFormInput}
+                        placeholder="e.g. 2"
+                        keyboardType="numeric"
+                        value={donateQty}
+                        onChangeText={setDonateQty}
+                      />
+                      <Text style={styles.supplyFormLabel}>When can you bring it?</Text>
+                      <TextInput
+                        style={styles.supplyFormInput}
+                        placeholder="e.g. Fri, Oct 16 at 3:00 PM"
+                        value={donateWhen}
+                        onChangeText={setDonateWhen}
+                      />
+                      <TouchableOpacity
+                        style={[styles.respondBtn, { backgroundColor: '#16A34A', marginTop: 10 }]}
+                        onPress={submitGeneralDonation}
+                        disabled={submitting}
+                      >
+                        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* --- REQUESTOR DASHBOARD (org's own broadcast) --- */}
+        {isMyOwnBroadcast && (responseData?.volunteerList?.length > 0 || responseData?.supplyList?.length > 0) && (
+          <View>
+            <View style={styles.divider} />
+            <View style={styles.dashboardSection}>
+              {showVolunteer && (
+                <View style={styles.dashboardBlock}>
+                  <View style={styles.dashboardHeaderRow}>
+                    <Text style={styles.dashboardTitle}>Volunteer Sign-Ups</Text>
+                    <Text style={styles.dashboardCount}>
+                      {responseData.volunteersConfirmed ?? 0}{item?.volunteersNeeded ? ` of ${item.volunteersNeeded}` : ''} confirmed
+                    </Text>
+                  </View>
+                  {(responseData.volunteerList || []).map((v, i) => (
+                    <View key={i} style={styles.dashboardRow}>
+                      <Text style={styles.dashboardName}>{v.name}</Text>
+                      <View style={styles.confirmedPill}><Text style={styles.confirmedPillText}>Confirmed</Text></View>
+                      <Text style={styles.dashboardDate}>{v.date}</Text>
+                    </View>
+                  ))}
+                  {(responseData.volunteerList || []).length === 0 && (
+                    <Text style={styles.dashboardEmpty}>No sign-ups yet</Text>
+                  )}
+                </View>
+              )}
+
+              {showSupplies && (
+                <View style={[styles.dashboardBlock, { marginTop: showVolunteer ? 14 : 0 }]}>
+                  <View style={styles.dashboardHeaderRow}>
+                    <Text style={styles.dashboardTitle}>Supplies Donations</Text>
+                    <Text style={styles.dashboardCount}>{responseData.supplyDonors ?? 0} donor{responseData.supplyDonors !== 1 ? 's' : ''}</Text>
+                  </View>
+                  {(responseData.supplyList || []).length > 0 && (
+                    <View style={styles.dashboardTableHeader}>
+                      <Text style={[styles.dashboardColHeader, { flex: 1.4 }]}>Name</Text>
+                      <Text style={[styles.dashboardColHeader, { flex: 2 }]}>Item / Qty</Text>
+                      <Text style={[styles.dashboardColHeader, { flex: 1.4 }]}>Delivery</Text>
+                    </View>
+                  )}
+                  {(responseData.supplyList || []).map((s, i) => (
+                    <View key={i} style={[styles.dashboardRow, { alignItems: 'flex-start' }]}>
+                      <Text style={[styles.dashboardName, { flex: 1.4 }]}>{s.name}</Text>
+                      <Text style={[styles.dashboardRowText, { flex: 2 }]}>
+                        {s.supplies?.length > 0
+                          ? s.supplies.map(x => `${x.qty}${x.unit ? ' ' + x.unit : ''} ${x.item}`).join(', ')
+                          : 'General donation'}
+                      </Text>
+                      <Text style={[styles.dashboardRowText, { flex: 1.4 }]}>{s.whenBringing || '—'}</Text>
+                    </View>
+                  ))}
+                  {(responseData.supplyList || []).length === 0 && (
+                    <Text style={styles.dashboardEmpty}>No donations yet</Text>
                   )}
                 </View>
               )}
@@ -473,6 +577,61 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     backgroundColor: '#fff',
   },
+  supplyFormLabel: { fontSize: 14, fontWeight: '600', color: '#374151', marginTop: 12, marginBottom: 4 },
+  supplyFormInput: {
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#0F172A',
+    backgroundColor: '#fff',
+  },
+
+  dashboardSection: { paddingBottom: 8 },
+  dashboardBlock: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  dashboardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  dashboardTitle: { fontSize: 16, fontWeight: '800', color: '#14532D' },
+  dashboardCount: { fontSize: 13, fontWeight: '600', color: '#15803D' },
+  dashboardTableHeader: {
+    flexDirection: 'row',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#BBF7D0',
+    marginBottom: 4,
+  },
+  dashboardColHeader: { fontSize: 12, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase' },
+  dashboardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#D1FAE5',
+  },
+  dashboardName: { fontSize: 14, fontWeight: '600', color: '#0F172A', flex: 1.4 },
+  dashboardRowText: { fontSize: 13, color: '#374151', flex: 2 },
+  dashboardDate: { fontSize: 13, color: '#6B7280', flex: 0.8, textAlign: 'right' },
+  dashboardEmpty: { fontSize: 14, color: '#9CA3AF', fontStyle: 'italic', paddingVertical: 8 },
+  confirmedPill: {
+    backgroundColor: '#BBF7D0',
+    borderRadius: 20,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    marginHorizontal: 8,
+  },
+  confirmedPillText: { fontSize: 12, fontWeight: '700', color: '#15803D' },
 
   fillNeedsButton: {
     backgroundColor: '#007bff',

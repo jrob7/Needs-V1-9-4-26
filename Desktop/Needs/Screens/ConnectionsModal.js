@@ -157,7 +157,11 @@ export default function ConnectionsModal() {
     setLoading(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { fetchAll(); }, [fetchAll]));
+  useFocusEffect(useCallback(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 10000);
+    return () => clearInterval(interval);
+  }, [fetchAll]));
 
   // ── Search with debounce ─────────────────────────────────────────────────
   const handleSearch = (text) => {
@@ -190,20 +194,27 @@ export default function ConnectionsModal() {
         body: JSON.stringify({ targetId: String(user._id) }),
       });
       const data = await r.json();
-      if (data.alreadyExists) {
-        Alert.alert('Already sent', 'A connection request already exists with this person.');
-        return;
+      const conn = data.connection;
+      const otherName = user.organization || [user.firstName, user.lastName].filter(Boolean).join(' ') || 'User';
+      // Add to connections list (or ensure it's there for alreadyExists case)
+      setConnections(prev => {
+        const alreadyInState = prev.find(c => c.otherId === String(user._id));
+        if (alreadyInState) return prev;
+        return [...prev, {
+          _id: conn?._id,
+          otherId: String(user._id),
+          otherName,
+          otherPic: user.profilePicture || null,
+          status: conn?.status || 'pending',
+          role: data.alreadyExists && conn?.requesterId !== currentUserId ? 'received' : 'sent',
+        }];
+      });
+      // Clear search so the user sees their connections list with the new entry
+      setQuery('');
+      setSearchResults([]);
+      if (!data.alreadyExists) {
+        Alert.alert('Request sent!', `${otherName} will be notified.`);
       }
-      // Add a pending entry so the button updates immediately
-      setConnections(prev => [...prev, {
-        _id: data.connection?._id,
-        otherId: String(user._id),
-        otherName: user.organization || [user.firstName, user.lastName].filter(Boolean).join(' '),
-        otherPic: user.profilePicture || null,
-        status: 'pending',
-        role: 'sent',
-      }]);
-      Alert.alert('Request sent!', `${user.organization || user.firstName || 'User'} will be notified.`);
     } catch (_) {
       Alert.alert('Error', 'Could not send request. Please try again.');
     }

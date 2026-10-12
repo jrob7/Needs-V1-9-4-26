@@ -239,19 +239,25 @@ const AccountTabContent = () => {
     }
   };
 
+  const fetchPendingCount = React.useCallback(() => {
+    authFetch(`${NODE_API}/connections`)
+      .then(r => r.json())
+      .then(data => {
+        const count = Array.isArray(data)
+          ? data.filter(c => c.role === 'received' && c.status === 'pending').length
+          : 0;
+        setPendingConnCount(count);
+      })
+      .catch(() => {});
+  }, []);
+
   useFocusEffect(
     React.useCallback(() => {
       fetchUserDetails();
-      authFetch(`${NODE_API}/connections`)
-        .then(r => r.json())
-        .then(data => {
-          const count = Array.isArray(data)
-            ? data.filter(c => c.role === 'received' && c.status === 'pending').length
-            : 0;
-          setPendingConnCount(count);
-        })
-        .catch(() => {});
-    }, [globalUserId, ctx.accountType, ctx.businessType])
+      fetchPendingCount();
+      const interval = setInterval(fetchPendingCount, 15000);
+      return () => clearInterval(interval);
+    }, [globalUserId, ctx.accountType, ctx.businessType, fetchPendingCount])
   );
 
   const handleLogout = async () => {

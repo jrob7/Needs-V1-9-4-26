@@ -217,15 +217,19 @@ export default function SearchScreen() {
   const handleBroadcastChoice = async (broadcastData) => {
     setConversation(prev => [...prev, { aiThinking: true }]);
     try {
-      await authFetch(`${NODE_API}/orgBroadcast`, {
+      const r = await authFetch(`${NODE_API}/orgBroadcast`, {
         method: 'POST',
         body: JSON.stringify({ text: broadcastData.text, shareable: !!broadcastData.shareable, userId: currentUserId }),
       });
       setConversation(prev => prev.filter(m => !m.aiThinking));
-      const connLabel = broadcastData.connCount > 0
-        ? `your ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}`
-        : 'your connections';
-      pushAI(`Done! Your request has been sent to ${connLabel}. You'll be notified when someone responds.`);
+      if (!r.ok) {
+        pushAI('Something went wrong sending your request. Please try again.');
+      } else {
+        const connLabel = broadcastData.connCount > 0
+          ? `your ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}`
+          : 'your connections';
+        pushAI(`Done! Your request has been sent to ${connLabel}. You'll be notified when someone responds.`);
+      }
     } catch (_) {
       setConversation(prev => prev.filter(m => !m.aiThinking));
       pushAI('Something went wrong. Please try again.');

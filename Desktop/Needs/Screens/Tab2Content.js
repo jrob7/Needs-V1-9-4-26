@@ -14,6 +14,7 @@ import {
   SafeAreaView,
   Animated,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
 import Constants from 'expo-constants';
@@ -115,7 +116,8 @@ export default function NeedInquiryView() {
   const [fundraisers, setFundraisers] = useState([]);
   const [searchText, setSearchText] = useState('');
   const [viewMode, setViewMode] = useState('list');
-  const [loading, setLoading]   = useState(true);
+  const [loading, setLoading]     = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const cardLayouts = useRef({});
   const isActiveScreen = useRef(true);
@@ -150,14 +152,27 @@ export default function NeedInquiryView() {
     loadAll();
   }, [currentUserId]);
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    invalidateTab2Cache();
+    await loadAll();
+    setRefreshing(false);
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       console.log('🟢 Tab2Content focused');
       isActiveScreen.current = true;
       // If Tab1 invalidated the cache (new need submitted), reload now
       if (_tab2Cache.needs.length === 0) loadAll();
+      // Poll every 45s for new incoming needs (org broadcasts, shared needs)
+      const poll = setInterval(() => {
+        invalidateTab2Cache();
+        loadAll();
+      }, 45000);
       return () => {
         console.log('🔴 Tab2Content unfocused');
+        clearInterval(poll);
         isActiveScreen.current = false;
         stopAllVideos();
         setActiveIndex(-1);
@@ -378,7 +393,8 @@ export default function NeedInquiryView() {
       {viewMode === 'list' ? (
         <>
           <ScrollView ref={listScrollRef} contentContainerStyle={styles.list} scrollEventThrottle={16}
-            onScroll={(e) => updateActiveFromScroll(e.nativeEvent.contentOffset.y)}>
+            onScroll={(e) => updateActiveFromScroll(e.nativeEvent.contentOffset.y)}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#2563EB" />}>
             {allItems.map((item, idx) => {
               const isFr = item.kind === 'fundraiser';
               const media = getBestMedia(item);

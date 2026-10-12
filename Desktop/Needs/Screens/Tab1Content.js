@@ -237,6 +237,7 @@ export default function SearchScreen() {
         const connLabel = broadcastData.connCount > 0
           ? `your ${broadcastData.connCount} connection${broadcastData.connCount !== 1 ? 's' : ''}`
           : 'your connections';
+        invalidateTab2Cache();
         pushAI(`Done! Your request has been sent to ${connLabel}. You'll be notified when someone responds.`);
       }
     } catch (_) {

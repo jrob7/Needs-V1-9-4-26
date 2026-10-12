@@ -453,6 +453,7 @@ app.post('/login', async (req, res) => {
       threadId: threadId || null,  // ✅ store thread link to ChatGPT conversation
       notifiedCount: 0,                     // ✅ new field to track notifications sent
       date: new Date(),
+      createdAt: new Date(),
       location: geoLocation || { type: "Point", coordinates: [] }, // ✅ always present
       initialMatchNames: Array.isArray(initialMatchNames) ? initialMatchNames : [], // ← Tab2 exclusion list
       serviceMatchStatus: req.body.serviceMatchStatus || null,
@@ -511,7 +512,7 @@ app.get('/createNeedRequest', requireAuth, async (req, res) => {
         { needType: 'org_broadcast', userId: { $in: connectedOrgIds.map(id => ObjectId.isValid(id) ? new ObjectId(id) : id) } },
         { needType: 'org_broadcast', sharedWith: currentUserId },
       ],
-    }).sort({ createdAt: -1 }).toArray();
+    }).sort({ _id: -1 }).toArray();
     console.log(`[createNeedRequest] allDocs=${allDocs.length} (types: ${allDocs.map(d=>d.needType||'item').join(',')})`);
 
     // Apply mute filtering for shared org broadcasts

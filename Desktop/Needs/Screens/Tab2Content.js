@@ -1046,12 +1046,12 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
           onViewCreator={onViewCreator}
           rightSlot={isShareable ? (
             <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
               onPress={() => setShareModalVisible(true)}
               activeOpacity={0.7}
             >
-              <Ionicons name="share-social-outline" size={18} color="#2563EB" />
-              <Text style={{ fontSize: 14, color: '#2563EB', fontWeight: '700' }}>Share</Text>
+              <Ionicons name="share-social-outline" size={23} color="#2563EB" />
+              <Text style={{ fontSize: 18, color: '#2563EB', fontWeight: '700' }}>Share</Text>
             </TouchableOpacity>
           ) : (IS_WEB ? pillNode : undefined)}
           bottomSlot={undefined}
@@ -1766,7 +1766,7 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
                   fallbackStyle={styles.creatorCircleFallback}
                   initialStyle={styles.creatorCircleInitial}
                 />
-                <Text style={styles.creatorCircleName}>{creatorName}</Text>
+                <Text style={styles.creatorCircleName} numberOfLines={2}>{creatorName}</Text>
               </TouchableOpacity>
             )}
             {!!bottomSlot && bottomSlot}
@@ -1815,7 +1815,7 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
               fallbackStyle={styles.creatorCircleFallback}
               initialStyle={styles.creatorCircleInitial}
             />
-            <Text style={styles.creatorCircleName}>{creatorName}</Text>
+            <Text style={styles.creatorCircleName} numberOfLines={2}>{creatorName}</Text>
           </TouchableOpacity>
         )}
         {!!bottomSlot && bottomSlot}
@@ -1826,12 +1826,12 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F7F7F7' },
-  creatorCircleWrap: { alignItems: 'center', alignSelf: 'flex-end', marginTop: 12, paddingTop: 10 },
+  creatorCircleWrap: { alignItems: 'center', alignSelf: 'flex-end', marginTop: 12, paddingTop: 10, width: 100 },
   creatorCircleAvatar:   { width: 72, height: 72, borderRadius: 41, borderWidth: 2.5, borderColor: '#2563EB', marginBottom: 6 },
   webCreatorAvatar:      { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: '#2563EB' },
   creatorCircleFallback: { backgroundColor: '#DBEAFE', justifyContent: 'center', alignItems: 'center' },
   creatorCircleInitial:  { fontSize: 24, fontWeight: '900', color: '#2563EB' },
-  creatorCircleName:     { fontSize: 14, color: '#0F172A', fontWeight: '700', textAlign: 'center' },
+  creatorCircleName:     { fontSize: 13, color: '#0F172A', fontWeight: '700', textAlign: 'center' },
   toggleContainer: { flexDirection: 'row', justifyContent: 'center', marginTop: 8 },
   toggleButton: {
     flexDirection: 'row', alignItems: 'center',

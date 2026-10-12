@@ -39,7 +39,8 @@ const SingleItemView = ({ route }) => {
   // Fallback: older broadcasts saved without requestType default to 'volunteer'
   const requestType = item?.requestType || (isOrgBroadcast ? 'volunteer' : null);
   const showVolunteer = isOrgBroadcast && (requestType === 'volunteer' || requestType === 'both');
-  const showSupplies  = isOrgBroadcast && (requestType === 'supplies'  || requestType === 'both') && Array.isArray(item?.supplies) && item.supplies.length > 0;
+  const showSupplies  = isOrgBroadcast && (requestType === 'supplies'  || requestType === 'both');
+  const hasSupplyItems = Array.isArray(item?.supplies) && item.supplies.length > 0;
   // --- NORMALIZER: supports NeedRequest + UploadedItem + Fundraiser ---
   const normalized = {
     // Full description — context holds the richer text on need requests
@@ -242,10 +243,12 @@ const SingleItemView = ({ route }) => {
                     <View style={styles.committedRow}>
                       <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
                       <Text style={styles.committedText}>
-                        Committed: {(responseData.mySupplies.supplies || []).map(s => `${s.qty} ${s.unit || ''} ${s.item}`).join(', ')}
+                        {(responseData.mySupplies.supplies || []).length > 0
+                          ? `Committed: ${responseData.mySupplies.supplies.map(s => `${s.qty} ${s.unit || ''} ${s.item}`).join(', ')}`
+                          : "You're donating ✓"}
                       </Text>
                     </View>
-                  ) : (
+                  ) : hasSupplyItems ? (
                     <View>
                       {item.supplies.map((s, idx) => (
                         <View key={idx} style={styles.supplyRow}>
@@ -272,6 +275,24 @@ const SingleItemView = ({ route }) => {
                         {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
                       </TouchableOpacity>
                     </View>
+                  ) : (
+                    /* No specific items listed — general pledge button */
+                    <TouchableOpacity
+                      style={[styles.respondBtn, { backgroundColor: '#16A34A' }]}
+                      onPress={() => {
+                        authFetch(`${NODE_API}/orgBroadcastResponse`, {
+                          method: 'POST',
+                          body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: [] }),
+                        }).then(() =>
+                          authFetch(`${NODE_API}/orgBroadcastResponses/${item._id}`)
+                            .then(r => r.ok ? r.json() : null)
+                            .then(d => { if (d) setResponseData(d); })
+                        ).catch(() => {});
+                      }}
+                      disabled={submitting}
+                    >
+                      {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>I Can Donate</Text>}
+                    </TouchableOpacity>
                   )}
                 </View>
               )}

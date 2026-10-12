@@ -215,20 +215,23 @@ export default function SearchScreen() {
   };
 
   const handleBroadcastChoice = async (broadcastData) => {
+    console.log('[handleBroadcastChoice] requestType=' + broadcastData.requestType + ' isVolunteer=' + broadcastData.isVolunteer + ' isSupplies=' + broadcastData.isSupplies + ' supplies=' + JSON.stringify(broadcastData.supplies));
     setConversation(prev => [...prev, { aiThinking: true }]);
     try {
+      const payload = {
+        text: broadcastData.text,
+        shareable: !!broadcastData.shareable,
+        userId: currentUserId,
+        requestType: broadcastData.requestType,
+        volunteersNeeded: broadcastData.volunteersNeeded,
+        eventDate: broadcastData.eventDate,
+        eventTime: broadcastData.eventTime,
+        supplies: broadcastData.supplies,
+      };
+      console.log('[handleBroadcastChoice] posting to /orgBroadcast:', JSON.stringify(payload));
       const r = await authFetch(`${NODE_API}/orgBroadcast`, {
         method: 'POST',
-        body: JSON.stringify({
-          text: broadcastData.text,
-          shareable: !!broadcastData.shareable,
-          userId: currentUserId,
-          requestType: broadcastData.requestType,
-          volunteersNeeded: broadcastData.volunteersNeeded,
-          eventDate: broadcastData.eventDate,
-          eventTime: broadcastData.eventTime,
-          supplies: broadcastData.supplies,
-        }),
+        body: JSON.stringify(payload),
       });
       setConversation(prev => prev.filter(m => !m.aiThinking));
       if (!r.ok) {
@@ -847,13 +850,16 @@ export default function SearchScreen() {
     if (!originalText) return;
 
     // ── Org broadcast: classify → preview → confirm → send ────────────────────
+    console.log('[sendQuery] accountType=' + currentAccountType + ' businessType=' + currentBusinessType + ' isOrgAccount=' + isOrgAccount + ' userId=' + currentUserId + ' overrideText=' + !!overrideText);
     if (isOrgAccount && currentUserId && !overrideText) {
+      console.log('[sendQuery] → ORG BROADCAST path');
       pushUser(originalText, !!media);
       setInput('');
       setConversation(prev => [...prev, { aiThinking: true }]);
       let connCount = 0;
       let classification = { requestType: 'volunteer', isVolunteer: true, isSupplies: false };
       try {
+        console.log('[sendQuery] calling classify-org-broadcast and /connections in parallel');
         const [connRes, classRes] = await Promise.all([
           authFetch(`${NODE_API}/connections`),
           fetch(`${FLASK_API}/classify-org-broadcast`, {
@@ -864,8 +870,12 @@ export default function SearchScreen() {
         ]);
         const conns = await connRes.json();
         connCount = Array.isArray(conns) ? conns.length : 0;
-        if (classRes.ok) classification = await classRes.json();
-      } catch (_) {}
+        console.log('[sendQuery] connCount=' + connCount + ' classRes.ok=' + classRes.ok);
+        if (classRes.ok) {
+          classification = await classRes.json();
+          console.log('[sendQuery] classification=' + JSON.stringify(classification));
+        }
+      } catch (e) { console.log('[sendQuery] classify error', e); }
       setConversation(prev => prev.filter(m => !m.aiThinking));
       setConversation(prev => [...prev, {
         broadcastPreview: true,
@@ -875,6 +885,7 @@ export default function SearchScreen() {
       }]);
       return;
     }
+    console.log('[sendQuery] → REGULAR NEED path (not org broadcast)');
 
     // ── Org name detection: check if user is addressing a specific org ────────
     // Runs on both first send AND location-retry sends (overrideText set).

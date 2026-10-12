@@ -221,6 +221,8 @@ export default function NeedInquiryView() {
               const u = await uRes.json();
               enriched.firstName = u?.firstName || '';
               enriched.lastName  = u?.lastName  || '';
+              enriched.creatorName = u?.organization || u?.displayName
+                || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || '';
               const rawPic =
                 u?.profilePicture || u?.profileImageUrl || u?.profileImage ||
                 u?.image || (Array.isArray(u?.images) ? u.images[0] : null) || null;
@@ -231,11 +233,13 @@ export default function NeedInquiryView() {
             } else {
               enriched.firstName = 'Unknown';
               enriched.lastName  = '';
+              enriched.creatorName = 'Unknown';
               enriched.profilePicture = null;
               enriched.creatorId = null;
             }
           } catch (err) {
             enriched.firstName = 'Unknown';
+            enriched.creatorName = 'Unknown';
           }
           return enriched;
         })
@@ -595,7 +599,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
           media={IS_WEB ? media : media}
           isActive={isActive}
           onPress={hasMatches ? () => setQuotesVisible(true) : null}
-          creatorName={[need?.firstName, need?.lastName].filter(Boolean).join(' ') || null}
+          creatorName={need?.creatorName || [need?.firstName, need?.lastName].filter(Boolean).join(' ') || null}
           creatorPic={need?.profilePicture}
           onViewCreator={onViewCreator}
           rightSlot={IS_WEB ? pillNode : undefined}
@@ -1035,10 +1039,20 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
           subtitle={need.urgency ? `When: ${(need.urgency).replace(/\*\*/g, '')}` : ''}
           infoLine={need.bidprice != null && need.bidprice !== 'N/A' && need.bidprice !== 0 ? `Offer: $${need.bidprice}` : ''}
           media={IS_WEB ? webMedia : media} isActive={isActive} onPress={onOpenNeed}
-          creatorName={[need.firstName, need.lastName].filter(Boolean).join(' ') || null}
+          creatorName={need.creatorName || [need.firstName, need.lastName].filter(Boolean).join(' ') || null}
           creatorPic={need.profilePicture}
           onViewCreator={onViewCreator}
           rightSlot={IS_WEB ? pillNode : undefined}
+          bottomSlot={isShareable ? (
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}
+              onPress={() => setShareModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="share-social-outline" size={16} color="#2563EB" />
+              <Text style={{ fontSize: 13, color: '#2563EB', fontWeight: '700' }}>Share with your connections</Text>
+            </TouchableOpacity>
+          ) : undefined}
         />
 
         {/* Matches pill — native only; on web it lives inside the Card topRow
@@ -1075,18 +1089,6 @@ function HorizontalNeedRowInner({ need, media, idx, isActive, isSessionNeed, aut
         needText={need?.searchText}
         onClose={() => setModalVisible(false)}
       />
-
-      {/* ── Share button — only on shareable org broadcasts ── */}
-      {isShareable && (
-        <TouchableOpacity
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}
-          onPress={() => setShareModalVisible(true)}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="share-social-outline" size={16} color="#2563EB" />
-          <Text style={{ fontSize: 13, color: '#2563EB', fontWeight: '700' }}>Share with your connections</Text>
-        </TouchableOpacity>
-      )}
 
       {/* ── Share connections picker modal ── */}
       {isShareable && (
@@ -1699,7 +1701,7 @@ const mStyles = StyleSheet.create({
   ctaPrimaryText: { fontSize: 18, fontWeight: '800', color: '#fff' },
 });
 
-function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, media, compact, onPress, isActive, onLayout, creatorName, creatorPic, onViewCreator, rightSlot, cardStyle }) {
+function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, media, compact, onPress, isActive, onLayout, creatorName, creatorPic, onViewCreator, rightSlot, cardStyle, bottomSlot }) {
   const isVideo = media?.type === 'video' || (media?.uri || '').toLowerCase().endsWith('.mp4');
   const player = useVideoPlayer(isVideo ? (media?.uri ?? null) : null, p => {
     p.loop = true;
@@ -1752,6 +1754,7 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
                 <Text style={styles.creatorCircleName}>{creatorName}</Text>
               </TouchableOpacity>
             )}
+            {!!bottomSlot && bottomSlot}
           </View>
           {/* Right: only show media actually attached to this need */}
           {canShowImg && (
@@ -1802,6 +1805,7 @@ function Card({ badgeLabel, badgeColor, title, subtitle, infoLine, metaRight, me
             <Text style={styles.creatorCircleName}>{creatorName}</Text>
           </TouchableOpacity>
         )}
+        {!!bottomSlot && bottomSlot}
       </View>
     </TouchableOpacity>
   );

@@ -46,6 +46,50 @@ const SingleItemView = ({ route }) => {
   const formatDonateDate = (d) => d
     ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
     : null;
+
+  // Renders the "When can you bring it?" date+time field.
+  // Web: native <input type="datetime-local">. Native: DateTimePicker in date→time sequence.
+  const renderDateField = () => IS_WEB ? (
+    <input
+      type="datetime-local"
+      min={new Date().toISOString().slice(0, 16)}
+      value={donateDate ? new Date(donateDate.getTime() - donateDate.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''}
+      onChange={e => { if (e.target.value) setDonateDate(new Date(e.target.value)); }}
+      style={{ border: '1.5px solid #BFDBFE', borderRadius: 10, padding: '10px 14px', fontSize: 15, color: donateDate ? '#1E40AF' : '#93C5FD', backgroundColor: '#EFF6FF', width: '100%', boxSizing: 'border-box', fontFamily: 'inherit', outline: 'none', cursor: 'pointer' }}
+    />
+  ) : (
+    <>
+      <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+        <Ionicons name="calendar-outline" size={18} color="#2563EB" />
+        <Text style={donateDate ? styles.datePickerBtnText : styles.datePickerBtnPlaceholder}>
+          {donateDate ? formatDonateDate(donateDate) : 'Select date & time'}
+        </Text>
+      </TouchableOpacity>
+      {showDatePicker && (
+        <DateTimePicker
+          value={donateDate || new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          minimumDate={new Date()}
+          onChange={(ev, selected) => {
+            setShowDatePicker(false);
+            if (ev.type !== 'dismissed' && selected) { setDonateDate(selected); setShowTimePicker(true); }
+          }}
+        />
+      )}
+      {showTimePicker && (
+        <DateTimePicker
+          value={donateDate || new Date()}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(ev, selected) => {
+            setShowTimePicker(false);
+            if (ev.type !== 'dismissed' && selected) setDonateDate(selected);
+          }}
+        />
+      )}
+    </>
+  );
   const isOrgBroadcast = item?.needType === 'org_broadcast';
   const isMyOwnBroadcast = isOrgBroadcast && item?.userId && String(item.userId) === String(item?._currentUserId);
   console.log('[SingleItemView] needType=' + item?.needType + ' requestType=' + item?.requestType + ' isVolunteer=' + item?.isVolunteer + ' isSupplies=' + item?.isSupplies + ' isOrgBroadcast=' + isOrgBroadcast + ' isMyOwnBroadcast=' + isMyOwnBroadcast + ' userId=' + item?.userId + ' _currentUserId=' + item?._currentUserId);
@@ -330,45 +374,16 @@ const SingleItemView = ({ route }) => {
                         </View>
                       ))}
                       <Text style={styles.supplyFormLabel}>When can you bring it?</Text>
-                      <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
-                        <Ionicons name="calendar-outline" size={18} color="#2563EB" />
-                        <Text style={donateDate ? styles.datePickerBtnText : styles.datePickerBtnPlaceholder}>
-                          {donateDate ? formatDonateDate(donateDate) : 'Select date & time'}
-                        </Text>
-                      </TouchableOpacity>
-                      {showDatePicker && (
-                        <DateTimePicker
-                          value={donateDate || new Date()}
-                          mode="date"
-                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                          minimumDate={new Date()}
-                          onChange={(ev, selected) => {
-                            setShowDatePicker(false);
-                            if (ev.type !== 'dismissed' && selected) {
-                              setDonateDate(selected);
-                              setShowTimePicker(true);
-                            }
-                          }}
-                        />
-                      )}
-                      {showTimePicker && (
-                        <DateTimePicker
-                          value={donateDate || new Date()}
-                          mode="time"
-                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                          onChange={(ev, selected) => {
-                            setShowTimePicker(false);
-                            if (ev.type !== 'dismissed' && selected) setDonateDate(selected);
-                          }}
-                        />
-                      )}
-                      <TouchableOpacity
-                        style={[styles.respondBtn, { backgroundColor: '#16A34A', marginTop: 10 }]}
-                        onPress={submitSupplies}
-                        disabled={submitting}
-                      >
-                        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
-                      </TouchableOpacity>
+                      {renderDateField()}
+                      <View style={IS_WEB ? { alignItems: 'center', marginTop: 10 } : { marginTop: 10 }}>
+                        <TouchableOpacity
+                          style={[styles.respondBtn, { backgroundColor: '#16A34A' }, IS_WEB && { minWidth: 200, paddingHorizontal: 40 }]}
+                          onPress={submitSupplies}
+                          disabled={submitting}
+                        >
+                          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ) : (
                     /* No specific items listed — general donation form */
@@ -389,45 +404,16 @@ const SingleItemView = ({ route }) => {
                         onChangeText={setDonateQty}
                       />
                       <Text style={styles.supplyFormLabel}>When can you bring it?</Text>
-                      <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
-                        <Ionicons name="calendar-outline" size={18} color="#2563EB" />
-                        <Text style={donateDate ? styles.datePickerBtnText : styles.datePickerBtnPlaceholder}>
-                          {donateDate ? formatDonateDate(donateDate) : 'Select date & time'}
-                        </Text>
-                      </TouchableOpacity>
-                      {showDatePicker && (
-                        <DateTimePicker
-                          value={donateDate || new Date()}
-                          mode="date"
-                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                          minimumDate={new Date()}
-                          onChange={(ev, selected) => {
-                            setShowDatePicker(false);
-                            if (ev.type !== 'dismissed' && selected) {
-                              setDonateDate(selected);
-                              setShowTimePicker(true);
-                            }
-                          }}
-                        />
-                      )}
-                      {showTimePicker && (
-                        <DateTimePicker
-                          value={donateDate || new Date()}
-                          mode="time"
-                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                          onChange={(ev, selected) => {
-                            setShowTimePicker(false);
-                            if (ev.type !== 'dismissed' && selected) setDonateDate(selected);
-                          }}
-                        />
-                      )}
-                      <TouchableOpacity
-                        style={[styles.respondBtn, { backgroundColor: '#16A34A', marginTop: 10 }]}
-                        onPress={submitGeneralDonation}
-                        disabled={submitting}
-                      >
-                        {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
-                      </TouchableOpacity>
+                      {renderDateField()}
+                      <View style={IS_WEB ? { alignItems: 'center', marginTop: 10 } : { marginTop: 10 }}>
+                        <TouchableOpacity
+                          style={[styles.respondBtn, { backgroundColor: '#16A34A' }, IS_WEB && { minWidth: 200, paddingHorizontal: 40 }]}
+                          onPress={submitGeneralDonation}
+                          disabled={submitting}
+                        >
+                          {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   )}
                 </View>

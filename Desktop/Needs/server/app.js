@@ -25,9 +25,17 @@ const gcal = require('./googleCalendar');
 
 
 // ── JWT ───────────────────────────────────────────────────────────────────────
-// Move JWT_SECRET to an environment variable before going to production:
-//   export JWT_SECRET="a-long-random-string"
-const JWT_SECRET = process.env.JWT_SECRET || 'needs-dev-secret-CHANGE-BEFORE-PRODUCTION';
+const JWT_SECRET     = process.env.JWT_SECRET     || 'needs-dev-secret-CHANGE-BEFORE-PRODUCTION';
+const REFRESH_SECRET = process.env.REFRESH_SECRET || 'needs-refresh-secret-CHANGE-BEFORE-PRODUCTION';
+
+const ACCESS_TOKEN_TTL  = '30m';
+const REFRESH_TOKEN_TTL = '7d';
+
+function signAccessToken(userId)  { return jwt.sign({ userId }, JWT_SECRET,     { expiresIn: ACCESS_TOKEN_TTL }); }
+function signRefreshToken(userId) { return jwt.sign({ userId }, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }); }
+function signTokens(userId) {
+  return { token: signAccessToken(userId), refreshToken: signRefreshToken(userId) };
+}
 
 const requireAuth = (req, res, next) => {
   const header = req.headers.authorization;
@@ -36,7 +44,7 @@ const requireAuth = (req, res, next) => {
   }
   try {
     const payload = jwt.verify(header.split(' ')[1], JWT_SECRET);
-    req.userId = payload.userId; // available to every protected route
+    req.userId = payload.userId;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -269,15 +277,11 @@ client.connect()
                 const collection = database.collection('Users');
                 const result = await collection.insertOne(newUser);
 
-                const token = jwt.sign(
-                  { userId: result.insertedId.toString() },
-                  JWT_SECRET,
-                  { expiresIn: '30d' }
-                );
+                const { token, refreshToken } = signTokens(result.insertedId.toString());
 
                 console.log('User created successfully with ID:', result.insertedId);
                 const { password: _pw, ...safeUser } = newUser;
-                res.status(201).json({ ...safeUser, _id: result.insertedId, token });
+                res.status(201).json({ ...safeUser, _id: result.insertedId, token, refreshToken });
             } catch (error) {
                 console.error('Error creating user:', error);
                 res.status(500).json({ error: 'Internal Server Error' });
@@ -335,15 +339,12 @@ app.post('/login', async (req, res) => {
         return res.status(401).json({ error: 'Invalid password' });
       }
 
-      const token = jwt.sign(
-        { userId: user._id.toString() },
-        JWT_SECRET,
-        { expiresIn: '30d' }
-      );
+      const { token, refreshToken } = signTokens(user._id.toString());
 
       return res.status(200).json({
         message: 'Login successful',
         token,
+        refreshToken,
         userId: user._id.toString(),
         email: user.email,
         firstName: user.firstName,
@@ -357,7 +358,18 @@ app.post('/login', async (req, res) => {
     }
   });
 
-
+// POST /refreshToken — exchange a valid refresh token for a new access token
+app.post('/refreshToken', async (req, res) => {
+  const { refreshToken } = req.body || {};
+  if (!refreshToken) return res.status(400).json({ error: 'refreshToken required' });
+  try {
+    const payload = jwt.verify(refreshToken, REFRESH_SECRET);
+    const token = signAccessToken(payload.userId);
+    return res.json({ token });
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired refresh token' });
+  }
+});
 
 
 

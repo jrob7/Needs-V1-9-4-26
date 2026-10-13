@@ -35,7 +35,7 @@ export const UserProvider = ({ children }) => {
         if (userId) {
           await AuthStorage.setItem('userId', userId);
         } else {
-          await AuthStorage.multiRemove(['userId', 'authToken', 'accountType', 'businessType']);
+          await AuthStorage.multiRemove(['userId', 'authToken', 'refreshToken', 'accountType', 'businessType']);
           setUserProfile(null);
           setAccountType(null);
           setBusinessType(null);

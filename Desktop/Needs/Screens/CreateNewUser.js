@@ -44,6 +44,7 @@ function CreateNewUser({ onLoginSuccess, onCancel }) {
         return;
       }
       if (data.token) await AuthStorage.setItem('authToken', data.token);
+      if (data.refreshToken) await AuthStorage.setItem('refreshToken', data.refreshToken);
       setUserId(id);
       setAccountType(data.accountType || 'individual');
       setBusinessType(data.businessType || null);
@@ -250,6 +251,7 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
       }
       const data = await response.json();
       if (data.token) await AuthStorage.setItem('authToken', data.token);
+      if (data.refreshToken) await AuthStorage.setItem('refreshToken', data.refreshToken);
       const newId = data._id?.toString?.() || data.userId;
       if (newId) {
         setUserId(newId);

@@ -173,6 +173,7 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
         if (userData.token) {
           createdToken = userData.token;
           await AuthStorage.setItem('authToken', createdToken);
+          if (userData.refreshToken) await AuthStorage.setItem('refreshToken', userData.refreshToken);
         }
         setUserId(effectiveUserId);
         setAccountType(pendingAccount.accountType);

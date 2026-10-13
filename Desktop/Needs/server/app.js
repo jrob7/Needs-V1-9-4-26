@@ -602,6 +602,14 @@ const result = hydrated.map(n => ({
   initialMatchNames: n.initialMatchNames || [],
   shareable: !!n.shareable,
   sharedWith: n.sharedWith || [],
+  orgName: n.orgName || null,
+  requestType: n.requestType || null,
+  isVolunteer: n.isVolunteer ?? null,
+  isSupplies: n.isSupplies ?? null,
+  volunteersNeeded: n.volunteersNeeded || null,
+  eventDate: n.eventDate || null,
+  eventTime: n.eventTime || null,
+  supplies: n.supplies || [],
 }));
 
 res.status(200).json(result);
@@ -4307,6 +4315,21 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
     const { text, shareable, requestType, volunteersNeeded, eventDate, eventTime, supplies } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });
 
+    // Resolve the org's display name once at creation — check Nonprofits collection first
+    const orgUser = await db.collection('Users').findOne(
+      { _id: new ObjectId(orgId) },
+      { projection: { firstName: 1, lastName: 1, organization: 1, businessType: 1, profilePicture: 1 } }
+    );
+    let orgName = orgUser?.organization || '';
+    if (!orgName && orgUser?.businessType === 'nonprofit') {
+      const npoDoc = await db.collection('Nonprofits').findOne({ userId: new ObjectId(orgId) });
+      orgName = npoDoc?.orgName || '';
+    }
+    if (!orgName) {
+      orgName = [orgUser?.firstName, orgUser?.lastName].filter(Boolean).join(' ') || 'An organization';
+    }
+    console.log(`[POST /orgBroadcast] orgId=${orgId} orgName=${orgName}`);
+
     // Save as a NeedRequest — always connections-only
     const needDoc = {
       searchText: text,
@@ -4316,6 +4339,7 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
       shareable: !!shareable,
       sharedWith: [],
       userId: orgId,
+      orgName,   // saved at creation so display is consistent regardless of profile changes
       createdAt: new Date(),
       status: 'active',
       // Structured classification fields
@@ -4336,12 +4360,6 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
         $or: [{ requesterId: orgId }, { targetId: orgId }],
         status: 'connected',
       }).toArray();
-
-      const orgUser = await db.collection('Users').findOne(
-        { _id: new ObjectId(orgId) },
-        { projection: { firstName: 1, lastName: 1, organization: 1 } }
-      );
-      const orgName = orgUser?.organization || [orgUser?.firstName, orgUser?.lastName].filter(Boolean).join(' ') || 'An organization';
 
       const notifications = conns.map(c => {
         const recipientId = c.requesterId === orgId ? c.targetId : c.requesterId;

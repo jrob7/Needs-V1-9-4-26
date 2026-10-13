@@ -246,9 +246,13 @@ const SingleItemView = ({ route }) => {
     setSubmitting(false);
   };
 
-  const creatorName = userProfile
-    ? userProfile.organization || userProfile.displayName || [userProfile.firstName, userProfile.lastName].filter(Boolean).join(' ') || userProfile.name || 'Anonymous'
-    : null;
+  // For org broadcasts, use the name baked into the need doc at creation time —
+  // avoids the getUserDetails lookup chain giving a wrong result.
+  const creatorName = isOrgBroadcast && item?.orgName
+    ? item.orgName
+    : userProfile
+      ? userProfile.organization || userProfile.displayName || [userProfile.firstName, userProfile.lastName].filter(Boolean).join(' ') || userProfile.name || 'Anonymous'
+      : null;
 
   const creatorPic = userProfile
     ? resolveImg(userProfile.profilePicture || userProfile.profileImageUrl || userProfile.profileImage || userProfile.logo)

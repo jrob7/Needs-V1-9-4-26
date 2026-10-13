@@ -224,8 +224,9 @@ export default function NeedInquiryView() {
               const u = await uRes.json();
               enriched.firstName = u?.firstName || '';
               enriched.lastName  = u?.lastName  || '';
-              enriched.creatorName = u?.organization || u?.displayName
-                || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || '';
+              enriched.creatorName = (n.needType === 'org_broadcast' && n.orgName)
+                ? n.orgName
+                : (u?.organization || u?.displayName || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || '');
               const rawPic =
                 u?.profilePicture || u?.profileImageUrl || u?.profileImage ||
                 u?.logo || u?.image || (Array.isArray(u?.images) ? u.images[0] : null) || null;

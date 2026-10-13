@@ -246,10 +246,10 @@ const SingleItemView = ({ route }) => {
     setSubmitting(false);
   };
 
-  // For org broadcasts, use the name baked into the need doc at creation time —
-  // avoids the getUserDetails lookup chain giving a wrong result.
-  const creatorName = isOrgBroadcast && item?.orgName
-    ? item.orgName
+  // For org broadcasts: prefer displayName from getUserDetails (freshly resolved via Nonprofits lookup)
+  // over the name baked into the need doc, which may be a stale personal-name fallback.
+  const creatorName = isOrgBroadcast
+    ? (userProfile?.displayName || item?.orgName || userProfile?.organization || [userProfile?.firstName, userProfile?.lastName].filter(Boolean).join(' ') || userProfile?.name || 'Anonymous')
     : userProfile
       ? userProfile.organization || userProfile.displayName || [userProfile.firstName, userProfile.lastName].filter(Boolean).join(' ') || userProfile.name || 'Anonymous'
       : null;

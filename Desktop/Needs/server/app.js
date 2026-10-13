@@ -4353,20 +4353,10 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
     const { text, shareable, requestType, volunteersNeeded, eventDate, eventTime, supplies } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });
 
-    // Resolve the org's display name once at creation — check Nonprofits collection first
-    const orgUser = await db.collection('Users').findOne(
-      { _id: new ObjectId(orgId) },
-      { projection: { firstName: 1, lastName: 1, organization: 1, businessType: 1, profilePicture: 1 } }
-    );
-    let orgName = orgUser?.organization || '';
-    if (!orgName && orgUser?.businessType === 'nonprofit') {
-      const npoDoc = await db.collection('Nonprofits').findOne({ userId: new ObjectId(orgId) });
-      orgName = npoDoc?.orgName || '';
-    }
-    if (!orgName) {
-      orgName = [orgUser?.firstName, orgUser?.lastName].filter(Boolean).join(' ') || 'An organization';
-    }
-    console.log(`[POST /orgBroadcast] orgId=${orgId} orgName=${orgName}`);
+    // Resolve the org's display name using the same resolveDisplayName path used everywhere else
+    const orgUser = await db.collection('Users').findOne({ _id: new ObjectId(orgId) });
+    const orgName = orgUser ? (await resolveDisplayName(orgUser)) : 'An organization';
+    console.log(`[POST /orgBroadcast] orgId=${orgId} accountType=${orgUser?.accountType} businessType=${orgUser?.businessType} organization="${orgUser?.organization}" orgName="${orgName}"`);
 
     // Save as a NeedRequest — always connections-only
     const needDoc = {

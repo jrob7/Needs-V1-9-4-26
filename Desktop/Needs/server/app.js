@@ -2469,6 +2469,13 @@ app.post('/createNonprofit', requireAuth, async (req, res) => {
     const result = await database.collection('Nonprofits').insertOne(payload);
     console.log('✅ Nonprofit created:', result.insertedId);
     await setProfilePictureIfMissing(payload.userId, payload.logoUrl);
+    // Stamp orgName onto the Users doc so getUserDetails always returns the correct name
+    if (payload.orgName && ObjectId.isValid(payload.userId)) {
+      await database.collection('Users').updateOne(
+        { _id: payload.userId },
+        { $set: { organization: payload.orgName } }
+      );
+    }
     res.json({ success: true, _id: result.insertedId.toString(), ...payload });
   } catch (err) {
     console.error('❌ /createNonprofit error:', err);
@@ -2503,10 +2510,41 @@ app.put('/nonprofits/:id', requireAuth, async (req, res) => {
     );
     if (result.matchedCount === 0) return res.status(404).json({ error: 'Nonprofit not found' });
     await setProfilePictureIfMissing(userId, updates.logoUrl);
+    // Keep Users.organization in sync so getUserDetails always returns the correct name
+    if (updates.orgName) {
+      const uid = userId || req.userId;
+      if (uid && ObjectId.isValid(uid)) {
+        await database.collection('Users').updateOne(
+          { _id: new ObjectId(uid) },
+          { $set: { organization: updates.orgName } }
+        );
+      }
+    }
     res.json({ success: true, _id: id, ...updates });
   } catch (err) {
     console.error('❌ PUT /nonprofits/:id error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /backfillNonprofitNames — one-time admin fix: copy orgName from Nonprofits → Users.organization
+app.post('/backfillNonprofitNames', requireAuth, async (req, res) => {
+  try {
+    const npos = await database.collection('Nonprofits').find({ orgName: { $exists: true } }).toArray();
+    let updated = 0;
+    for (const npo of npos) {
+      if (!npo.orgName || !npo.userId) continue;
+      const uid = ObjectId.isValid(npo.userId) ? npo.userId : null;
+      if (!uid) continue;
+      const r = await database.collection('Users').updateOne(
+        { _id: uid, $or: [{ organization: { $exists: false } }, { organization: '' }, { organization: null }] },
+        { $set: { organization: npo.orgName } }
+      );
+      if (r.modifiedCount) updated++;
+    }
+    res.json({ success: true, updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

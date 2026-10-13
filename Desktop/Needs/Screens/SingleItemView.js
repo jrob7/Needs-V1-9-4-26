@@ -456,22 +456,31 @@ const SingleItemView = ({ route }) => {
                   </View>
                   {(responseData.supplyList || []).length > 0 && (
                     <View style={styles.dashboardTableHeader}>
-                      <Text style={[styles.dashboardColHeader, { flex: 1.4 }]}>Name</Text>
-                      <Text style={[styles.dashboardColHeader, { flex: 2 }]}>Item / Qty</Text>
-                      <Text style={[styles.dashboardColHeader, { flex: 1.4 }]}>Delivery</Text>
+                      <Text style={[styles.dashboardColHeader, { flex: 1.3 }]}>Name</Text>
+                      <Text style={[styles.dashboardColHeader, { flex: 1.5 }]}>Item</Text>
+                      <Text style={[styles.dashboardColHeader, { flex: 0.6 }]}>Qty</Text>
+                      <Text style={[styles.dashboardColHeader, { flex: 1.3 }]}>Delivery</Text>
                     </View>
                   )}
-                  {(responseData.supplyList || []).map((s, i) => (
-                    <View key={i} style={[styles.dashboardRow, { alignItems: 'flex-start' }]}>
-                      <Text style={[styles.dashboardName, { flex: 1.4 }]}>{s.name}</Text>
-                      <Text style={[styles.dashboardRowText, { flex: 2 }]}>
-                        {s.supplies?.length > 0
-                          ? s.supplies.map(x => `${x.qty}${x.unit ? ' ' + x.unit : ''} ${x.item}`).join(', ')
-                          : 'General donation'}
-                      </Text>
-                      <Text style={[styles.dashboardRowText, { flex: 1.4 }]}>{s.whenBringing || '—'}</Text>
-                    </View>
-                  ))}
+                  {(responseData.supplyList || []).map((s, i) => {
+                    const firstSupply = s.supplies?.[0];
+                    const itemName = firstSupply ? firstSupply.item : '—';
+                    const qtyLabel = firstSupply
+                      ? `${firstSupply.qty}${firstSupply.unit ? ' ' + firstSupply.unit : ''}`
+                      : s.supplies?.length > 0 ? `${s.supplies.length}` : '—';
+                    const isGeneral = !s.supplies?.length;
+                    return (
+                      <View key={i} style={[styles.dashboardRow, { alignItems: 'flex-start' }]}>
+                        <Text style={[styles.dashboardName, { flex: 1.3 }]}>{s.name}</Text>
+                        <Text style={[styles.dashboardRowText, { flex: 1.5 }]}>
+                          {isGeneral ? 'General donation' : itemName}
+                          {s.supplies?.length > 1 ? ` +${s.supplies.length - 1}` : ''}
+                        </Text>
+                        <Text style={[styles.dashboardRowText, { flex: 0.6 }]}>{isGeneral ? '—' : qtyLabel}</Text>
+                        <Text style={[styles.dashboardRowText, { flex: 1.3 }]}>{s.whenBringing || '—'}</Text>
+                      </View>
+                    );
+                  })}
                   {(responseData.supplyList || []).length === 0 && (
                     <Text style={styles.dashboardEmpty}>No donations yet</Text>
                   )}

@@ -1622,12 +1622,21 @@ const setProfilePictureIfMissing = async (userId, candidateUrl) => {
 const resolveDisplayName = async (user) => {
   if (!user) return 'Someone';
   if (user.accountType === 'business') {
-    const collection = user.businessType === 'restaurant' ? 'Restaurants' : 'Services';
-    const listing = await database.collection(collection).findOne({ userId: user._id });
-    const name = (listing?.businessName || listing?.name || '').trim();
-    if (name) return name;
+    if (user.businessType === 'nonprofit') {
+      const uid = user._id;
+      const npo = await database.collection('Nonprofits').findOne(
+        ObjectId.isValid(uid) ? { userId: uid } : { userId: new ObjectId(String(uid)) }
+      );
+      const name = (npo?.orgName || user.organization || '').trim();
+      if (name) return name;
+    } else {
+      const col = user.businessType === 'restaurant' ? 'Restaurants' : 'Services';
+      const listing = await database.collection(col).findOne({ userId: user._id });
+      const name = (listing?.businessName || listing?.name || '').trim();
+      if (name) return name;
+    }
   }
-  return [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Someone';
+  return user.organization || [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Someone';
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

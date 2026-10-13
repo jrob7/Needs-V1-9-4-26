@@ -247,7 +247,7 @@ const SingleItemView = ({ route }) => {
   };
 
   const creatorName = userProfile
-    ? userProfile.organization || [userProfile.firstName, userProfile.lastName].filter(Boolean).join(' ') || userProfile.name || 'Anonymous'
+    ? userProfile.organization || userProfile.displayName || [userProfile.firstName, userProfile.lastName].filter(Boolean).join(' ') || userProfile.name || 'Anonymous'
     : null;
 
   const creatorPic = userProfile

@@ -92,6 +92,36 @@ async function createCalendarEvent(tokens, appointment) {
   }
 }
 
+// ── Create a calendar event for a supply donation drop-off ───────────────────
+// Takes an ISO timestamp directly (no string parsing needed).
+async function createDonationCalendarEvent(tokens, { title, description, isoDate }) {
+  try {
+    const auth     = await authedClient(tokens);
+    const calendar = google.calendar({ version: 'v3', auth });
+    const start = new Date(isoDate);
+    if (isNaN(start.getTime())) return null;
+    const end = new Date(start.getTime() + 30 * 60 * 1000); // 30-min slot
+    const event = {
+      summary:     title || 'Supply Donation Drop-off',
+      description: description || '',
+      start: { dateTime: start.toISOString(), timeZone: 'America/Los_Angeles' },
+      end:   { dateTime: end.toISOString(),   timeZone: 'America/Los_Angeles' },
+      reminders: {
+        useDefault: false,
+        overrides: [
+          { method: 'popup', minutes: 60 },
+          { method: 'email', minutes: 30 },
+        ],
+      },
+    };
+    const res = await calendar.events.insert({ calendarId: 'primary', resource: event });
+    return res.data;
+  } catch (err) {
+    console.error('createDonationCalendarEvent error:', err?.message);
+    return null;
+  }
+}
+
 // ── Delete a calendar event (on appointment cancellation) ─────────────────────
 async function deleteCalendarEvent(tokens, eventId) {
   try {
@@ -186,6 +216,7 @@ module.exports = {
   exchangeCode,
   authedClient,
   createCalendarEvent,
+  createDonationCalendarEvent,
   deleteCalendarEvent,
   getBusySlots,
   getAvailableSlots,

@@ -1,6 +1,7 @@
 // Screens/SingleItemView.js
 import React, { useLayoutEffect, useEffect, useState, useCallback } from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Image, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, TextInput, ActivityIndicator, Alert, Platform } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
@@ -38,7 +39,13 @@ const SingleItemView = ({ route }) => {
   const [supplyQtys, setSupplyQtys] = useState({});         // { [item]: qty string }
   const [donateItem, setDonateItem] = useState('');
   const [donateQty, setDonateQty] = useState('');
-  const [donateWhen, setDonateWhen] = useState('');
+  const [donateDate, setDonateDate] = useState(null);   // Date object
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const formatDonateDate = (d) => d
+    ? d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    : null;
   const isOrgBroadcast = item?.needType === 'org_broadcast';
   const isMyOwnBroadcast = isOrgBroadcast && item?.userId && String(item.userId) === String(item?._currentUserId);
   console.log('[SingleItemView] needType=' + item?.needType + ' requestType=' + item?.requestType + ' isVolunteer=' + item?.isVolunteer + ' isSupplies=' + item?.isSupplies + ' isOrgBroadcast=' + isOrgBroadcast + ' isMyOwnBroadcast=' + isMyOwnBroadcast + ' userId=' + item?.userId + ' _currentUserId=' + item?._currentUserId);
@@ -151,7 +158,7 @@ const SingleItemView = ({ route }) => {
     setSubmitting(false);
   };
 
-  const submitSupplies = async (whenBringing) => {
+  const submitSupplies = async () => {
     if (!item?._id) return;
     const suppliesArr = (item.supplies || []).map(s => ({
       item: s.item,
@@ -163,7 +170,11 @@ const SingleItemView = ({ route }) => {
     try {
       await authFetch(`${NODE_API}/orgBroadcastResponse`, {
         method: 'POST',
-        body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: suppliesArr, whenBringing: whenBringing || null }),
+        body: JSON.stringify({
+          needId: String(item._id), type: 'supplies', supplies: suppliesArr,
+          whenBringing: formatDonateDate(donateDate),
+          whenBringingISO: donateDate ? donateDate.toISOString() : null,
+        }),
       });
       const r = await authFetch(`${NODE_API}/orgBroadcastResponses/${item._id}`);
       if (r.ok) setResponseData(await r.json());
@@ -179,7 +190,11 @@ const SingleItemView = ({ route }) => {
     try {
       await authFetch(`${NODE_API}/orgBroadcastResponse`, {
         method: 'POST',
-        body: JSON.stringify({ needId: String(item._id), type: 'supplies', supplies: suppliesArr, whenBringing: donateWhen.trim() || null }),
+        body: JSON.stringify({
+          needId: String(item._id), type: 'supplies', supplies: suppliesArr,
+          whenBringing: formatDonateDate(donateDate),
+          whenBringingISO: donateDate ? donateDate.toISOString() : null,
+        }),
       });
       const r = await authFetch(`${NODE_API}/orgBroadcastResponses/${item._id}`);
       if (r.ok) setResponseData(await r.json());
@@ -315,15 +330,41 @@ const SingleItemView = ({ route }) => {
                         </View>
                       ))}
                       <Text style={styles.supplyFormLabel}>When can you bring it?</Text>
-                      <TextInput
-                        style={styles.supplyFormInput}
-                        placeholder="e.g. Fri, Oct 16 at 3:00 PM"
-                        value={donateWhen}
-                        onChangeText={setDonateWhen}
-                      />
+                      <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+                        <Ionicons name="calendar-outline" size={18} color="#2563EB" />
+                        <Text style={donateDate ? styles.datePickerBtnText : styles.datePickerBtnPlaceholder}>
+                          {donateDate ? formatDonateDate(donateDate) : 'Select date & time'}
+                        </Text>
+                      </TouchableOpacity>
+                      {showDatePicker && (
+                        <DateTimePicker
+                          value={donateDate || new Date()}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          minimumDate={new Date()}
+                          onChange={(ev, selected) => {
+                            setShowDatePicker(false);
+                            if (ev.type !== 'dismissed' && selected) {
+                              setDonateDate(selected);
+                              setShowTimePicker(true);
+                            }
+                          }}
+                        />
+                      )}
+                      {showTimePicker && (
+                        <DateTimePicker
+                          value={donateDate || new Date()}
+                          mode="time"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={(ev, selected) => {
+                            setShowTimePicker(false);
+                            if (ev.type !== 'dismissed' && selected) setDonateDate(selected);
+                          }}
+                        />
+                      )}
                       <TouchableOpacity
                         style={[styles.respondBtn, { backgroundColor: '#16A34A', marginTop: 10 }]}
-                        onPress={() => submitSupplies(donateWhen)}
+                        onPress={submitSupplies}
                         disabled={submitting}
                       >
                         {submitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.respondBtnTextLight}>Confirm Donation</Text>}
@@ -348,12 +389,38 @@ const SingleItemView = ({ route }) => {
                         onChangeText={setDonateQty}
                       />
                       <Text style={styles.supplyFormLabel}>When can you bring it?</Text>
-                      <TextInput
-                        style={styles.supplyFormInput}
-                        placeholder="e.g. Fri, Oct 16 at 3:00 PM"
-                        value={donateWhen}
-                        onChangeText={setDonateWhen}
-                      />
+                      <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
+                        <Ionicons name="calendar-outline" size={18} color="#2563EB" />
+                        <Text style={donateDate ? styles.datePickerBtnText : styles.datePickerBtnPlaceholder}>
+                          {donateDate ? formatDonateDate(donateDate) : 'Select date & time'}
+                        </Text>
+                      </TouchableOpacity>
+                      {showDatePicker && (
+                        <DateTimePicker
+                          value={donateDate || new Date()}
+                          mode="date"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          minimumDate={new Date()}
+                          onChange={(ev, selected) => {
+                            setShowDatePicker(false);
+                            if (ev.type !== 'dismissed' && selected) {
+                              setDonateDate(selected);
+                              setShowTimePicker(true);
+                            }
+                          }}
+                        />
+                      )}
+                      {showTimePicker && (
+                        <DateTimePicker
+                          value={donateDate || new Date()}
+                          mode="time"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={(ev, selected) => {
+                            setShowTimePicker(false);
+                            if (ev.type !== 'dismissed' && selected) setDonateDate(selected);
+                          }}
+                        />
+                      )}
                       <TouchableOpacity
                         style={[styles.respondBtn, { backgroundColor: '#16A34A', marginTop: 10 }]}
                         onPress={submitGeneralDonation}
@@ -588,6 +655,19 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     backgroundColor: '#fff',
   },
+  datePickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#EFF6FF',
+  },
+  datePickerBtnText: { fontSize: 15, color: '#1E40AF', fontWeight: '600', flex: 1 },
+  datePickerBtnPlaceholder: { fontSize: 15, color: '#93C5FD', flex: 1 },
 
   dashboardSection: { paddingBottom: 8 },
   dashboardBlock: {

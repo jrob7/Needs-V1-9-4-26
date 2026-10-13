@@ -4364,17 +4364,65 @@ app.post('/orgBroadcastResponse', requireAuth, async (req, res) => {
   try {
     const db = client.db('Need');
     const userId = req.userId;
-    const { needId, type, volunteering, supplies, whenBringing } = req.body;
+    const { needId, type, volunteering, supplies, whenBringing, whenBringingISO } = req.body;
     if (!needId || !type) return res.status(400).json({ error: 'needId and type required' });
 
     const col = db.collection('OrgBroadcastResponses');
     await col.updateOne(
       { needId, userId, type },
-      { $set: { needId, userId, type, volunteering: !!volunteering, supplies: supplies || [], whenBringing: whenBringing || null, updatedAt: new Date() },
+      { $set: { needId, userId, type, volunteering: !!volunteering, supplies: supplies || [], whenBringing: whenBringing || null, whenBringingISO: whenBringingISO || null, updatedAt: new Date() },
         $setOnInsert: { createdAt: new Date() } },
       { upsert: true }
     );
     res.json({ success: true });
+
+    // Fire-and-forget: create Google Calendar events for supply donations with a date
+    if (type === 'supplies' && whenBringingISO) {
+      (async () => {
+        try {
+          const needDoc = await db.collection('NeedRequests').findOne(
+            ObjectId.isValid(needId) ? { _id: new ObjectId(needId) } : { _id: needId }
+          );
+          const orgUserId = needDoc?.userId;
+          const orgName = needDoc?.orgName || 'Organization';
+          const needTitle = (needDoc?.context || needDoc?.searchText || 'Broadcast').slice(0, 50);
+          const itemDesc = (supplies || []).length > 0
+            ? (supplies).map(s => `${s.qty}${s.unit ? ' ' + s.unit : ''} ${s.item}`).join(', ')
+            : 'General donation';
+
+          // Look up donor name
+          const donorDoc = await db.collection('Users').findOne(
+            { _id: new ObjectId(userId) },
+            { projection: { firstName: 1, lastName: 1, organization: 1, googleCalendar: 1 } }
+          );
+          const donorName = donorDoc?.organization || [donorDoc?.firstName, donorDoc?.lastName].filter(Boolean).join(' ') || 'Donor';
+
+          // Calendar event for the org (they receive the drop-off)
+          if (orgUserId && ObjectId.isValid(orgUserId)) {
+            const orgDoc = await db.collection('Users').findOne(
+              { _id: new ObjectId(orgUserId) },
+              { projection: { googleCalendar: 1 } }
+            );
+            if (orgDoc?.googleCalendar?.tokens) {
+              await gcal.createDonationCalendarEvent(orgDoc.googleCalendar.tokens, {
+                title: `Donation Drop-off: ${donorName} – ${itemDesc.slice(0, 40)}`,
+                description: `${donorName} is bringing: ${itemDesc}\nFor: ${needTitle}`,
+                isoDate: whenBringingISO,
+              });
+            }
+          }
+
+          // Calendar event for the donor (reminder to bring items)
+          if (donorDoc?.googleCalendar?.tokens) {
+            await gcal.createDonationCalendarEvent(donorDoc.googleCalendar.tokens, {
+              title: `Supply Donation Drop-off – ${orgName}`,
+              description: `Bringing: ${itemDesc}\nFor: ${needTitle}`,
+              isoDate: whenBringingISO,
+            });
+          }
+        } catch (e) { console.error('Donation calendar event error:', e?.message); }
+      })();
+    }
   } catch (err) {
     console.error('POST /orgBroadcastResponse error:', err);
     res.status(500).json({ error: 'Internal Server Error' });

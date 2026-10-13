@@ -7,7 +7,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AuthStorage from '../server/authStorage';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
 import { NODE_API } from '../config';
@@ -172,7 +172,7 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
         effectiveUserId = (userData._id || '').toString();
         if (userData.token) {
           createdToken = userData.token;
-          await AsyncStorage.setItem('authToken', createdToken);
+          await AuthStorage.setItem('authToken', createdToken);
         }
         setUserId(effectiveUserId);
         setAccountType(pendingAccount.accountType);

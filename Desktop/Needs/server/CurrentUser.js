@@ -1,6 +1,6 @@
 // server/CurrentUser.js
 import React, { createContext, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AuthStorage from './authStorage';
 
 export const UserContext = createContext();
 
@@ -17,13 +17,13 @@ export const UserProvider = ({ children }) => {
   useEffect(() => {
     (async () => {
       try {
-        const stored = await AsyncStorage.getItem('userId');
+        const stored = await AuthStorage.getItem('userId');
         if (stored) setUserId(stored);
-        const storedType = await AsyncStorage.getItem('accountType');
+        const storedType = await AuthStorage.getItem('accountType');
         if (storedType) setAccountType(storedType);
-        const storedBizType = await AsyncStorage.getItem('businessType');
+        const storedBizType = await AuthStorage.getItem('businessType');
         if (storedBizType) setBusinessType(storedBizType);
-        // authToken is stored separately — authFetch reads it directly from AsyncStorage
+        // authToken is stored separately — authFetch reads it directly from AuthStorage
       } catch {}
     })();
   }, []);
@@ -33,9 +33,9 @@ export const UserProvider = ({ children }) => {
     (async () => {
       try {
         if (userId) {
-          await AsyncStorage.setItem('userId', userId);
+          await AuthStorage.setItem('userId', userId);
         } else {
-          await AsyncStorage.multiRemove(['userId', 'authToken', 'accountType', 'businessType']);
+          await AuthStorage.multiRemove(['userId', 'authToken', 'accountType', 'businessType']);
           setUserProfile(null);
           setAccountType(null);
           setBusinessType(null);
@@ -48,8 +48,8 @@ export const UserProvider = ({ children }) => {
   useEffect(() => {
     (async () => {
       try {
-        if (accountType) await AsyncStorage.setItem('accountType', accountType);
-        if (businessType) await AsyncStorage.setItem('businessType', businessType);
+        if (accountType) await AuthStorage.setItem('accountType', accountType);
+        if (businessType) await AuthStorage.setItem('businessType', businessType);
       } catch {}
     })();
   }, [accountType, businessType]);

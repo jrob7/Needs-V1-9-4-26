@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AuthStorage from '../server/authStorage';
 import * as ImagePicker from 'expo-image-picker';
 import { UserContext } from '../server/CurrentUser';
 import UploadService, { SERVICE_CATEGORY_GROUPS } from './UploadService';
@@ -43,7 +43,7 @@ function CreateNewUser({ onLoginSuccess, onCancel }) {
         Alert.alert('Error', 'Login succeeded but user id missing.');
         return;
       }
-      if (data.token) await AsyncStorage.setItem('authToken', data.token);
+      if (data.token) await AuthStorage.setItem('authToken', data.token);
       setUserId(id);
       setAccountType(data.accountType || 'individual');
       setBusinessType(data.businessType || null);
@@ -249,7 +249,7 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
         throw new Error(err?.error || 'Failed to create user');
       }
       const data = await response.json();
-      if (data.token) await AsyncStorage.setItem('authToken', data.token);
+      if (data.token) await AuthStorage.setItem('authToken', data.token);
       const newId = data._id?.toString?.() || data.userId;
       if (newId) {
         setUserId(newId);
@@ -266,7 +266,7 @@ function CreateAccountModal({ onClose, onLoginSuccess }) {
   };
 
   const finishBusinessSignup = async (createdUserId, token) => {
-    if (token) await AsyncStorage.setItem('authToken', token);
+    if (token) await AuthStorage.setItem('authToken', token);
     Alert.alert('🎉 All set!', 'Your business profile is live.');
     onLoginSuccess?.(createdUserId);
     onClose();

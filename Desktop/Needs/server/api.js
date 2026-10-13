@@ -2,10 +2,10 @@
 // Drop-in fetch wrapper that automatically attaches the JWT auth token.
 // Usage: import { authFetch } from '../server/api';
 //        authFetch(`${NODE_API}/sendMessage`, { method: 'POST', body: JSON.stringify({...}) })
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AuthStorage from './authStorage';
 
 export async function authFetch(url, options = {}) {
-  const token = await AsyncStorage.getItem('authToken');
+  const token = await AuthStorage.getItem('authToken');
   const headers = {
     'Content-Type': 'application/json',
     ...options.headers,
@@ -22,7 +22,7 @@ import axios from 'axios';
 const api = axios.create();
 
 api.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem('authToken');
+  const token = await AuthStorage.getItem('authToken');
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -31,7 +31,7 @@ api.interceptors.response.use(
   res => res,
   async err => {
     if (err.response?.status === 401) {
-      await AsyncStorage.multiRemove(['authToken', 'userId', 'accountType', 'businessType']);
+      await AuthStorage.multiRemove(['authToken', 'userId', 'accountType', 'businessType']);
     }
     return Promise.reject(err);
   }

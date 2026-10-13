@@ -4472,8 +4472,12 @@ app.get('/orgBroadcastResponses/:needId', requireAuth, async (req, res) => {
     const userIds = [...new Set(responses.map(r => r.userId).filter(Boolean))];
     const userObjs = userIds.map(id => { try { return new ObjectId(id); } catch { return null; } }).filter(Boolean);
     const usersRaw = userObjs.length ? await db.collection('Users').find({ _id: { $in: userObjs } }, { projection: { firstName: 1, lastName: 1, organization: 1, name: 1 } }).toArray() : [];
+    // Volunteers are people — prefer personal name (firstName + lastName) over org name.
     const userMap = {};
-    usersRaw.forEach(u => { userMap[String(u._id)] = u.organization || [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || 'Anonymous'; });
+    usersRaw.forEach(u => {
+      const personal = [u.firstName, u.lastName].filter(Boolean).join(' ');
+      userMap[String(u._id)] = personal || u.organization || u.name || 'Anonymous';
+    });
 
     const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
 

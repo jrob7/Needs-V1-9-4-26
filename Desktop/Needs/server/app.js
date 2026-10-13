@@ -387,8 +387,7 @@ app.post('/login', async (req, res) => {
               // Business accounts have no firstName/lastName — resolve their
               // listing's name so callers don't have to special-case this.
               user.displayName = await resolveDisplayName(user);
-
-              console.log('User details retrieved:', user);
+              console.log(`[getUserDetails] userId=${userId} accountType="${user.accountType}" businessType="${user.businessType}" organization="${user.organization}" resolvedDisplayName="${user.displayName}"`);
 
               // Respond with all user details dynamically
               res.json(user);
@@ -1635,6 +1634,7 @@ const resolveDisplayName = async (user) => {
       const npo = await database.collection('Nonprofits').findOne(
         ObjectId.isValid(uid) ? { userId: uid } : { userId: new ObjectId(String(uid)) }
       );
+      console.log(`[resolveDisplayName] nonprofit uid="${uid}" npoFound=${!!npo} npo.orgName="${npo?.orgName}" npo.userId="${npo?.userId}"`);
       const name = (npo?.orgName || user.organization || '').trim();
       if (name) return name;
     } else {
@@ -1644,7 +1644,9 @@ const resolveDisplayName = async (user) => {
       if (name) return name;
     }
   }
-  return user.organization || [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Someone';
+  const fallback = user.organization || [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Someone';
+  console.log(`[resolveDisplayName] fallback for userId="${user._id}" accountType="${user.accountType}" → "${fallback}"`);
+  return fallback;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4353,24 +4355,35 @@ app.post('/orgBroadcast', requireAuth, async (req, res) => {
     const { text, shareable, requestType, volunteersNeeded, eventDate, eventTime, supplies } = req.body;
     if (!text) return res.status(400).json({ error: 'text required' });
 
-    // Resolve the org's display name at creation time so it's stable on the need doc
+    // ── STEP 1: find the user doc
     const orgUser = await db.collection('Users').findOne(
       { _id: new ObjectId(orgId) },
       { projection: { firstName: 1, lastName: 1, organization: 1, accountType: 1, businessType: 1 } }
     );
+    console.log(`[orgBroadcast STEP1] orgUser found=${!!orgUser} accountType="${orgUser?.accountType}" businessType="${orgUser?.businessType}" organization="${orgUser?.organization}" firstName="${orgUser?.firstName}" lastName="${orgUser?.lastName}"`);
+
+    // ── STEP 2: try Users.organization first
     let orgName = orgUser?.organization || '';
-    // For nonprofit accounts: check Nonprofits collection (try both ObjectId and string userId)
-    if (!orgName && (orgUser?.accountType === 'business' || orgUser?.businessType === 'nonprofit')) {
+    console.log(`[orgBroadcast STEP2] orgName from organization field: "${orgName}"`);
+
+    // ── STEP 3: for business/nonprofit accounts, check Nonprofits collection
+    const shouldCheckNpo = !orgName && (orgUser?.accountType === 'business' || orgUser?.businessType === 'nonprofit');
+    console.log(`[orgBroadcast STEP3] shouldCheckNpo=${shouldCheckNpo}`);
+    if (shouldCheckNpo) {
       const npoDoc = await db.collection('Nonprofits').findOne({
         $or: [
           { userId: new ObjectId(orgId) },
           { userId: orgId },
         ],
       });
+      console.log(`[orgBroadcast STEP3] npoDoc found=${!!npoDoc} orgName="${npoDoc?.orgName}" npoDoc.userId="${npoDoc?.userId}"`);
       orgName = npoDoc?.orgName || '';
     }
+
+    // ── STEP 4: last resort — personal name
+    console.log(`[orgBroadcast STEP4] orgName after Nonprofits check: "${orgName}"`);
     if (!orgName) orgName = [orgUser?.firstName, orgUser?.lastName].filter(Boolean).join(' ') || 'An organization';
-    console.log(`[POST /orgBroadcast] orgId=${orgId} accountType=${orgUser?.accountType} businessType=${orgUser?.businessType} organization="${orgUser?.organization}" npoOrgName="${orgName}"`);
+    console.log(`[orgBroadcast FINAL] resolved orgName="${orgName}"`);
 
     // Save as a NeedRequest — always connections-only
     const needDoc = {

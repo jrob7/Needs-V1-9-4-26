@@ -224,10 +224,10 @@ export default function NeedInquiryView() {
               const u = await uRes.json();
               enriched.firstName = u?.firstName || '';
               enriched.lastName  = u?.lastName  || '';
+              if (n.needType === 'org_broadcast') {
+                console.log(`[Tab2 enrich] org_broadcast _id=${n._id} userId=${n.userId} n.orgName="${n.orgName}" u.displayName="${u?.displayName}" u.organization="${u?.organization}" u.firstName="${u?.firstName}" u.lastName="${u?.lastName}"`);
+              }
               enriched.creatorName = n.needType === 'org_broadcast'
-                // For org broadcasts: prefer the freshly-resolved displayName from the server
-                // (via resolveDisplayName/Nonprofits lookup) over the name baked into the need doc,
-                // which may have been stamped with a personal-name fallback if the profile wasn't found.
                 ? (u?.displayName || n.orgName || u?.organization || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || '')
                 : (u?.organization || u?.displayName || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || '');
               const rawPic =

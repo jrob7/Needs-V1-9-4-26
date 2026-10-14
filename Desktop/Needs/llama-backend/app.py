@@ -372,9 +372,9 @@ def classify_org_broadcast():
         return jsonify({"isService": True, "requestType": "service", "isVolunteer": False, "isSupplies": False})
 
     is_volunteer = _ask_binary(
-        "Does this request need volunteers or people to show up and help?", text)
+        "Does this request need volunteers to physically show up and perform tasks or work — such as helping at an event, serving food, building, cleaning, or staffing? Do NOT answer YES just because someone needs to drop off or donate items.", text)
     is_supplies = _ask_binary(
-        "Does this request need people to donate or bring physical items, goods, toys, food, clothing, or any other tangible things?", text)
+        "Does this request need people to donate or bring physical items, goods, toys, food, water, clothing, or any other tangible things?", text)
 
     if not is_volunteer and not is_supplies:
         is_volunteer = True

@@ -193,8 +193,18 @@ def enhance_need_description():
                 return True
         return False
 
+    # Community/nonprofit phrases — override food keywords so "free meals",
+    # "soup kitchen", "food pantry" etc. don't route to restaurant matching.
+    COMMUNITY_OVERRIDE = [
+        "food bank", "food pantry", "soup kitchen", "free meal", "free meals",
+        "free food", "food assistance", "food drive", "food donation",
+        "help with groceries", "grocery assistance", "homeless", "shelter",
+        "nonprofit", "charity", "community resource", "rehab", "addiction",
+    ]
+    if any(w in combined_lower for w in COMMUNITY_OVERRIDE):
+        domain = "unclear"
     # Step 1: service keyword fast-path
-    if is_service_description(labels, user_text):
+    elif is_service_description(labels, user_text):
         domain = "service"
     # Step 2: food keyword fast-path (word-boundary safe)
     elif _food_matches(combined_lower):

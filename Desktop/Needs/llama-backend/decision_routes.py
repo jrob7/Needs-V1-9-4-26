@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from mistral_engine import run_mistral
+from ai_service import generate_response
 import json
 import logging
 import re
@@ -110,9 +110,9 @@ CLASSIFICATION RULES:
 - Return ONLY valid JSON with no extra text: {"action": "<ACTION>"}
 """.strip()
 
-    user_prompt = f'User said: "{user_reply}". Respond ONLY with JSON.'
+    combined_prompt = f"{system_prompt}\n\nUser said: \"{user_reply}\". Respond ONLY with JSON."
 
-    raw_output = run_mistral(system_prompt, user_prompt)
+    raw_output = generate_response(combined_prompt)
     logging.info(f"🧪 Raw Mistral Output: {raw_output}")
 
     # Clean common contamination

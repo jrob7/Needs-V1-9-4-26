@@ -116,8 +116,22 @@ SERVICE_HINT_WORDS = [
     "food bank","food assistance","food pantry","church","ministry","nonprofit","charity",
 ]
 
+# Community/nonprofit phrases that should NEVER be routed to restaurant matching,
+# even though they contain food-adjacent words.
+COMMUNITY_OVERRIDE_WORDS = [
+    "food bank", "food pantry", "soup kitchen", "free meal", "free meals",
+    "free food", "food assistance", "food drive", "food donation",
+    "help with groceries", "need groceries", "grocery assistance",
+    "homeless shelter", "homeless", "transitional housing", "shelter",
+    "nonprofit", "charity", "donation drive", "community resource",
+    "rehab", "addiction", "recovery program",
+]
+
 def detect_need_type(text: str) -> str:
     t = (text or "").lower()
+    # Community phrases override food keywords — route to service/unclear
+    if any(w in t for w in COMMUNITY_OVERRIDE_WORDS):
+        return "unclear"
     # Fast path: keyword match (no LLM call needed)
     if any(w in t for w in SERVICE_HINT_WORDS):
         return "service"
@@ -372,9 +386,9 @@ def classify_org_broadcast():
         return jsonify({"isService": True, "requestType": "service", "isVolunteer": False, "isSupplies": False})
 
     is_volunteer = _ask_binary(
-        "Does this request need volunteers to physically show up and perform tasks or work — such as helping at an event, serving food, building, cleaning, or staffing? Do NOT answer YES just because someone needs to drop off or donate items.", text)
+        "Does this request need volunteers to physically show up and perform tasks or work — such as helping at an event, serving food, building, cleaning, or staffing? Answer YES if the text asks for people, helpers, volunteers, or anyone to show up and help in person. Do NOT answer YES just because someone needs to drop off or donate items.", text)
     is_supplies = _ask_binary(
-        "Does this request need people to donate or bring physical items, goods, toys, food, water, clothing, or any other tangible things?", text)
+        "Does this request need people to donate or bring physical items, goods, toys, food, water, clothing, supplies, or any other tangible things? Answer YES even if the request ALSO asks for volunteers.", text)
 
     if not is_volunteer and not is_supplies:
         is_volunteer = True

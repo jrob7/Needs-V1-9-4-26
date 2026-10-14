@@ -883,13 +883,21 @@ export default function SearchScreen() {
         }
       } catch (e) { console.log('[sendQuery] classify error', e); }
       setConversation(prev => prev.filter(m => !m.aiThinking));
-      setConversation(prev => [...prev, {
-        broadcastPreview: true,
-        text: originalText,
-        connCount,
-        ...classification,
-      }]);
-      return;
+
+      // Service requests (plumber, electrician, etc.) don't belong in the
+      // broadcast flow — fall through to regular service matching instead.
+      if (classification.isService) {
+        console.log('[sendQuery] service request detected → falling through to regular need path');
+        // continue to regular need path below
+      } else {
+        setConversation(prev => [...prev, {
+          broadcastPreview: true,
+          text: originalText,
+          connCount,
+          ...classification,
+        }]);
+        return;
+      }
     }
     console.log('[sendQuery] → REGULAR NEED path (not org broadcast)');
 

@@ -361,6 +361,16 @@ def classify_org_broadcast():
     if not text:
         return jsonify({"error": "text required"}), 400
 
+    # Check first whether this is a paid professional service request.
+    # If so, skip the broadcast flow entirely — the regular service-matching
+    # flow handles it.
+    is_service = _ask_binary(
+        "Is this a request to hire or find a paid professional such as a plumber, electrician, contractor, lawyer, doctor, cleaner, technician, or other skilled trade or service worker?",
+        text)
+    if is_service:
+        logging.info(f"[classify-org-broadcast] detected service request, returning isService=True")
+        return jsonify({"isService": True, "requestType": "service", "isVolunteer": False, "isSupplies": False})
+
     is_volunteer = _ask_binary(
         "Does this request need volunteers or people to show up and help?", text)
     is_supplies = _ask_binary(
@@ -371,7 +381,7 @@ def classify_org_broadcast():
 
     request_type = "both" if (is_volunteer and is_supplies) else ("volunteer" if is_volunteer else "supplies")
 
-    result = {"requestType": request_type, "isVolunteer": is_volunteer, "isSupplies": is_supplies}
+    result = {"requestType": request_type, "isVolunteer": is_volunteer, "isSupplies": is_supplies, "isService": False}
 
     if is_volunteer:
         result["volunteersNeeded"] = _ask_number(
@@ -383,7 +393,7 @@ def classify_org_broadcast():
 
     if is_supplies:
         result["supplies"] = _ask_supplies(text)
-        if not result["eventDate"]:
+        if not result.get("eventDate"):
             result["eventDate"] = _ask_text(
                 "When are the supplies or items needed by?", text)
 

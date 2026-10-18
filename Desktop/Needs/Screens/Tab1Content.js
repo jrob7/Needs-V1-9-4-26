@@ -23,6 +23,9 @@ const screenH = Dimensions.get('window').height;
 import Svg, { Rect, G } from 'react-native-svg';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
+import * as VideoThumbnails from 'expo-video-thumbnails';
+import * as FileSystem from 'expo-file-system';
+import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 import * as Location from 'expo-location';
 import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useNavigation } from '@react-navigation/native';
@@ -43,8 +46,6 @@ const HELP_CATEGORIES = [
 ];
 
 
-const GOOGLE_VISION_API_KEY = 'AIzaSyDcozWA1GD5WpZUONt7V7lscHn80PddUps';
-const GOOGLE_VISION_URL = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`;
 
 const TypingBubble = () => {
   const dot1 = useState(new Animated.Value(0))[0];
@@ -145,6 +146,8 @@ export default function SearchScreen() {
   const [pendingBroadcast, setPendingBroadcast] = useState(null); // { text, connCount }
 
   const [enhancing, setEnhancing] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   // ── Location capture ──────────────────────────────────────────────────────
   // Persists for the session; { lat, lng } from GPS or { city } from user text.
@@ -346,38 +349,14 @@ export default function SearchScreen() {
     return null;
   };
 
-  const analyzeImageWithVisionAPI = async (base64Image) => {
+  const analyzeImageWithPixtral = async (base64Image) => {
     try {
-      const response = await fetch(GOOGLE_VISION_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [{
-            image: { content: base64Image },
-            features: [
-              { type: 'LABEL_DETECTION', maxResults: 5 },
-              { type: 'WEB_DETECTION' },
-              { type: 'LOGO_DETECTION' },
-            ],
-          }],
-        }),
-      });
-      const data = await response.json();
-      const labels = data.responses?.[0]?.labelAnnotations || [];
-      const web = data.responses?.[0]?.webDetection || {};
-      const logo = data.responses?.[0]?.logoAnnotations?.[0]?.description || '';
-      const bestGuess = web.bestGuessLabels?.[0]?.label || '';
-
-      // LABEL_DETECTION identifies the actual object (e.g. "Tire"); WEB_DETECTION's
-      // bestGuess is a reverse-image-search caption and is unreliable for close-up crops.
-      const topLabels = labels.slice(0, 3).map((l) => l.description).join(' ');
-
-      const rawResult = [topLabels || bestGuess, logo].filter(Boolean).join(" ");
-      const cleanedResult = scrubRetailTerms(rawResult);
-      console.log("✅ Vision Cleaned:", cleanedResult);
-      return cleanedResult;
+      const resp = await axios.post(`${FLASK_API}/ai/analyzeImage`, { base64: base64Image });
+      const description = resp.data?.description || '';
+      console.log('✅ Pixtral description:', description.slice(0, 80));
+      return description;
     } catch (error) {
-      console.error('🚨 Vision API error:', error);
+      console.error('🚨 Pixtral error:', error);
       return '';
     }
   };
@@ -387,7 +366,7 @@ export default function SearchScreen() {
     if (!permission.granted) { alert('Camera roll access is required!'); return; }
     const picker = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.All,
-      allowsEditing: false, // crop editor on web requires an extra confirm step; skip it
+      allowsEditing: false,
       quality: 1, base64: true,
     });
     console.log('📷 [PICKER] canceled:', picker.canceled, '| assets:', picker.assets?.length, '| asset0:', JSON.stringify({ type: picker.assets?.[0]?.type, uri: picker.assets?.[0]?.uri?.slice(0,60), hasBase64: !!picker.assets?.[0]?.base64 }));
@@ -398,6 +377,81 @@ export default function SearchScreen() {
       setMedia(asset);
       wasAutoEnhancedRef.current = false;
 
+      if (asset.type === 'video') {
+        if (inputRef.current.trim()) return;
+        if (imageEnhanceTimeoutRef.current) clearTimeout(imageEnhanceTimeoutRef.current);
+        imageEnhanceTimeoutRef.current = setTimeout(async () => {
+          if (inputRef.current.trim()) return;
+          if (!mediaRef.current || mediaRef.current.uri !== asset.uri) return;
+          try {
+            setEnhancing(true);
+
+            // Check file size before reading (~25MB limit for Voxtral)
+            const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+            const videoTooLarge = fileInfo.size && fileInfo.size > 25 * 1024 * 1024;
+
+            // Run keyframe visual analysis + video audio transcription in parallel
+            const mimeType = asset.uri.toLowerCase().includes('.mov') ? 'video/quicktime' : 'video/mp4';
+
+            const [thumbResult, audioResult] = await Promise.allSettled([
+              // Pixtral: extract keyframe → visual description
+              (async () => {
+                const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(asset.uri, { time: 1000 });
+                const thumbResp = await fetch(thumbUri);
+                const thumbBlob = await thumbResp.blob();
+                const thumbB64 = await new Promise((res, rej) => {
+                  const reader = new FileReader();
+                  reader.onload = () => res(reader.result.split(',')[1]);
+                  reader.onerror = rej;
+                  reader.readAsDataURL(thumbBlob);
+                });
+                return analyzeImageWithPixtral(thumbB64);
+              })(),
+              // Voxtral: read video file → transcribe spoken audio
+              videoTooLarge ? Promise.reject(new Error('video too large')) : (async () => {
+                const videoB64 = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: FileSystem.EncodingType.Base64,
+                });
+                const resp = await axios.post(`${FLASK_API}/ai/transcribeVideo`, {
+                  base64: videoB64,
+                  mimeType,
+                });
+                return resp.data?.transcript || '';
+              })(),
+            ]);
+
+            const visualDesc = thumbResult.status === 'fulfilled' ? thumbResult.value : '';
+            const spokenText = audioResult.status === 'fulfilled' ? audioResult.value : '';
+
+            if (audioResult.status === 'rejected' && !videoTooLarge) {
+              console.log('⚠️ Video audio transcription failed:', audioResult.reason?.message);
+            }
+
+            // Spoken words are more specific than visual; use them as primary userText
+            let finalDesc = spokenText || visualDesc;
+            try {
+              const enhResp = await axios.post(`${FLASK_API}/ai/enhanceNeedDescription`, {
+                labels: visualDesc,
+                userText: spokenText,
+              });
+              const desc = enhResp.data?.description;
+              if (desc && desc.trim()) finalDesc = desc.trim();
+            } catch (e) {
+              console.log('⚠️ enhanceNeedDescription failed:', e?.message);
+            }
+            if (!inputRef.current.trim() && finalDesc) {
+              setInput(finalDesc);
+              wasAutoEnhancedRef.current = true;
+            }
+          } catch (err) {
+            console.error('🚨 Error during video analysis:', err);
+          } finally {
+            setEnhancing(false);
+          }
+        }, 500);
+        return;
+      }
+
       if (asset.type === 'image' && asset.base64) {
         if (imageEnhanceTimeoutRef.current) clearTimeout(imageEnhanceTimeoutRef.current);
 
@@ -406,11 +460,11 @@ export default function SearchScreen() {
           if (!mediaRef.current || mediaRef.current.uri !== asset.uri) return;
           try {
             setEnhancing(true);
-            const labels = await analyzeImageWithVisionAPI(asset.base64);
-            let finalDesc = labels;
+            const description = await analyzeImageWithPixtral(asset.base64);
+            let finalDesc = description;
             try {
               const enhResp = await axios.post(`${FLASK_API}/ai/enhanceNeedDescription`, {
-                labels, userText: '',
+                labels: description, userText: '',
               });
               const desc = enhResp.data?.description;
               if (desc && desc.trim()) finalDesc = desc.trim();
@@ -427,6 +481,64 @@ export default function SearchScreen() {
             setEnhancing(false);
           }
         }, 3000);
+      }
+    }
+  };
+
+  const handleVoiceRecord = async () => {
+    if (isRecording) {
+      // Stop and process
+      try {
+        await audioRecorder.stop();
+        setIsRecording(false);
+        const uri = audioRecorder.uri;
+        if (!uri) return;
+        setEnhancing(true);
+        try {
+          const audioResp = await fetch(uri);
+          const audioBlob = await audioResp.blob();
+          const audioB64 = await new Promise((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result.split(',')[1]);
+            reader.onerror = rej;
+            reader.readAsDataURL(audioBlob);
+          });
+          const mimeType = 'audio/m4a';
+          const transcriptResp = await axios.post(`${FLASK_API}/ai/transcribeAudio`, {
+            base64: audioB64, mimeType,
+          });
+          const transcript = transcriptResp.data?.transcript || '';
+          if (!transcript) return;
+          let finalDesc = transcript;
+          try {
+            const enhResp = await axios.post(`${FLASK_API}/ai/enhanceNeedDescription`, {
+              labels: '', userText: transcript,
+            });
+            const desc = enhResp.data?.description;
+            if (desc && desc.trim()) finalDesc = desc.trim();
+          } catch (e) {
+            console.log('⚠️ enhanceNeedDescription failed:', e?.message);
+          }
+          setInput(finalDesc);
+          wasAutoEnhancedRef.current = true;
+        } catch (err) {
+          console.error('🚨 Voice transcription error:', err);
+        } finally {
+          setEnhancing(false);
+        }
+      } catch (err) {
+        console.error('🚨 Error stopping recording:', err);
+        setIsRecording(false);
+      }
+    } else {
+      // Start recording
+      try {
+        const perm = await AudioModule.requestRecordingPermissionsAsync();
+        if (!perm.granted) { alert('Microphone access is required!'); return; }
+        await audioRecorder.record();
+        setIsRecording(true);
+      } catch (err) {
+        console.error('🚨 Error starting recording:', err);
       }
     }
   };
@@ -1141,7 +1253,7 @@ export default function SearchScreen() {
     try {
       let labels = '';
       if (attachedMedia?.type === 'image' && attachedMedia.base64) {
-        labels = await analyzeImageWithVisionAPI(attachedMedia.base64);
+        labels = await analyzeImageWithPixtral(attachedMedia.base64);
       }
       let enhancedDescription = '';
       let unclear = false;
@@ -1419,6 +1531,12 @@ export default function SearchScreen() {
           <TouchableOpacity style={styles.imageButton} onPress={handleMediaPick}>
             <Image source={require('../assets/Camer Button 2.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.micButton, isRecording && styles.micButtonRecording]}
+            onPress={handleVoiceRecord}
+          >
+            <Ionicons name={isRecording ? 'stop-circle' : 'mic'} size={22} color={isRecording ? '#EF4444' : '#6B7280'} />
+          </TouchableOpacity>
 
           <View style={styles.previewHolder}>
             {media && (
@@ -1532,6 +1650,15 @@ const styles = StyleSheet.create({
     marginBottom: IS_WEB ? 13 : 10, marginTop: IS_WEB ? 13 : 10, alignSelf: 'flex-start',
   },
   cameraButtonImage: { width: 59, height: 59, resizeMode: 'contain' },
+  micButton: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: 6, alignSelf: 'center',
+  },
+  micButtonRecording: {
+    backgroundColor: '#FEE2E2',
+  },
   arrowButton: {
     marginLeft: IS_WEB ? 13 : 10,
   },

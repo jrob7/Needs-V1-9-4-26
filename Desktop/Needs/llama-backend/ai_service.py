@@ -2,6 +2,7 @@ import os
 import logging
 import subprocess
 import base64
+import tempfile
 import requests
 
 from mistralai.client import Mistral
@@ -126,6 +127,51 @@ def analyze_image_pixtral(base64_image: str) -> str:
     return response.choices[0].message.content
 
 # ---------- VOXTRAL (audio transcription) ----------
+# Extracts audio from a video using ffmpeg, then transcribes with Voxtral.
+def transcribe_video_voxtral(video_base64: str, mime_type: str = "video/mp4") -> str:
+    video_bytes = base64.b64decode(video_base64)
+    ext = "mov" if "quicktime" in mime_type.lower() or "mov" in mime_type.lower() else "mp4"
+
+    with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as vf:
+        vf.write(video_bytes)
+        video_path = vf.name
+
+    audio_path = video_path.replace(f".{ext}", "_audio.m4a")
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-i", video_path,
+                "-vn",              # drop video track
+                "-acodec", "aac",
+                "-ab", "64k",
+                "-ar", "22050",
+                "-ac", "1",         # mono
+                "-y",
+                audio_path,
+            ],
+            check=True, capture_output=True, timeout=60,
+        )
+        with open(audio_path, "rb") as af:
+            audio_bytes = af.read()
+
+        result = _mistral.audio.transcriptions.complete(
+            model="voxtral-mini-transcribe-2",
+            file=MistralFile(
+                file_name="audio.m4a",
+                content=audio_bytes,
+                content_type="audio/mp4",
+            )
+        )
+        return result.text or ""
+    finally:
+        for p in [video_path, audio_path]:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
+
+
 def transcribe_audio_voxtral(audio_base64: str, mime_type: str = "audio/mpeg") -> str:
     audio_bytes = base64.b64decode(audio_base64)
     ext_map = {

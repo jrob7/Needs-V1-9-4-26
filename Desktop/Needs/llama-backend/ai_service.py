@@ -133,9 +133,10 @@ def transcribe_video_voxtral(video_base64: str, mime_type: str = "video/mp4") ->
     ext = "mov" if "quicktime" in mime_type.lower() or "mov" in mime_type.lower() else "mp4"
 
     # Strategy 1: send video directly — Voxtral accepts MP4/MOV containers
+    direct_err_msg = None
     try:
         result = _mistral.audio.transcriptions.complete(
-            model="voxtral-mini-transcribe-2",
+            model="voxtral-mini-latest",
             file=MistralFile(
                 file_name=f"video.{ext}",
                 content=video_bytes,
@@ -144,12 +145,13 @@ def transcribe_video_voxtral(video_base64: str, mime_type: str = "video/mp4") ->
         )
         return result.text or ""
     except Exception as direct_err:
-        logging.warning(f"[transcribeVideo] direct submission failed: {direct_err}")
+        direct_err_msg = str(direct_err)
+        logging.warning(f"[transcribeVideo] direct submission failed: {direct_err_msg}")
 
     # Strategy 2: extract audio with ffmpeg then transcribe
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
-        raise RuntimeError(f"ffmpeg not found and direct video transcription failed: {direct_err}")
+        raise RuntimeError(f"ffmpeg not found and direct video transcription failed: {direct_err_msg}")
 
     with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as vf:
         vf.write(video_bytes)
@@ -165,7 +167,7 @@ def transcribe_video_voxtral(video_base64: str, mime_type: str = "video/mp4") ->
         with open(audio_path, "rb") as af:
             audio_bytes = af.read()
         result = _mistral.audio.transcriptions.complete(
-            model="voxtral-mini-transcribe-2",
+            model="voxtral-mini-latest",
             file=MistralFile(file_name="audio.m4a", content=audio_bytes, content_type="audio/mp4")
         )
         return result.text or ""
@@ -190,7 +192,7 @@ def transcribe_audio_voxtral(audio_base64: str, mime_type: str = "audio/mpeg") -
     ext = ext_map.get(mime_type.lower(), "m4a")
 
     result = _mistral.audio.transcriptions.complete(
-        model="voxtral-mini-transcribe-2",
+        model="voxtral-mini-latest",
         file=MistralFile(
             file_name=f"recording.{ext}",
             content=audio_bytes,

@@ -45,7 +45,7 @@ def test_voxtral():
             b'RIFF', 37, b'WAVE', b'fmt ', 16, 1, 1, 8000, 8000, 1, 8,
             b'data', 1) + b'\x00'
         result = _mistral.audio.transcriptions.complete(
-            model="voxtral-mini-transcribe-2",
+            model="voxtral-mini-latest",
             file=MistralFile(file_name="test.wav", content=wav, content_type="audio/wav")
         )
         return jsonify({"ok": True, "text": result.text})

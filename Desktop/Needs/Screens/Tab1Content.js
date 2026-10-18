@@ -428,11 +428,13 @@ export default function SearchScreen() {
               console.log('⚠️ Video audio transcription failed:', audioResult.reason?.message);
             }
 
-            // Spoken words are more specific than visual; use them as primary userText
+            // Spoken words are more specific than visual; use them as primary userText.
+            // Only pass image labels when there's no speech — otherwise the backend
+            // blends generic visual clues into text that's already complete on its own.
             let finalDesc = spokenText || visualDesc;
             try {
               const enhResp = await axios.post(`${FLASK_API}/ai/enhanceNeedDescription`, {
-                labels: visualDesc,
+                labels: spokenText ? '' : visualDesc,
                 userText: spokenText,
               });
               const desc = enhResp.data?.description;

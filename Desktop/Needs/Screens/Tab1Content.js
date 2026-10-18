@@ -377,7 +377,8 @@ export default function SearchScreen() {
       setMedia(asset);
       wasAutoEnhancedRef.current = false;
 
-      if (asset.type === 'video') {
+      const isVideo = asset.type === 'video' || /\.(mp4|mov|avi|webm|m4v)$/i.test(asset.uri || '');
+      if (isVideo) {
         if (inputRef.current.trim()) return;
         if (imageEnhanceTimeoutRef.current) clearTimeout(imageEnhanceTimeoutRef.current);
         imageEnhanceTimeoutRef.current = setTimeout(async () => {
@@ -452,7 +453,7 @@ export default function SearchScreen() {
         return;
       }
 
-      if (asset.type === 'image' && asset.base64) {
+      if (!isVideo && asset.type === 'image' && asset.base64) {
         if (imageEnhanceTimeoutRef.current) clearTimeout(imageEnhanceTimeoutRef.current);
 
         imageEnhanceTimeoutRef.current = setTimeout(async () => {

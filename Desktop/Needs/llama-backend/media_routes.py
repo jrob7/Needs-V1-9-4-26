@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
-from ai_service import analyze_image_pixtral, transcribe_audio_voxtral, transcribe_video_voxtral
+from ai_service import analyze_image_pixtral, transcribe_audio_voxtral, transcribe_video_voxtral, _mistral, MistralFile
 import logging
+import traceback
 
 media_bp = Blueprint("media", __name__)
 
@@ -33,6 +34,24 @@ def transcribe_video():
     except Exception as e:
         logging.error(f"[transcribeVideo] {e}")
         return jsonify({"error": str(e)}), 500
+
+@media_bp.get("/testVoxtral")
+def test_voxtral():
+    """Quick smoke-test — returns the exact error if Voxtral isn't reachable."""
+    try:
+        # Minimal valid WAV: 44-byte header + 1 byte of silence
+        import struct
+        wav = struct.pack('<4sI4s4sIHHIIHH4sI',
+            b'RIFF', 37, b'WAVE', b'fmt ', 16, 1, 1, 8000, 8000, 1, 8,
+            b'data', 1) + b'\x00'
+        result = _mistral.audio.transcriptions.complete(
+            model="voxtral-mini-transcribe-2",
+            file=MistralFile(file_name="test.wav", content=wav, content_type="audio/wav")
+        )
+        return jsonify({"ok": True, "text": result.text})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
+
 
 @media_bp.post("/transcribeAudio")
 def transcribe_audio():

@@ -127,41 +127,46 @@ def analyze_image_pixtral(base64_image: str) -> str:
     return response.choices[0].message.content
 
 # ---------- VOXTRAL (audio transcription) ----------
-# Extracts audio from a video using ffmpeg, then transcribes with Voxtral.
 def transcribe_video_voxtral(video_base64: str, mime_type: str = "video/mp4") -> str:
+    import shutil
     video_bytes = base64.b64decode(video_base64)
     ext = "mov" if "quicktime" in mime_type.lower() or "mov" in mime_type.lower() else "mp4"
+
+    # Strategy 1: send video directly — Voxtral accepts MP4/MOV containers
+    try:
+        result = _mistral.audio.transcriptions.complete(
+            model="voxtral-mini-transcribe-2",
+            file=MistralFile(
+                file_name=f"video.{ext}",
+                content=video_bytes,
+                content_type=mime_type,
+            )
+        )
+        return result.text or ""
+    except Exception as direct_err:
+        logging.warning(f"[transcribeVideo] direct submission failed: {direct_err}")
+
+    # Strategy 2: extract audio with ffmpeg then transcribe
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise RuntimeError(f"ffmpeg not found and direct video transcription failed: {direct_err}")
 
     with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as vf:
         vf.write(video_bytes)
         video_path = vf.name
 
     audio_path = video_path.replace(f".{ext}", "_audio.m4a")
-
     try:
-        subprocess.run(
-            [
-                "ffmpeg", "-i", video_path,
-                "-vn",              # drop video track
-                "-acodec", "aac",
-                "-ab", "64k",
-                "-ar", "22050",
-                "-ac", "1",         # mono
-                "-y",
-                audio_path,
-            ],
+        result = subprocess.run(
+            [ffmpeg_bin, "-i", video_path, "-vn", "-acodec", "aac",
+             "-ab", "64k", "-ar", "22050", "-ac", "1", "-y", audio_path],
             check=True, capture_output=True, timeout=60,
         )
         with open(audio_path, "rb") as af:
             audio_bytes = af.read()
-
         result = _mistral.audio.transcriptions.complete(
             model="voxtral-mini-transcribe-2",
-            file=MistralFile(
-                file_name="audio.m4a",
-                content=audio_bytes,
-                content_type="audio/mp4",
-            )
+            file=MistralFile(file_name="audio.m4a", content=audio_bytes, content_type="audio/mp4")
         )
         return result.text or ""
     finally:

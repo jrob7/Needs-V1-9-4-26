@@ -25,7 +25,7 @@ import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as FileSystem from 'expo-file-system/legacy';
-import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
+import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
 import * as Location from 'expo-location';
 import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useNavigation } from '@react-navigation/native';
@@ -494,6 +494,12 @@ export default function SearchScreen() {
       try {
         await audioRecorder.stop();
         setIsRecording(false);
+        await setAudioModeAsync({
+          playsInSilentModeIOS: true,
+          allowsRecordingIOS: false,
+          shouldDuckAndroid: true,
+          staysActiveInBackground: false,
+        });
         const uri = audioRecorder.uri;
         if (!uri) return;
         setEnhancing(true);
@@ -538,6 +544,12 @@ export default function SearchScreen() {
       try {
         const perm = await AudioModule.requestRecordingPermissionsAsync();
         if (!perm.granted) { alert('Microphone access is required!'); return; }
+        await setAudioModeAsync({
+          playsInSilentModeIOS: true,
+          allowsRecordingIOS: true,
+          shouldDuckAndroid: true,
+          staysActiveInBackground: false,
+        });
         await audioRecorder.record();
         setIsRecording(true);
       } catch (err) {

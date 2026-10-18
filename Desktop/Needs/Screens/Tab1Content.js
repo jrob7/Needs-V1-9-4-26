@@ -24,7 +24,7 @@ import Svg, { Rect, G } from 'react-native-svg';
 import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 import * as Location from 'expo-location';
 import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';

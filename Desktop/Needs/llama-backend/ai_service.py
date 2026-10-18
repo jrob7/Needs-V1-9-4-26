@@ -1,10 +1,13 @@
 import os
 import logging
 import subprocess
-from mistralai.client import MistralClient
+import base64
 import requests
 
-AI_PROVIDER = os.getenv("AI_PROVIDER", "api")  # local | api | gpu
+from mistralai.client import Mistral
+from mistralai.client.models.file import File as MistralFile
+
+AI_PROVIDER = os.getenv("AI_PROVIDER", "api")
 
 # ---------- LOCAL ----------
 def call_local(prompt):
@@ -38,20 +41,20 @@ def call_local(prompt):
     return "\n".join(output)
 
 # ---------- MISTRAL API ----------
-client = MistralClient(api_key=os.getenv("MISTRAL_API_KEY", ""))
+_mistral = Mistral(api_key=os.getenv("MISTRAL_API_KEY", ""))
 
 def call_api(prompt):
     print("🔥 USING MISTRAL API")
-    response = client.chat(
+    response = _mistral.chat.complete(
         model="mistral-small-latest",
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content
 
 # ---------- RUNPOD GPU ----------
-RUNPOD_API_URL = os.getenv("RUNPOD_API_URL", "")   # e.g. https://xxxx-8000.proxy.runpod.net
-RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY", "")   # RunPod API key (optional, depends on your setup)
-RUNPOD_MODEL   = os.getenv("RUNPOD_MODEL", "mistral")  # model name your RunPod server exposes
+RUNPOD_API_URL = os.getenv("RUNPOD_API_URL", "")
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY", "")
+RUNPOD_MODEL   = os.getenv("RUNPOD_MODEL", "mistral")
 
 def call_gpu(prompt):
     print("⚡ USING RUNPOD GPU")
@@ -82,7 +85,6 @@ def generate_response(prompt):
         try:
             return call_api(prompt)
         except Exception as e:
-            # Automatic fallback to RunPod if Mistral fails and RunPod is configured
             if RUNPOD_API_URL:
                 logging.warning(f"Mistral API failed ({e}), falling back to RunPod")
                 return call_gpu(prompt)
@@ -98,3 +100,50 @@ def generate_response(prompt):
 
     else:
         raise ValueError(f"❌ Unknown AI_PROVIDER: {AI_PROVIDER}")
+
+# ---------- PIXTRAL (image analysis) ----------
+def analyze_image_pixtral(base64_image: str) -> str:
+    response = _mistral.chat.complete(
+        model="pixtral-12b-2409",
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Describe this image focusing on any visible problems, damage, or service needs. "
+                        "Be specific about what a service provider would need to know: what the problem is, "
+                        "where it is, and any severity or urgency indicators. Keep it under 3 sentences."
+                    )
+                }
+            ]
+        }]
+    )
+    return response.choices[0].message.content
+
+# ---------- VOXTRAL (audio transcription) ----------
+def transcribe_audio_voxtral(audio_base64: str, mime_type: str = "audio/mpeg") -> str:
+    audio_bytes = base64.b64decode(audio_base64)
+    ext_map = {
+        "audio/mpeg": "mp3",
+        "audio/mp4": "m4a",
+        "audio/m4a": "m4a",
+        "audio/wav": "wav",
+        "audio/webm": "webm",
+        "audio/aac": "aac",
+    }
+    ext = ext_map.get(mime_type.lower(), "m4a")
+
+    result = _mistral.audio.transcriptions.complete(
+        model="voxtral-mini-transcribe-2",
+        file=MistralFile(
+            file_name=f"recording.{ext}",
+            content=audio_bytes,
+            content_type=mime_type,
+        )
+    )
+    return result.text or ""

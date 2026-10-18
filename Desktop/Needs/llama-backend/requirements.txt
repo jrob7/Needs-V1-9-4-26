@@ -17,7 +17,7 @@ itsdangerous==2.2.0
 Jinja2==3.1.6
 jsonpath-python==1.1.6
 MarkupSafe==3.0.3
-mistralai==0.4.2
+mistralai>=1.0.0
 opentelemetry-api==1.39.1
 opentelemetry-semantic-conventions==0.60b1
 orjson==3.10.18

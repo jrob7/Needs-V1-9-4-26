@@ -25,6 +25,9 @@ app.register_blueprint(enhancer_bp, url_prefix="/ai")
 from match_routes import match_bp
 app.register_blueprint(match_bp, url_prefix="/ai")
 
+from media_routes import media_bp
+app.register_blueprint(media_bp, url_prefix="/ai")
+
 logging.getLogger("pymongo").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.DEBUG)
 

@@ -25,7 +25,7 @@ import axios from 'axios';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import * as FileSystem from 'expo-file-system/legacy';
-import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import * as Location from 'expo-location';
 import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 import { useNavigation } from '@react-navigation/native';
@@ -147,7 +147,7 @@ export default function SearchScreen() {
 
   const [enhancing, setEnhancing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const voiceTranscriptRef = useRef('');
 
   // ── Location capture ──────────────────────────────────────────────────────
   // Persists for the session; { lat, lng } from GPS or { city } from user text.
@@ -488,73 +488,64 @@ export default function SearchScreen() {
     }
   };
 
+  // On-device transcription (iOS SFSpeechRecognizer / Android SpeechRecognizer) —
+  // voice-only input is disabled on web entirely, see mic button render below.
+  useSpeechRecognitionEvent('result', (event) => {
+    const result = event.results?.[0];
+    if (event.isFinal && result?.transcript) {
+      voiceTranscriptRef.current = `${voiceTranscriptRef.current} ${result.transcript}`.trim();
+    }
+  });
+
+  useSpeechRecognitionEvent('error', (event) => {
+    console.error('🚨 Voice transcription error:', event.error, event.message);
+  });
+
+  useSpeechRecognitionEvent('end', async () => {
+    setIsRecording(false);
+    const transcript = voiceTranscriptRef.current.trim();
+    voiceTranscriptRef.current = '';
+    if (!transcript) return;
+    setEnhancing(true);
+    try {
+      let finalDesc = transcript;
+      try {
+        const enhResp = await axios.post(`${FLASK_API}/ai/enhanceNeedDescription`, {
+          labels: '', userText: transcript,
+        });
+        const desc = enhResp.data?.description;
+        if (desc && desc.trim()) finalDesc = desc.trim();
+      } catch (e) {
+        console.log('⚠️ enhanceNeedDescription failed:', e?.message);
+      }
+      setInput(finalDesc);
+      wasAutoEnhancedRef.current = true;
+    } finally {
+      setEnhancing(false);
+    }
+  });
+
   const handleVoiceRecord = async () => {
+    if (IS_WEB) return; // no on-device transcription on web
+
     if (isRecording) {
-      // Stop and process
-      try {
-        await audioRecorder.stop();
-        setIsRecording(false);
-        await setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          allowsRecordingIOS: false,
-          shouldDuckAndroid: true,
-          staysActiveInBackground: false,
-        });
-        const uri = audioRecorder.uri;
-        if (!uri) return;
-        setEnhancing(true);
-        try {
-          const audioResp = await fetch(uri);
-          const audioBlob = await audioResp.blob();
-          const audioB64 = await new Promise((res, rej) => {
-            const reader = new FileReader();
-            reader.onload = () => res(reader.result.split(',')[1]);
-            reader.onerror = rej;
-            reader.readAsDataURL(audioBlob);
-          });
-          const mimeType = 'audio/m4a';
-          const transcriptResp = await axios.post(`${FLASK_API}/ai/transcribeAudio`, {
-            base64: audioB64, mimeType,
-          });
-          const transcript = transcriptResp.data?.transcript || '';
-          if (!transcript) return;
-          let finalDesc = transcript;
-          try {
-            const enhResp = await axios.post(`${FLASK_API}/ai/enhanceNeedDescription`, {
-              labels: '', userText: transcript,
-            });
-            const desc = enhResp.data?.description;
-            if (desc && desc.trim()) finalDesc = desc.trim();
-          } catch (e) {
-            console.log('⚠️ enhanceNeedDescription failed:', e?.message);
-          }
-          setInput(finalDesc);
-          wasAutoEnhancedRef.current = true;
-        } catch (err) {
-          console.error('🚨 Voice transcription error:', err);
-        } finally {
-          setEnhancing(false);
-        }
-      } catch (err) {
-        console.error('🚨 Error stopping recording:', err);
-        setIsRecording(false);
-      }
-    } else {
-      // Start recording
-      try {
-        const perm = await AudioModule.requestRecordingPermissionsAsync();
-        if (!perm.granted) { alert('Microphone access is required!'); return; }
-        await setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          allowsRecordingIOS: true,
-          shouldDuckAndroid: true,
-          staysActiveInBackground: false,
-        });
-        await audioRecorder.record();
-        setIsRecording(true);
-      } catch (err) {
-        console.error('🚨 Error starting recording:', err);
-      }
+      ExpoSpeechRecognitionModule.stop();
+      return;
+    }
+
+    try {
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!perm.granted) { alert('Microphone access is required!'); return; }
+      voiceTranscriptRef.current = '';
+      setIsRecording(true);
+      ExpoSpeechRecognitionModule.start({
+        lang: 'en-US',
+        continuous: true,
+        interimResults: false,
+      });
+    } catch (err) {
+      console.error('🚨 Error starting recording:', err);
+      setIsRecording(false);
     }
   };
 
@@ -1546,12 +1537,14 @@ export default function SearchScreen() {
           <TouchableOpacity style={styles.imageButton} onPress={handleMediaPick}>
             <Image source={require('../assets/Camer Button 2.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.micButton, isRecording && styles.micButtonRecording]}
-            onPress={handleVoiceRecord}
-          >
-            <Ionicons name={isRecording ? 'stop-circle' : 'mic'} size={22} color={isRecording ? '#EF4444' : '#6B7280'} />
-          </TouchableOpacity>
+          {!IS_WEB && (
+            <TouchableOpacity
+              style={[styles.micButton, isRecording && styles.micButtonRecording]}
+              onPress={handleVoiceRecord}
+            >
+              <Ionicons name={isRecording ? 'stop-circle' : 'mic'} size={22} color={isRecording ? '#EF4444' : '#6B7280'} />
+            </TouchableOpacity>
+          )}
 
           <View style={styles.previewHolder}>
             {media && (

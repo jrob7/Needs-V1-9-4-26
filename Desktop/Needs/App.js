@@ -131,12 +131,10 @@ export default function App() {
     const enableAudio = async () => {
       try {
         await setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          allowsRecordingIOS: false,
-          shouldDuckAndroid: true,
-          staysActiveInBackground: false,
-          interruptionModeIOS: 1,
-          interruptionModeAndroid: 1,
+          playsInSilentMode: true,
+          allowsRecording: false,
+          shouldPlayInBackground: false,
+          interruptionMode: 'duckOthers',
         });
         console.log('🎧 Audio mode enabled globally');
       } catch (e) {

@@ -36,7 +36,15 @@
         }
       ],
       "expo-video",
-      "expo-audio"
+      "expo-audio",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to use the microphone to describe your need by voice.",
+          "speechRecognitionPermission": "Allow $(PRODUCT_NAME) to use speech recognition to transcribe your voice description.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
     ],
     "extra": {
       "eas": {

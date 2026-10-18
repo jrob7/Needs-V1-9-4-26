@@ -126,10 +126,10 @@ export default function NeedInquiryView() {
   useEffect(() => {
     (async () => {
       await setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        allowsRecordingIOS: false,
-        shouldDuckAndroid: true,
-        staysActiveInBackground: false,
+        playsInSilentMode: true,
+        allowsRecording: false,
+        shouldPlayInBackground: false,
+        interruptionMode: 'duckOthers',
       });
     })();
   }, []);

@@ -26,7 +26,6 @@ module.exports = {
       output: 'single',
     },
     plugins: [
-      'expo-av',
       'expo-font',
       '@react-native-community/datetimepicker',
       [

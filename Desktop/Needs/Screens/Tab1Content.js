@@ -1535,7 +1535,7 @@ export default function SearchScreen() {
       <View style={styles.searchContainer}>
         <View style={styles.searchRow}>
           <TouchableOpacity style={styles.imageButton} onPress={handleMediaPick}>
-            <Image source={require('../assets/Camer Button 2.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 65, height: 65 }]} />
+            <Image source={require('../assets/camera-button.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
           {!IS_WEB && (
             <TouchableOpacity

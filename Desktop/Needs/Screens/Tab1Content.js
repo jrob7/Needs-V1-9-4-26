@@ -1564,7 +1564,7 @@ export default function SearchScreen() {
           </View>
 
           <TouchableOpacity style={styles.arrowButton} onPress={() => sendQuery()}>
-            <Image source={require('../assets/Up Arrow Button 2.png')} style={[styles.arrowButtonImage, IS_WEB && { width: 65, height: 65 }]} />
+            <Image source={require('../assets/send-arrow-button.png')} style={[styles.arrowButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
         </View>
 

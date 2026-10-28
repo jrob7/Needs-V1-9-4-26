@@ -3,7 +3,7 @@
 // Run from server/ dir: node ../scripts/uploadSmokeHouseMenu.js
 const { MongoClient } = require('mongodb');
 
-const MONGO_URI = 'mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority';
+const MONGO_URI = process.env.MONGO_URI;
 
 const MENU = [
   {

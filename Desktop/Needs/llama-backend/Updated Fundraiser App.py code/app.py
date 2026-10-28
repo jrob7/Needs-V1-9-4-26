@@ -17,7 +17,7 @@ logging.getLogger("pymongo").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.DEBUG)
 
 # --- Mongo (still used to log need extractions) ---
-MONGO_URI = "mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority"
+MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client.Need
 mistral_queries = db.mistral_queries

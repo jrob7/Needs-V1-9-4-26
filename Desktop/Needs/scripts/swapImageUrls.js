@@ -6,7 +6,7 @@
 
 const { MongoClient } = require('mongodb');
 
-const ATLAS_URI   = 'mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority';
+const ATLAS_URI   = process.env.MONGO_URI;
 const DB_NAME     = 'Need';
 const OLD_BASE    = 'http://localhost:3000';
 const NEW_BASE    = 'https://needs-v1-9-4-26-production.up.railway.app';

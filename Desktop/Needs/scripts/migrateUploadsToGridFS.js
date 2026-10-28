@@ -9,7 +9,7 @@ const { MongoClient, GridFSBucket, ObjectId } = require('mongodb');
 const fs   = require('fs');
 const path = require('path');
 
-const ATLAS_URI  = 'mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority';
+const ATLAS_URI  = process.env.MONGO_URI;
 const DB_NAME    = 'Need';
 const NODE_API   = 'https://your-node-service.up.railway.app'; // ← update after Railway deploy
 const UPLOADS_DIR = path.join(__dirname, '../server/uploads');

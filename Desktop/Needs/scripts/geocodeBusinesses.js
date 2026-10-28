@@ -9,8 +9,7 @@
 const { MongoClient } = require('mongodb');
 const https = require('https');
 
-const ATLAS_URI =
-  'mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority';
+const ATLAS_URI = process.env.MONGO_URI;
 const DB_NAME = 'test';
 
 // ── Nominatim geocoder ────────────────────────────────────────────────────────

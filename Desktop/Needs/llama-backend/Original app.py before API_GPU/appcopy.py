@@ -36,7 +36,7 @@ logging.getLogger("pymongo").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.DEBUG)
 
 # ✅ MongoDB Connection
-MONGO_URI = "mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority"
+MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client.Need
 collection = db.mistral_queries

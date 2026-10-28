@@ -554,6 +554,7 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
   // Only count quotes where the business has actually sent a response (not pending_business)
   const realQuotes = quotes.filter(q => !['pending_business', 'cancelled'].includes(q.status));
   const hasMatches = realQuotes.length > 0;
+  const isConfirmed = quotes.some(q => q.status === 'appointment_confirmed');
 
   // Pill pulse: blink when pending, solid when quote ready or resolved
   useEffect(() => {
@@ -568,9 +569,11 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     return () => loop.stop();
   }, [isResolved, hasMatches]);
 
-  // Border pulse: blink only when quote is ready
+  // Border pulse: blink only while a quote is ready and not yet accepted —
+  // once the user confirms, hold it solid instead of continuing to blink.
   useEffect(() => {
     if (!hasMatches) { borderAnim.setValue(0); return; }
+    if (isConfirmed) { borderAnim.setValue(1); return; }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(borderAnim, { toValue: 0,  duration: 1000, useNativeDriver: true }),
@@ -579,10 +582,12 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
     );
     loop.start();
     return () => loop.stop();
-  }, [hasMatches]);
-  const pillLabel = hasMatches
-    ? `${realQuotes.length} Quote${realQuotes.length !== 1 ? 's' : ''} Ready`
-    : 'Pending Service Quotes';
+  }, [hasMatches, isConfirmed]);
+  const pillLabel = isConfirmed
+    ? 'Confirmed'
+    : hasMatches
+      ? `${realQuotes.length} Quote${realQuotes.length !== 1 ? 's' : ''} Ready`
+      : 'Pending Service Quotes';
   const pillStyle = hasMatches ? styles.matchPill : styles.swipeHintPill;
   const pillTextStyle = hasMatches ? styles.matchPillText : styles.swipeHintText;
 

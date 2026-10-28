@@ -18,10 +18,10 @@ import {
 } from 'react-native';
 import Svg, { Rect } from 'react-native-svg';
 import Constants from 'expo-constants';
-const _isExpoGo =
-  Constants.executionEnvironment === 'storeClient' ||
-  Constants.executionEnvironment === 'expo' ||
-  !Constants.executionEnvironment;
+// executionEnvironment can't distinguish Expo Go from a custom dev-client
+// build (both report 'storeClient') - appOwnership can ('expo' only in
+// real Expo Go, null in dev-client and production builds).
+const _isExpoGo = Constants.appOwnership === 'expo';
 import { Platform } from 'react-native';
 const _expoVideo = (Platform.OS !== 'web' && !_isExpoGo) ? require('expo-video') : {};
 const VideoView = _expoVideo.VideoView || (() => null);

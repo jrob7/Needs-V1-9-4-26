@@ -3016,11 +3016,29 @@ app.get('/appointments', requireAuth, async (req, res) => {
     const docs = await database.collection('Appointments')
       .find({ $or: [{ serviceUserId: uid }, { requesterId: uid }] })
       .sort({ createdAt: -1 }).toArray();
+
+    // Business accounts don't set a personal Users.profilePicture - their
+    // "avatar" is the first Services portfolio photo. Attach it here so the
+    // customer-side Scheduler card can show it without a separate fetch.
+    const serviceUserIds = [...new Set(docs.map(d => d.serviceUserId?.toString()).filter(Boolean))];
+    const bizPicMap = {};
+    if (serviceUserIds.length) {
+      const services = await database.collection('Services')
+        .find(
+          { userId: { $in: serviceUserIds.map(id => ObjectId.isValid(id) ? new ObjectId(id) : id) } },
+          { projection: { userId: 1, portfolioImageUrls: 1 } }
+        ).toArray();
+      services.forEach(s => {
+        bizPicMap[s.userId?.toString()] = (s.portfolioImageUrls || [])[0] || null;
+      });
+    }
+
     res.json(docs.map(d => ({ ...d,
       _id: d._id.toString(),
       serviceUserId: d.serviceUserId?.toString() || null,
       requesterId: d.requesterId?.toString() || null,
       conversationId: d.conversationId?.toString() || null,
+      businessLogoUrl: bizPicMap[d.serviceUserId?.toString()] || null,
     })));
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
@@ -3064,6 +3082,8 @@ app.post('/appointments/:id/rescheduleRequest', requireAuth, async (req, res) =>
     const apt = await database.collection('Appointments').findOne({ _id: new ObjectId(id) });
     if (!apt) return res.status(404).json({ error: 'Appointment not found' });
 
+    const { proposedDate, proposedTime, note } = req.body || {};
+
     const requesterId = req.userId;
     const otherUserId = apt.serviceUserId === requesterId ? apt.requesterId : apt.serviceUserId;
     const db = client.db('Need');
@@ -3075,20 +3095,69 @@ app.post('/appointments/:id/rescheduleRequest', requireAuth, async (req, res) =>
 
     await database.collection('Appointments').updateOne(
       { _id: new ObjectId(id) },
-      { $set: { status: 'reschedule_requested', rescheduleRequestedAt: new Date() } }
+      { $set: {
+          status: 'reschedule_requested',
+          rescheduleRequestedAt: new Date(),
+          rescheduleProposedDate: proposedDate || null,
+          rescheduleProposedTime: proposedTime || null,
+          rescheduleNote: note || null,
+        } }
     );
 
+    const proposedLabel = proposedDate
+      ? ` They suggested ${proposedDate}${proposedTime ? ` at ${proposedTime}` : ''}.`
+      : '';
     await database.collection('Notifications').insertOne({
       userId: otherUserId,
       type: 'reschedule_request',
       title: '⏰ Reschedule Request',
-      body: `${requesterName} would like to reschedule their appointment.`,
+      body: `${requesterName} would like to reschedule their appointment.${proposedLabel}`,
       appointmentId: new ObjectId(id),
+      proposedDate: proposedDate || null,
+      proposedTime: proposedTime || null,
+      note: note || null,
       read: false,
       createdAt: new Date(),
     });
 
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
+});
+
+// POST /appointments/:id/confirmReschedule
+// Business (or whichever party was asked) picks the final new date/time.
+app.post('/appointments/:id/confirmReschedule', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid appointment id' });
+    const { date, time } = req.body || {};
+    if (!date) return res.status(400).json({ error: 'date is required' });
+
+    const apt = await database.collection('Appointments').findOne({ _id: new ObjectId(id) });
+    if (!apt) return res.status(404).json({ error: 'Appointment not found' });
+
+    await database.collection('Appointments').updateOne(
+      { _id: new ObjectId(id) },
+      { $set: {
+          status: 'confirmed', date, time: time || null,
+          rescheduleRequestedAt: null,
+          rescheduleProposedDate: null, rescheduleProposedTime: null, rescheduleNote: null,
+        } }
+    );
+
+    const confirmerId = req.userId;
+    const otherUserId = apt.serviceUserId === confirmerId ? apt.requesterId : apt.serviceUserId;
+    await database.collection('Notifications').insertOne({
+      userId: otherUserId,
+      type: 'appointment_confirmed',
+      title: '🎉 Appointment Rescheduled',
+      body: `Your appointment has been rescheduled to ${date}${time ? ` at ${time}` : ''}.`,
+      appointmentId: new ObjectId(id),
+      read: false,
+      createdAt: new Date(),
+    });
+
+    res.json({ success: true, date, time: time || null });
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
 

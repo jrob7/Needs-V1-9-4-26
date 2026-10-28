@@ -750,7 +750,7 @@ function ServiceDetail({ doc, colors, onClose, query }) {
   return (
     <ScrollView style={styles.detailScroll} showsVerticalScrollIndicator={false}>
       <View style={styles.detailHeroWrap}>
-        <Image source={{ uri: cover }} style={styles.detailHero} resizeMode="cover" />
+        <Image source={{ uri: cover }} style={styles.detailHero} resizeMode="contain" />
         <TouchableOpacity style={styles.detailBackBtn} onPress={onClose}>
           <Ionicons name="chevron-back" size={20} color="#fff" />
         </TouchableOpacity>
@@ -819,7 +819,7 @@ function ServiceDetail({ doc, colors, onClose, query }) {
             <Text style={styles.sectionTitle}>Portfolio</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
               {doc.portfolioImageUrls.map((url, i) => (
-                <Image key={i} source={{ uri: resolveImage(url, 'service') }} style={styles.portfolioImg} resizeMode="cover" />
+                <Image key={i} source={{ uri: resolveImage(url, 'service') }} style={styles.portfolioImg} resizeMode="contain" />
               ))}
             </ScrollView>
           </View>
@@ -1270,7 +1270,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   detailScroll: { flex: 1 },
-  detailHeroWrap: { width: '100%', height: IS_WEB ? 494 : 380, position: 'relative' },
+  detailHeroWrap: { width: '100%', height: IS_WEB ? 494 : 380, position: 'relative', backgroundColor: '#0F172A' },
   detailHero: { width: '100%', height: IS_WEB ? 494 : 380 },
   detailBackBtn: {
     position: 'absolute', top: IS_WEB ? 18 : 14, left: IS_WEB ? 18 : 14,
@@ -1360,7 +1360,7 @@ const styles = StyleSheet.create({
   serviceRowName:  { fontSize: IS_WEB ? 18 : 14, color: '#111', fontWeight: '600' },
 
   // Portfolio
-  portfolioImg: { width: IS_WEB ? 156 : 120, height: IS_WEB ? 117 : 90, borderRadius: IS_WEB ? 13 : 10, marginRight: IS_WEB ? 13 : 10 },
+  portfolioImg: { width: IS_WEB ? 156 : 120, height: IS_WEB ? 117 : 90, borderRadius: IS_WEB ? 13 : 10, marginRight: IS_WEB ? 13 : 10, backgroundColor: '#0F172A' },
 
   // CTAs
   ctaRow: { flexDirection: 'row', gap: IS_WEB ? 13 : 10, marginTop: IS_WEB ? 31 : 24 },

@@ -13,6 +13,7 @@ import { UserContext } from '../server/CurrentUser';
 import { NODE_API, FLASK_API } from '../config';
 import { IS_WEB } from '../webLayout';
 import { authFetch } from '../server/api';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const pad = (n) => String(n).padStart(2, '0');
@@ -141,6 +142,18 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
       .then(d => { if (d && !d.error) setQuoteDoc(d); })
       .catch(() => {});
   }, [notification?.quoteId]);
+
+  // The need's original photo/video — notifications only carry needText, so
+  // fetch the full NeedRequest to show the business what the customer sent.
+  const [needMedia, setNeedMedia] = useState(null);
+  useEffect(() => {
+    const needId = notification?.needId;
+    if (!needId) return;
+    fetch(`${NODE_API}/needRequest/${needId}`)
+      .then(r => r.json())
+      .then(d => { if (d?.media?.uri) setNeedMedia(d.media); })
+      .catch(() => {});
+  }, [notification?.needId]);
 
   // ── Fetch busy days ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -284,6 +297,15 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
               <View style={st.needBanner}>
                 <Text style={st.needBannerLabel}>Request</Text>
                 <Text style={st.needBannerText}>{notification.needText}</Text>
+              </View>
+            ) : null}
+            {needMedia?.uri ? (
+              <View style={st.needMediaWrap}>
+                {needMedia.type === 'video' ? (
+                  <NeedsVideoPlayer uri={needMedia.uri} style={st.needMedia} contentFit="cover" />
+                ) : (
+                  <Image source={{ uri: needMedia.uri }} style={st.needMedia} />
+                )}
               </View>
             ) : null}
             {notification?.estimateMin != null && (
@@ -601,8 +623,11 @@ const st = StyleSheet.create({
     backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, marginBottom: 10,
     borderWidth: 1, borderColor: '#E2E8F0',
   },
-  needBannerLabel: { fontSize: 11, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 3, letterSpacing: 0.5 },
-  needBannerText:  { fontSize: 14, color: '#0F172A', lineHeight: 20 },
+  needBannerLabel: { fontSize: IS_WEB ? 16 : 11, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 3, letterSpacing: 0.5 },
+  needBannerText:  { fontSize: IS_WEB ? 22 : 14, color: '#0F172A', lineHeight: IS_WEB ? 30 : 20 },
+
+  needMediaWrap: { marginBottom: 10, borderRadius: 12, overflow: 'hidden' },
+  needMedia: { width: '100%', height: IS_WEB ? 600 : 270, borderRadius: 12, backgroundColor: '#0F172A' },
 
   estHint: {
     flexDirection: 'row', alignItems: 'center', gap: 5,

@@ -7,10 +7,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
-const _isExpoGo =
-  Constants.executionEnvironment === 'storeClient' ||
-  Constants.executionEnvironment === 'expo' ||
-  !Constants.executionEnvironment;
+// executionEnvironment can't distinguish Expo Go from a custom dev-client
+// build (both report 'storeClient') - appOwnership can ('expo' only in
+// real Expo Go, null in dev-client and production builds).
+const _isExpoGo = Constants.appOwnership === 'expo';
 import { Platform } from 'react-native';
 const Notifications = (Platform.OS !== 'web' && !_isExpoGo)
   ? require('expo-notifications')
@@ -18,6 +18,8 @@ const Notifications = (Platform.OS !== 'web' && !_isExpoGo)
 import { UserContext } from '../server/CurrentUser';
 import RespondToLeadModal from './RespondToLeadModal';
 import QuoteResponseModal from './QuoteResponseModal';
+import RescheduleRequestModal from './RescheduleRequestModal';
+import RescheduleResponseModal from './RescheduleResponseModal';
 
 import { NODE_API, FLASK_API } from '../config';
 import { IS_WEB, IS_MOBILE_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
@@ -364,9 +366,19 @@ const SchedulerCard = ({ apt, currentUserId, onCancel, onReschedule }) => {
       .then(r => r.json())
       .then(u => {
         const name = u?.displayName || [u?.firstName, u?.lastName].filter(Boolean).join(' ') || (isProvider ? 'Customer' : apt.businessName);
-        const rawPic = u?.profilePicture || u?.profileImageUrl || null;
         setOtherName(name);
-        setOtherPic(rawPic ? (rawPic.startsWith('http') ? rawPic : `${NODE_API}/uploads/${rawPic}`) : null);
+        // Business accounts don't set a personal profile photo - their avatar
+        // is their Services portfolio image, already attached to the
+        // appointment by the server as businessLogoUrl.
+        const rawPic = (!isProvider && apt.businessLogoUrl)
+          ? apt.businessLogoUrl
+          : (u?.profilePicture || u?.profileImageUrl || null);
+        if (!rawPic) { setOtherPic(null); return; }
+        setOtherPic(
+          rawPic.startsWith('http') ? rawPic
+            : /^[0-9a-f]{24}$/i.test(rawPic) ? `${NODE_API}/images/${rawPic}`
+            : `${NODE_API}/uploads/${rawPic}`
+        );
       })
       .catch(() => {});
   }, [otherUserId]);
@@ -419,11 +431,11 @@ const SchedulerCard = ({ apt, currentUserId, onCancel, onReschedule }) => {
       {apt.status === 'confirmed' && (
         <View style={styles.aptActionRow}>
           <TouchableOpacity style={styles.aptRescheduleBtn} onPress={() => onReschedule && onReschedule(apt)}>
-            <Ionicons name="time-outline" size={15} color="#D97706" />
+            <Ionicons name="time-outline" size={15} color="#FFFFFF" />
             <Text style={styles.aptRescheduleTxt}>Request Reschedule</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.aptCancelBtn} onPress={() => onCancel && onCancel(apt)}>
-            <Ionicons name="close-circle-outline" size={15} color="#DC2626" />
+            <Ionicons name="close-circle-outline" size={15} color="#2563EB" />
             <Text style={styles.aptCancelTxt}>Cancel</Text>
           </TouchableOpacity>
         </View>
@@ -463,7 +475,7 @@ const RescheduleRequestRow = ({ item, onRespond }) => (
       </View>
       <Text style={styles.rowBody}>{item.body}</Text>
       <View style={styles.leadButtonsRow}>
-        <TouchableOpacity style={styles.respondBtn} onPress={() => item.quoteId && onRespond(item)}>
+        <TouchableOpacity style={styles.respondBtn} onPress={() => item.appointmentId && onRespond(item)}>
           <Text style={styles.respondBtnText}>Send New Schedule</Text>
         </TouchableOpacity>
       </View>
@@ -503,6 +515,8 @@ const NotificationsScreen = () => {
   const [appointments, setAppointments] = useState([]);
   const [respondTarget, setRespondTarget] = useState(null);
   const [quoteRespondTarget, setQuoteRespondTarget] = useState(null); // { notification, initialTab }
+  const [rescheduleRequestTarget, setRescheduleRequestTarget] = useState(null); // appointment
+  const [rescheduleResponseTarget, setRescheduleResponseTarget] = useState(null); // notification
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
@@ -563,24 +577,7 @@ const NotificationsScreen = () => {
   };
 
   const handleRescheduleRequest = (apt) => {
-    Alert.alert(
-      'Request Reschedule',
-      'This will notify the other party that you would like to reschedule.',
-      [
-        { text: 'Nevermind', style: 'cancel' },
-        {
-          text: 'Send Request',
-          onPress: async () => {
-            try {
-              await authFetch(`${NODE_API}/appointments/${apt._id}/rescheduleRequest`, {
-                method: 'POST',
-              });
-              Alert.alert('Request Sent', 'The other party has been notified.');
-            } catch { Alert.alert('Error', 'Could not send reschedule request.'); }
-          },
-        },
-      ]
-    );
+    setRescheduleRequestTarget(apt);
   };
 
   const checkScheduledNotifications = async () => {
@@ -955,11 +952,7 @@ const NotificationsScreen = () => {
               : item.type === 'appointment_confirmed'
                 ? <AppointmentConfirmedRow item={item} />
               : item.type === 'reschedule_request'
-                ? <RescheduleRequestRow item={item} onRespond={i => {
-                    // Map notification quoteId → open QuoteResponseModal
-                    const qId = i.quoteId ? String(i.quoteId) : null;
-                    if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'quote' });
-                  }} />
+                ? <RescheduleRequestRow item={item} onRespond={i => setRescheduleResponseTarget(i)} />
               : item.type === 'info_provided'
                 ? <InfoProvidedRow item={item} onRespond={i => {
                     const qId = i.quoteId ? String(i.quoteId) : null;
@@ -1000,6 +993,30 @@ const NotificationsScreen = () => {
             const id = quoteRespondTarget.notification?._id;
             if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, responded: true, read: true } : n));
             setQuoteRespondTarget(null);
+          }}
+        />
+      )}
+
+      {rescheduleRequestTarget && (
+        <RescheduleRequestModal
+          appointment={rescheduleRequestTarget}
+          onClose={() => setRescheduleRequestTarget(null)}
+          onSent={() => {
+            setRescheduleRequestTarget(null);
+            fetchAppointments();
+          }}
+        />
+      )}
+
+      {rescheduleResponseTarget && (
+        <RescheduleResponseModal
+          notification={rescheduleResponseTarget}
+          onClose={() => setRescheduleResponseTarget(null)}
+          onSent={() => {
+            const id = rescheduleResponseTarget._id;
+            if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, read: true } : n));
+            setRescheduleResponseTarget(null);
+            fetchAppointments();
           }}
         />
       )}
@@ -1162,17 +1179,17 @@ const styles = StyleSheet.create({
   aptRescheduleBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: W ? 6 : 5, paddingVertical: W ? 9 : 7,
-    borderRadius: W ? 10 : 8, borderWidth: 1.5, borderColor: '#D97706',
-    backgroundColor: '#FFFBEB',
+    borderRadius: W ? 10 : 8, borderWidth: 1.5, borderColor: '#2563EB',
+    backgroundColor: '#2563EB',
   },
-  aptRescheduleTxt: { fontSize: W ? 14 : 11, fontWeight: '700', color: '#D97706' },
+  aptRescheduleTxt: { fontSize: W ? 14 : 11, fontWeight: '700', color: '#FFFFFF' },
   aptCancelBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: W ? 6 : 5, paddingVertical: W ? 9 : 7,
-    borderRadius: W ? 10 : 8, borderWidth: 1.5, borderColor: '#DC2626',
-    backgroundColor: '#FFF1F1',
+    borderRadius: W ? 10 : 8, borderWidth: 1.5, borderColor: '#2563EB',
+    backgroundColor: '#FFFFFF',
   },
-  aptCancelTxt:     { fontSize: W ? 14 : 11, fontWeight: '700', color: '#DC2626' },
+  aptCancelTxt:     { fontSize: W ? 14 : 11, fontWeight: '700', color: '#2563EB' },
 
 });
 

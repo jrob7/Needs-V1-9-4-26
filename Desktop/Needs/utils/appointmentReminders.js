@@ -7,10 +7,12 @@ import Constants from 'expo-constants';
 const REMINDER_MINS_BEFORE = 2;
 const FOLLOWUP_MINS_AFTER  = 2;
 
-const isExpoGo =
-  Constants.executionEnvironment === 'storeClient' ||
-  Constants.executionEnvironment === 'expo' ||
-  !Constants.executionEnvironment;
+// executionEnvironment === 'storeClient' means "Expo Go OR a custom
+// expo-dev-client build" per Expo's own docs - it can't tell them apart.
+// appOwnership is the field that actually distinguishes real Expo Go
+// ('expo') from everything else (null in both dev-client and production
+// builds), so that's what has to gate notification scheduling.
+const isExpoGo = Constants.appOwnership === 'expo';
 
 // Lazy-load so the import never crashes Expo Go on Android
 const Notifications = (Platform.OS !== 'web' && !isExpoGo)

@@ -1,7 +1,7 @@
 // Screens/RespondToLeadModal.js
 import React, { createElement, useState, useContext, useEffect, useCallback } from 'react';
 import {
-  Modal, View, Text, StyleSheet, TouchableOpacity, TextInput,
+  Modal, View, Text, Image, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Alert, Platform, KeyboardAvoidingView, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { UserContext } from '../server/CurrentUser';
 import { NODE_API } from '../config';
 import { IS_WEB } from '../webLayout';
 import { authFetch } from '../server/api';
+import NeedsVideoPlayer from '../utils/NeedsVideoPlayer';
 
 // ── Date/time formatters (stored in quoteData, parsed by appointmentReminders) ─
 const fmtDate = (d) =>
@@ -163,6 +164,18 @@ function MonthCalendar({ selectedDay, onSelectDay, busyDays, calMonth, onChangeM
 // ── Main modal ────────────────────────────────────────────────────────────────
 export default function RespondToLeadModal({ notification, onClose, onSent }) {
   const { userId } = useContext(UserContext);
+
+  // The need's original photo/video — notifications only carry needText, so
+  // fetch the full NeedRequest to show the business what the customer sent.
+  const [needMedia, setNeedMedia] = useState(null);
+  useEffect(() => {
+    const needId = notification?.needId;
+    if (!needId) return;
+    fetch(`${NODE_API}/needRequest/${needId}`)
+      .then(r => r.json())
+      .then(d => { if (d?.media?.uri) setNeedMedia(d.media); })
+      .catch(() => {});
+  }, [notification?.needId]);
 
   const defaultDate = (() => {
     const d = new Date();
@@ -351,6 +364,15 @@ export default function RespondToLeadModal({ notification, onClose, onSent }) {
               <View style={styles.needBanner}>
                 <Text style={styles.needBannerLabel}>Request</Text>
                 <Text style={styles.needBannerText}>{notification.needText}</Text>
+              </View>
+            ) : null}
+            {needMedia?.uri ? (
+              <View style={styles.needMediaWrap}>
+                {needMedia.type === 'video' ? (
+                  <NeedsVideoPlayer uri={needMedia.uri} style={styles.needMedia} contentFit="cover" />
+                ) : (
+                  <Image source={{ uri: needMedia.uri }} style={styles.needMedia} />
+                )}
               </View>
             ) : null}
 
@@ -634,8 +656,11 @@ const styles = StyleSheet.create({
     padding: IS_WEB ? 18 : 14, marginBottom: IS_WEB ? 16 : 12,
     borderWidth: 1, borderColor: '#E2E8F0',
   },
-  needBannerLabel: { fontSize: IS_WEB ? 14 : 11, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 },
-  needBannerText:  { fontSize: IS_WEB ? 18 : 14, color: '#0F172A', lineHeight: IS_WEB ? 26 : 20 },
+  needBannerLabel: { fontSize: IS_WEB ? 16 : 11, fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 },
+  needBannerText:  { fontSize: IS_WEB ? 22 : 14, color: '#0F172A', lineHeight: IS_WEB ? 30 : 20 },
+
+  needMediaWrap: { marginBottom: IS_WEB ? 16 : 12, borderRadius: IS_WEB ? 16 : 12, overflow: 'hidden' },
+  needMedia: { width: '100%', height: IS_WEB ? 600 : 270, borderRadius: IS_WEB ? 16 : 12, backgroundColor: '#0F172A' },
 
   estimateHint: {
     flexDirection: 'row', alignItems: 'center', gap: 6,

@@ -570,10 +570,10 @@ function ServiceNeedCard({ need: initialNeed, media, isActive, isSessionNeed, on
   }, [isResolved, hasMatches]);
 
   // Border pulse: blink only while a quote is ready and not yet accepted —
-  // once the user confirms, hold it solid instead of continuing to blink.
+  // once the user confirms, hide the glow entirely and leave the card's
+  // normal border.
   useEffect(() => {
-    if (!hasMatches) { borderAnim.setValue(0); return; }
-    if (isConfirmed) { borderAnim.setValue(1); return; }
+    if (!hasMatches || isConfirmed) { borderAnim.setValue(0); return; }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(borderAnim, { toValue: 0,  duration: 1000, useNativeDriver: true }),

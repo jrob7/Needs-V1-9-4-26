@@ -47,7 +47,7 @@ const MONTH_IDX = {
   Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11,
 };
 
-function parseAppointmentDateTime(dateStr, timeStr) {
+export function parseAppointmentDateTime(dateStr, timeStr) {
   try {
     // Strip optional weekday prefix: "Fri, Jul 10, 2026" → "Jul 10, 2026"
     const cleanDate = (dateStr || '').replace(/^\w+,\s*/, '').trim();

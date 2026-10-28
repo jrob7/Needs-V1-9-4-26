@@ -12,6 +12,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { NODE_API } from '../config';
 import { IS_WEB } from '../webLayout';
 import { authFetch } from '../server/api';
+import { parseAppointmentDateTime } from '../utils/appointmentReminders';
 
 const pad = (n) => String(n).padStart(2, '0');
 const fmtDate = (d) =>
@@ -24,6 +25,8 @@ const fmtTime = (d) => {
 
 export default function RescheduleResponseModal({ notification, onClose, onSent }) {
   const [date, setDate] = useState(() => {
+    const suggested = parseAppointmentDateTime(notification?.proposedDate, notification?.proposedTime);
+    if (suggested && !isNaN(suggested.getTime()) && suggested.getTime() > Date.now()) return suggested;
     const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0); return d;
   });
   const [sending, setSending] = useState(false);
@@ -163,12 +166,12 @@ const st = StyleSheet.create({
   label: { fontSize: IS_WEB ? 14 : 12, fontWeight: '800', color: '#334155', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
 
   suggestedBox: {
-    backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A',
+    backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE',
     borderRadius: 12, padding: 14, marginBottom: 18,
   },
-  suggestedLabel: { fontSize: 11, fontWeight: '800', color: '#B45309', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 },
+  suggestedLabel: { fontSize: 11, fontWeight: '800', color: '#2563EB', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 },
   suggestedTxt: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
-  suggestedNote: { fontSize: 13, color: '#78716C', marginTop: 6, fontStyle: 'italic' },
+  suggestedNote: { fontSize: 13, color: '#64748B', marginTop: 6, fontStyle: 'italic' },
 
   webInput: {
     fontSize: 15, fontWeight: '700', color: '#2563EB',

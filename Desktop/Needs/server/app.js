@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server: SocketIOServer } = require('socket.io');
@@ -25,8 +26,11 @@ const gcal = require('./googleCalendar');
 
 
 // ── JWT ───────────────────────────────────────────────────────────────────────
-const JWT_SECRET     = process.env.JWT_SECRET     || 'needs-dev-secret-CHANGE-BEFORE-PRODUCTION';
-const REFRESH_SECRET = process.env.REFRESH_SECRET || 'needs-refresh-secret-CHANGE-BEFORE-PRODUCTION';
+const JWT_SECRET     = process.env.JWT_SECRET;
+const REFRESH_SECRET = process.env.REFRESH_SECRET;
+if (!JWT_SECRET || !REFRESH_SECRET) {
+  throw new Error('JWT_SECRET and REFRESH_SECRET environment variables are required but not set.');
+}
 
 const ACCESS_TOKEN_TTL  = '30m';
 const REFRESH_TOKEN_TTL = '7d';
@@ -99,7 +103,10 @@ io.on('connection', (socket) => {
   });
 });
 
-const atlasURI = 'mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority';
+const atlasURI = process.env.MONGO_URI;
+if (!atlasURI) {
+  throw new Error('MONGO_URI environment variable is required but not set.');
+}
 
 // ── Nominatim geocoder (free, no API key, 1 req/s limit) ─────────────────────
 async function geocodeAddress(addressText) {

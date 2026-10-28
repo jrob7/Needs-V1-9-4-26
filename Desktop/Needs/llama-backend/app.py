@@ -31,7 +31,9 @@ app.register_blueprint(media_bp, url_prefix="/ai")
 logging.getLogger("pymongo").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.DEBUG)
 
-MONGO_URI = "mongodb+srv://jrehurst7:FmFml9ohKDtGBh36@needcluster1.3mhquys.mongodb.net/?retryWrites=true&w=majority"
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI environment variable is required but not set.")
 client = MongoClient(MONGO_URI)
 db = client.Need
 collection = db.mistral_queries

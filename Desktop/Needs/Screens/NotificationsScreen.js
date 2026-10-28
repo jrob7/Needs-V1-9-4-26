@@ -640,9 +640,13 @@ const NotificationsScreen = () => {
     fetchNotifications();
     fetchActivity();
     fetchAppointments();
-    // Poll notifications every 15s while screen is focused so new match
-    // updates (info_provided, quote_update) appear without manual refresh
-    const pollInterval = setInterval(fetchNotifications, 5000);
+    // Poll every 5s while screen is focused so new match updates
+    // (info_provided, quote_update) and appointment/reschedule changes
+    // made by the other party appear without manual refresh
+    const pollInterval = setInterval(() => {
+      fetchNotifications();
+      fetchAppointments();
+    }, 5000);
     return () => clearInterval(pollInterval);
   }, [fetchNotifications, fetchActivity, fetchAppointments]));
 

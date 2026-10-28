@@ -7,7 +7,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
-import { NODE_API, FLASK_API } from '../config';
+import { NODE_API } from '../config';
 
 const UploadItems = () => {
   const { userId } = useContext(UserContext); // <-- userId from context
@@ -18,46 +18,6 @@ const UploadItems = () => {
   const [images, setImages] = useState([]);
   const [title, setTitle] = useState('');
   
-
-  const GOOGLE_VISION_API_KEY = 'AIzaSyDcozWA1GD5WpZUONt7V7lscHn80PddUps';
-  const GOOGLE_VISION_URL = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`;
-
-  const analyzeImageWithVisionAPI = async (base64Image) => {
-    try {
-      const response = await fetch(GOOGLE_VISION_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: base64Image },
-              features: [
-                { type: 'WEB_DETECTION', maxResults: 1 },
-             // { type: 'TEXT_DETECTION', maxResults: 1 },
-                { type: 'LOGO_DETECTION', maxResults: 1 },
-              ],
-            },
-          ],
-        }),
-      });
-
-      const data = await response.json();
-      if (!data.responses || !data.responses[0]) {
-        throw new Error('Vision API returned no valid response.');
-      }
-
-      const resp = data.responses[0];
-      const bestGuess    = resp.webDetection?.bestGuessLabels?.[0]?.label || '';
-      const webEntities  = resp.webDetection?.webEntities?.map(e => e.description).filter(Boolean) || [];
-      const textAnn      = resp.textAnnotations?.[0]?.description || '';
-      const logos        = resp.logoAnnotations?.map(l => l.description).filter(Boolean) || [];
-
-      return [bestGuess, ...webEntities, ...logos, textAnn].filter(Boolean).join(', ');
-    } catch (error) {
-      console.error('Vision API error:', error);
-      return '';
-    }
-  };
 
   const handleImagePick = async () => {
     try {
@@ -77,28 +37,6 @@ const UploadItems = () => {
       if (pickerResult.assets && pickerResult.assets[0]?.base64) {
         const selectedImage = pickerResult.assets[0];
         setImages(prev => [...prev, selectedImage]);
-  
-        // ✅ Step 1: Google Vision → Extract labels
-        const labels = await analyzeImageWithVisionAPI(selectedImage.base64);
-        console.log("🔍 Vision Labels:", labels);
-  
-        if (!labels) return;
-  
-        // ✅ Step 2: Send labels → Flask → Mistral (LLM)
-        const enhanceRes = await fetch(`${FLASK_API}/enhanceImageDescription`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ labels }),
-        });
-  
-        const enhanceData = await enhanceRes.json();
-        console.log("🧠 LLM Enhance Response:", enhanceData);
-  
-        // ✅ Step 3: Auto-fill fields
-        if (enhanceData.title) setTitle(enhanceData.title);
-        if (enhanceData.description) setDescription(enhanceData.description);
-  
-        Alert.alert("AI Completed", "Title & description auto-generated!");
       } else {
         Alert.alert('Error', 'No base64 data found in the selected image.');
       }

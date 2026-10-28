@@ -900,7 +900,23 @@ export default function SearchScreen() {
     const cleanedCity = text
       .replace(/^(look(?:ing)?\s+(?:in|near|around|at)|search(?:ing)?\s+(?:in|near|around|at|for)?|find\s+(?:in|near|around)?|near|around|in|at)\s+/i, '')
       .trim();
-    locationRef.current = { city: cleanedCity || text };
+    const queryText = cleanedCity || text;
+    // Resolve the typed city/zip/address into real coordinates so matching
+    // (and the saved need's location) works the same as GPS-based requests.
+    try {
+      const geoResp = await axios.post(`${FLASK_API}/ai/geocodeLocation`, { query: queryText });
+      if (geoResp.data?.resolved) {
+        locationRef.current = {
+          lat: geoResp.data.lat, lng: geoResp.data.lng,
+          city: geoResp.data.city || queryText,
+        };
+      } else {
+        locationRef.current = { city: queryText };
+      }
+    } catch (e) {
+      console.log('⚠️ geocodeLocation failed:', e?.message);
+      locationRef.current = { city: queryText };
+    }
     setAwaitingLocationInput(false); awaitingLocationRef.current = false;
     const pending = pendingNeedAfterLocation;
     setPendingNeedAfterLocation(null);

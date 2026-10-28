@@ -61,6 +61,43 @@ def reverse_geocode(lat, lng):
     except Exception:
         return "", "", ""
 
+def forward_geocode(query):
+    """Resolves a free-text city, zip code, or address into (lat, lng, city,
+    state, postcode) via Nominatim. Returns (None, None, '', '', '') on failure."""
+    try:
+        url = (f"https://nominatim.openstreetmap.org/search"
+               f"?q={urllib.parse.quote(query)}&format=json&addressdetails=1&limit=1&countrycodes=us")
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "NeedsApp/1.0 (jrehurst7@gmail.com)"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read())
+        if not data:
+            return None, None, "", "", ""
+        top = data[0]
+        addr = top.get("address", {})
+        city     = addr.get("city") or addr.get("town") or addr.get("village") or ""
+        state    = addr.get("state", "")
+        postcode = addr.get("postcode", "")
+        return float(top["lat"]), float(top["lon"]), city, state, postcode
+    except Exception:
+        return None, None, "", "", ""
+
+
+@match_bp.route("/geocodeLocation", methods=["POST"])
+def geocode_location_route():
+    """Resolves a user-typed city/zip/address into coordinates, used when
+    GPS isn't available and the chatbot asks the user to type a location."""
+    body = request.get_json(silent=True) or {}
+    query = (body.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "query is required"}), 400
+    lat, lng, city, state, postcode = forward_geocode(query)
+    if lat is None:
+        return jsonify({"resolved": False})
+    return jsonify({"resolved": True, "lat": lat, "lng": lng, "city": city, "state": state, "zip": postcode})
+
+
 def service_covers_location(doc, user_city, user_state, user_zip):
     """
     Binary gate: does this service cover the user's area?

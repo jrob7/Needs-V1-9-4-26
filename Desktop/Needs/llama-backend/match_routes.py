@@ -1262,13 +1262,19 @@ def generate_pricing_follow_up():
     prompt = (
         f'Customer request: "{query}"\n\n'
         f"Matching provider's pricing structure:\n{pricing_text}\n\n"
-        "Identify the single most important question to ask the customer that "
+        "First, check whether the customer's request already identifies which "
+        "tier from the list above applies — including by synonym or informal "
+        "wording (e.g. \"fridge\" = \"Refrigerator\", \"washer\" = \"Washer\"). "
+        "If it does, respond with {\"question\": null} — do not ask the "
+        "customer to repeat information they already gave.\n\n"
+        "Only if the tier genuinely cannot be determined from their request, "
+        "identify the single most important question to ask the customer that "
         "would let you select the correct pricing tier from the list above. "
         "The question must be short, plain-language, and answerable without "
         "technical knowledge (e.g. size, quantity, location — not brand or specs).\n\n"
         "Respond with ONLY valid JSON:\n"
         '{"question": "<short question>"}\n'
-        "or if no useful differentiating question can be derived:\n"
+        "or if the tier is already clear or no useful differentiating question can be derived:\n"
         '{"question": null}'
     )
 

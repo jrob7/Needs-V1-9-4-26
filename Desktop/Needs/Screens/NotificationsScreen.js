@@ -1079,10 +1079,10 @@ const styles = StyleSheet.create({
 
   row: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: W ? 21 : 16, paddingVertical: W ? 18 : 14, gap: W ? 16 : 12,
-    borderWidth: 1, borderColor: '#E5E7EB', borderRadius: W ? 16 : 12,
+    borderWidth: 1, borderColor: '#CBD5E1', borderRadius: W ? 16 : 12,
     marginHorizontal: W ? 16 : 12, marginTop: W ? 10 : 8, backgroundColor: '#fff',
   },
-  rowUnread: { backgroundColor: '#F8FAFF', borderColor: '#DBEAFE' },
+  rowUnread: { backgroundColor: '#F8FAFF', borderColor: '#93C5FD' },
   iconWrap:  { width: W ? 57 : 44, height: W ? 57 : 44, borderRadius: W ? 29 : 22, justifyContent: 'center', alignItems: 'center' },
   leadAvatarImg: { width: W ? 57 : 44, height: W ? 57 : 44, borderRadius: W ? 29 : 22, borderWidth: 2, borderColor: '#2563EB' },
   rowContent:{ flex: 1 },

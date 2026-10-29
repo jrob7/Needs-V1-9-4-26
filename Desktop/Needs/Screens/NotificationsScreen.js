@@ -970,7 +970,6 @@ const NotificationsScreen = () => {
                   />
                 : <NotifRow item={item} onPress={() => handleNotifPress(item)} />
           )}
-          ItemSeparatorComponent={() => <View style={styles.sep} />}
           contentContainerStyle={{ paddingBottom: 20 }}
           showsVerticalScrollIndicator={false}
         />
@@ -1078,8 +1077,12 @@ const styles = StyleSheet.create({
   },
   tabBadgeTxt: { fontSize: W ? 14 : 10, fontWeight: '800', color: '#fff' },
 
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: W ? 21 : 16, paddingVertical: W ? 18 : 14, gap: W ? 16 : 12 },
-  rowUnread: { backgroundColor: '#F8FAFF' },
+  row: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: W ? 21 : 16, paddingVertical: W ? 18 : 14, gap: W ? 16 : 12,
+    borderWidth: 1, borderColor: '#E5E7EB', borderRadius: W ? 16 : 12,
+    marginHorizontal: W ? 16 : 12, marginTop: W ? 10 : 8, backgroundColor: '#fff',
+  },
+  rowUnread: { backgroundColor: '#F8FAFF', borderColor: '#DBEAFE' },
   iconWrap:  { width: W ? 57 : 44, height: W ? 57 : 44, borderRadius: W ? 29 : 22, justifyContent: 'center', alignItems: 'center' },
   leadAvatarImg: { width: W ? 57 : 44, height: W ? 57 : 44, borderRadius: W ? 29 : 22, borderWidth: 2, borderColor: '#2563EB' },
   rowContent:{ flex: 1 },

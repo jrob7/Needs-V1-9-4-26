@@ -34,7 +34,13 @@ async function sendEmail({ to, subject, html }) {
     console.warn('⚠️ sendEmail skipped — RESEND_API_KEY not set');
     return { skipped: true };
   }
-  return resend.emails.send({ from: EMAIL_FROM, to, subject, html });
+  const result = await resend.emails.send({ from: EMAIL_FROM, to, subject, html });
+  if (result?.error) {
+    console.error('❌ Resend send failed:', JSON.stringify(result.error));
+  } else {
+    console.log('📧 Resend send ok:', result?.data?.id);
+  }
+  return result;
 }
 
 
@@ -3553,7 +3559,7 @@ app.post('/requestQuote', async (req, res) => {
 
     const confirmUrl = `${NODE_API}/confirmQuoteRequest/${token}`;
     const businessName = service.businessName || service.providerName || 'this business';
-    await sendEmail({
+    const emailResult = await sendEmail({
       to: email,
       subject: `Confirm your quote request to ${businessName}`,
       html: `
@@ -3564,7 +3570,10 @@ app.post('/requestQuote', async (req, res) => {
       `,
     });
 
-    res.json({ success: true, message: 'Check your email to confirm your request before it is sent to the business.' });
+    if (emailResult?.error) {
+      return res.status(502).json({ error: 'Could not send confirmation email', detail: emailResult.error });
+    }
+    res.json({ success: true, skipped: !!emailResult?.skipped, message: 'Check your email to confirm your request before it is sent to the business.' });
   } catch (err) {
     console.error('❌ /requestQuote error:', err);
     res.status(500).json({ error: 'Internal Server Error' });

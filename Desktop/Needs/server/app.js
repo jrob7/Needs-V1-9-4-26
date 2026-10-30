@@ -1810,9 +1810,9 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?')
 </div>
 
 <style>
-  .chat-section { margin: 0 24px 20px; }
+  .chat-section { margin: 0 24px 20px; border: 1px solid #CBD5E1; border-radius: 16px; padding: 18px; background: #fff; }
   .chat-heading { font-size: 1.05rem; font-weight: 700; color: #1a1a1a; margin-bottom: 12px; }
-  .chat-box { background: #fff; border-radius: 16px; padding: 14px; min-height: 80px; max-height: 320px; overflow-y: auto; box-shadow: 0 2px 10px rgba(0,0,0,.06); display: flex; flex-direction: column; gap: 10px; }
+  .chat-box { background: #fff; border-radius: 12px; padding: 0 2px; min-height: 80px; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
   .chat-input-row { display: flex; gap: 8px; margin-top: 10px; }
   .chat-input { flex: 1; border: 1.5px solid #e0e0e0; border-radius: 24px; padding: 12px 18px; font-size: .92rem; outline: none; background: #fff; color: #1a1a1a; }
   .chat-input:focus { border-color: #1a1a1a; }

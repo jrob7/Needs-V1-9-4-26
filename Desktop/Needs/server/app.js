@@ -1798,13 +1798,13 @@ app.post('/m/:slug/contact', async (req, res) => {
 });
 
 // Shared chat widget — injected into every module page
-function moduleChatWidget(slug, businessName) {
+function moduleChatWidget(slug, businessName, placeholder = 'What do you need?') {
   return `
 <div class="chat-section" id="chat-section">
   <h2 class="chat-heading">Ask ${businessName}</h2>
   <div class="chat-box" id="chat-box"></div>
   <div class="chat-input-row" id="chat-input-row">
-    <input class="chat-input" id="chat-input" type="text" placeholder="What do you need?" autocomplete="off" maxlength="300">
+    <input class="chat-input" id="chat-input" type="text" placeholder="${placeholder}" autocomplete="off" maxlength="300">
     <button class="chat-send" id="chat-send" aria-label="Send">&#9658;</button>
   </div>
 </div>
@@ -2273,14 +2273,14 @@ app.get('/m/:slug', async (req, res) => {
     <div>${serviceRows}</div>
   </div>` : ''}
 
+  <div class="section">
+  ${moduleChatWidget(slug, name, 'What do you Need? Ask about services or request a personalized quote')}
+  </div>
+
   ${statBoxes ? `
   <div class="section">
     <div class="stats">${statBoxes}</div>
   </div>` : ''}
-
-  <div class="section">
-  ${moduleChatWidget(slug, name)}
-  </div>
 
   <div class="actions">
     <a class="btn btn-primary" href="needs://service/${doc._id}">Request on Needs</a>

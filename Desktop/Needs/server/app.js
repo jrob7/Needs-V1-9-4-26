@@ -19,7 +19,23 @@ const NODE_API = process.env.NODE_API || "http://localhost:3000";
 const FLASK_API = process.env.FLASK_API || "https://llama-go-production.up.railway.app";
 const fundraisersCol = () => client.db('Need').collection('Fundraisers');
 const path = require('path');
+const crypto = require('crypto');
 const gcal = require('./googleCalendar');
+
+// ── Email (Resend) ──────────────────────────────────────────────────────────
+// Lazy/optional: the rest of the app must not crash if this isn't configured
+// yet, since email is only needed for the agent/no-account quote-request flow.
+const { Resend } = require('resend');
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const EMAIL_FROM = process.env.EMAIL_FROM || 'Needs <onboarding@resend.dev>';
+
+async function sendEmail({ to, subject, html }) {
+  if (!resend) {
+    console.warn('⚠️ sendEmail skipped — RESEND_API_KEY not set');
+    return { skipped: true };
+  }
+  return resend.emails.send({ from: EMAIL_FROM, to, subject, html });
+}
 
 
 
@@ -3479,6 +3495,142 @@ app.post('/getServicePricingQuestion', async (req, res) => {
   } catch (e) {
     console.error('getServicePricingQuestion error:', e?.message);
     return res.json({ question: null });
+  }
+});
+
+// ─── Agent/no-account quote requests — email double opt-in ────────────────────
+// Lets an AI agent (or anyone else without a Needs account) submit a quote
+// request with just an email. The request never reaches the business until
+// the person clicks the confirmation link, which prevents bots/spam from
+// flooding businesses with fake leads.
+function renderConfirmPage(success, message) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${success ? 'Request Confirmed' : 'Confirmation Failed'} — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #fff; border-radius: 16px; padding: 36px 28px; max-width: 420px; text-align: center; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .icon { font-size: 2.6rem; margin-bottom: 12px; }
+    h1 { font-size: 1.2rem; color: #0F172A; margin-bottom: 8px; }
+    p { font-size: .95rem; color: #64748B; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">${success ? '✅' : '⚠️'}</div>
+    <h1>${success ? 'Request Confirmed' : 'Confirmation Failed'}</h1>
+    <p>${message}</p>
+  </div>
+</body>
+</html>`;
+}
+
+// POST /requestQuote — body: { businessId, description, email }
+app.post('/requestQuote', async (req, res) => {
+  try {
+    const { businessId, description, email } = req.body || {};
+    if (!businessId || !description || !email) {
+      return res.status(400).json({ error: 'businessId, description, and email are required' });
+    }
+    if (!ObjectId.isValid(businessId)) return res.status(400).json({ error: 'Invalid businessId' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
+
+    const service = await database.collection('Services').findOne({ _id: new ObjectId(businessId) });
+    if (!service) return res.status(404).json({ error: 'Business not found' });
+
+    const token = crypto.randomBytes(24).toString('hex');
+    await database.collection('PendingQuoteRequests').insertOne({
+      serviceId: new ObjectId(businessId),
+      description: String(description).slice(0, 2000),
+      email,
+      token,
+      createdAt: new Date(),
+      confirmedAt: null,
+    });
+
+    const confirmUrl = `${NODE_API}/confirmQuoteRequest/${token}`;
+    const businessName = service.businessName || service.providerName || 'this business';
+    await sendEmail({
+      to: email,
+      subject: `Confirm your quote request to ${businessName}`,
+      html: `
+        <p>You requested a quote from <strong>${businessName}</strong> on Needs:</p>
+        <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${description}</p>
+        <p><a href="${confirmUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Confirm and Send Request</a></p>
+        <p style="color:#94A3B8;font-size:.85rem;">If you did not request this, you can safely ignore this email — nothing will be sent unless you click the link above.</p>
+      `,
+    });
+
+    res.json({ success: true, message: 'Check your email to confirm your request before it is sent to the business.' });
+  } catch (err) {
+    console.error('❌ /requestQuote error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /confirmQuoteRequest/:token — clicked from the confirmation email
+app.get('/confirmQuoteRequest/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const pending = await database.collection('PendingQuoteRequests').findOne({ token });
+    if (!pending) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has already been used.'));
+    }
+    if (pending.confirmedAt) {
+      return res.send(renderConfirmPage(true, 'This request was already confirmed and sent.'));
+    }
+
+    // Find or create a lightweight account tied to this email so the
+    // request flows through the existing matching/quote system unchanged.
+    let user = await database.collection('Users').findOne({ email: pending.email });
+    let userId;
+    if (user) {
+      userId = user._id;
+    } else {
+      const randomPassword = crypto.randomBytes(16).toString('hex');
+      const hashedPassword = await bcrypt.hash(randomPassword, 12);
+      const result = await database.collection('Users').insertOne({
+        firstName: null, lastName: null, organization: null, email: pending.email,
+        password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
+        accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
+        cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
+        recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
+      });
+      userId = result.insertedId;
+    }
+
+    const service = await database.collection('Services').findOne({ _id: pending.serviceId });
+
+    const needResult = await database.collection('NeedRequests').insertOne({
+      searchText: pending.description, urgency: 'ASAP', bidprice: 0,
+      context: pending.description, needType: 'service', userId,
+      serviceMatchStatus: 'processing', mediaType: null, mediaUri: null, fileName: 'media',
+      date: new Date(), createdAt: new Date(),
+    });
+
+    await database.collection('PendingQuoteRequests').updateOne(
+      { _id: pending._id }, { $set: { confirmedAt: new Date() } }
+    );
+
+    // Reuse the existing matching pipeline exactly as the normal in-app flow does
+    fetch(`${NODE_API}/triggerServiceMatching`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        needId: needResult.insertedId.toString(),
+        userId: userId.toString(),
+        query: pending.description,
+      }),
+    }).catch(e => console.warn('⚠️ triggerServiceMatching call failed:', e?.message));
+
+    const businessName = service?.businessName || service?.providerName || 'the business';
+    res.send(renderConfirmPage(true, `Your request has been confirmed and sent to ${businessName}. They will reach out soon.`));
+  } catch (err) {
+    console.error('❌ /confirmQuoteRequest error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your request. Please try again.'));
   }
 });
 

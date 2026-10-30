@@ -2164,7 +2164,7 @@ app.get('/m/:slug', async (req, res) => {
   });
 
   const photoCards = photos.map(url =>
-    `<img src="${url}" alt="${name}" loading="lazy" style="width:120px;height:90px;object-fit:cover;border-radius:10px;flex-shrink:0">`
+    `<img src="${url}" alt="${name}" loading="lazy" style="width:120px;height:90px;object-fit:contain;border-radius:10px;flex-shrink:0;background:#0F172A">`
   ).join('');
 
   return res.send(`<!DOCTYPE html>
@@ -2180,27 +2180,30 @@ app.get('/m/:slug', async (req, res) => {
   <script type="application/ld+json">${jsonLd}</script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; }
-    .hero { background: #1a1a1a; padding: 48px 20px 60px; text-align: center; color: #fff; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; color: #0F172A; }
+    .page { max-width: 600px; margin: 0 auto; background: #f5f5f5; min-height: 100vh; }
+    .hero { background: #0F172A; padding: 48px 20px 60px; text-align: center; color: #fff; }
     .hero h1 { font-size: 1.6rem; font-weight: 700; }
-    .hero p { font-size: .9rem; color: #aaa; margin-top: 6px; }
-    .badge { display: inline-block; background: rgba(255,255,255,.15); border-radius: 20px; padding: 4px 12px; font-size: .8rem; color: #fff; margin-top: 10px; }
+    .hero p { font-size: .9rem; color: #94A3B8; margin-top: 6px; }
+    .badge { display: inline-block; background: #EFF6FF; border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 600; color: #2563EB; margin-top: 10px; margin-right: 6px; }
     .card { background: #fff; border-radius: 16px; margin: -28px 16px 16px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
     .row { display: flex; justify-content: space-between; font-size: .88rem; color: #555; margin-top: 10px; gap: 8px; flex-wrap: wrap; }
     .row span { display: flex; align-items: center; gap: 4px; }
     .section { margin: 0 16px 16px; }
     .section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #333; }
     .photo-row { display: flex; gap: 10px; overflow-x: auto; }
+    .photo-row img { background: #0F172A; }
     .desc { background: #fff; border-radius: 12px; padding: 14px 16px; font-size: .88rem; color: #444; line-height: 1.6; }
     .actions { display: flex; gap: 10px; margin: 0 16px 32px; }
     .btn { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; }
-    .btn-primary { background: #1a1a1a; color: #fff; }
-    .btn-secondary { background: #fff; color: #1a1a1a; border: 1.5px solid #ddd; }
+    .btn-primary { background: #2563EB; color: #fff; }
+    .btn-secondary { background: #fff; color: #2563EB; border: 1.5px solid #BFDBFE; }
     .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }
     .powered a { color: #aaa; text-decoration: none; }
   </style>
 </head>
 <body>
+  <div class="page">
   <div class="hero">
     <h1>${name}</h1>
     <p>${tagline}</p>
@@ -2238,6 +2241,7 @@ app.get('/m/:slug', async (req, res) => {
   </div>
 
   <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>
+  </div>
 </body>
 </html>`);
 });

@@ -2152,8 +2152,7 @@ app.get('/m/:slug', async (req, res) => {
   const desc         = doc.description || tagline;
   const licensed     = doc.licensed ? '✓ Licensed & Insured' : '';
   const rating       = doc.rating || '4.8';
-  const photos       = (doc.portfolioImageUrls || []).slice(0, 5);
-  const heroImage     = photos[0] || null;
+  const photos       = (doc.portfolioImageUrls || []).slice(0, 10);
   const topServices  = doc.topServices || [];
 
   const jsonLd = JSON.stringify({
@@ -2166,8 +2165,11 @@ app.get('/m/:slug', async (req, res) => {
     "url": MODULE_URL,
   });
 
-  const photoCards = photos.map(url =>
-    `<img src="${url}" alt="${name}" loading="lazy" style="width:120px;height:90px;object-fit:contain;border-radius:10px;flex-shrink:0;background:#0F172A">`
+  const heroSlides = photos.map(url =>
+    `<img class="hero-slide" src="${url}" alt="${name}" loading="lazy">`
+  ).join('');
+  const heroDots = photos.map((_, i) =>
+    `<span class="dot${i === 0 ? ' active' : ''}"></span>`
   ).join('');
 
   const serviceRows = topServices.map(s =>
@@ -2195,8 +2197,20 @@ app.get('/m/:slug', async (req, res) => {
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; color: #0F172A; }
-    .page { max-width: 600px; margin: 0 auto; background: #fff; min-height: 100vh; }
-    .hero-img { width: 100%; height: 320px; object-fit: contain; background: #0F172A; display: block; }
+    .page { max-width: 750px; margin: 0 auto; background: #fff; min-height: 100vh; }
+    .hero-carousel { position: relative; width: 100%; height: 400px; overflow: hidden; background: #0F172A; }
+    .hero-track { display: flex; height: 100%; transition: transform .3s ease; }
+    .hero-slide { width: 100%; height: 100%; object-fit: contain; flex-shrink: 0; background: #0F172A; }
+    .hero-arrow {
+      position: absolute; top: 50%; transform: translateY(-50%); width: 38px; height: 38px;
+      border-radius: 50%; background: rgba(15,23,42,.55); color: #fff; border: none;
+      font-size: 1.3rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    .hero-arrow-left { left: 12px; }
+    .hero-arrow-right { right: 12px; }
+    .hero-dots { position: absolute; bottom: 14px; left: 0; right: 0; display: flex; justify-content: center; gap: 6px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.4); }
+    .dot.active { background: #fff; }
     .header { padding: 20px 16px 4px; }
     .badge-row { margin-bottom: 10px; }
     .badge { display: inline-block; background: #DCFCE7; border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 700; color: #166534; margin-right: 6px; }
@@ -2225,7 +2239,14 @@ app.get('/m/:slug', async (req, res) => {
 </head>
 <body>
   <div class="page">
-  ${heroImage ? `<img class="hero-img" src="${heroImage}" alt="${name}">` : ''}
+  ${photos.length ? `
+  <div class="hero-carousel">
+    <div class="hero-track" id="heroTrack">${heroSlides}</div>
+    ${photos.length > 1 ? `
+    <button class="hero-arrow hero-arrow-left" onclick="heroPrev()" aria-label="Previous photo">‹</button>
+    <button class="hero-arrow hero-arrow-right" onclick="heroNext()" aria-label="Next photo">›</button>
+    <div class="hero-dots">${heroDots}</div>` : ''}
+  </div>` : ''}
 
   <div class="header">
     ${(category || licensed) ? `
@@ -2257,12 +2278,6 @@ app.get('/m/:slug', async (req, res) => {
     <div class="stats">${statBoxes}</div>
   </div>` : ''}
 
-  ${photos.length ? `
-  <div class="section">
-    <h2>Portfolio</h2>
-    <div class="photo-row">${photoCards}</div>
-  </div>` : ''}
-
   <div class="section">
   ${moduleChatWidget(slug, name)}
   </div>
@@ -2274,6 +2289,18 @@ app.get('/m/:slug', async (req, res) => {
 
   <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>
   </div>
+  ${photos.length > 1 ? `
+  <script>
+    let heroIdx = 0;
+    const heroCount = ${photos.length};
+    function heroGoto(i) {
+      heroIdx = (i + heroCount) % heroCount;
+      document.getElementById('heroTrack').style.transform = 'translateX(-' + (heroIdx * 100) + '%)';
+      document.querySelectorAll('.dot').forEach((d, j) => d.classList.toggle('active', j === heroIdx));
+    }
+    function heroPrev() { heroGoto(heroIdx - 1); }
+    function heroNext() { heroGoto(heroIdx + 1); }
+  </script>` : ''}
 </body>
 </html>`);
 });

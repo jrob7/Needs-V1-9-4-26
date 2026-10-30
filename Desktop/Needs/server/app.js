@@ -2141,17 +2141,20 @@ app.get('/m/:slug', async (req, res) => {
   }
 
   // ── SERVICE MODULE ────────────────────────────────────────────────────────
-  const name      = doc.businessName || doc.providerName || '';
-  const tagline   = doc.tagline || '';
-  const category  = doc.category || '';
-  const area      = doc.serviceArea || doc.businessAddress || '';
-  const phone     = doc.phone || '';
-  const rate      = doc.rateMin ? `$${doc.rateMin}${doc.rateMax ? '–$' + doc.rateMax : ''}` : '';
-  const rateLabel = doc.rateType ? `${rate} / ${doc.rateType}` : rate;
-  const avail     = doc.availability || '';
-  const desc      = doc.description || tagline;
-  const licensed  = doc.licensed ? '✓ Licensed & Insured' : '';
-  const photos    = (doc.portfolioImageUrls || []).slice(0, 5);
+  const name         = doc.businessName || doc.providerName || '';
+  const providerName = doc.providerName && doc.providerName !== name ? doc.providerName : '';
+  const tagline      = doc.tagline || '';
+  const category     = doc.category || '';
+  const area         = doc.serviceArea || doc.businessAddress || '';
+  const phone        = doc.phone || '';
+  const avail        = doc.availability || '';
+  const responseTime = doc.responseTime || '';
+  const desc         = doc.description || tagline;
+  const licensed     = doc.licensed ? '✓ Licensed & Insured' : '';
+  const rating       = doc.rating || '4.8';
+  const photos       = (doc.portfolioImageUrls || []).slice(0, 5);
+  const heroImage     = photos[0] || null;
+  const topServices  = doc.topServices || [];
 
   const jsonLd = JSON.stringify({
     "@context": "https://schema.org",
@@ -2167,6 +2170,17 @@ app.get('/m/:slug', async (req, res) => {
     `<img src="${url}" alt="${name}" loading="lazy" style="width:120px;height:90px;object-fit:contain;border-radius:10px;flex-shrink:0;background:#0F172A">`
   ).join('');
 
+  const serviceRows = topServices.map(s =>
+    `<div class="service-row">${s.name || s}</div>`
+  ).join('');
+
+  const statBoxes = [
+    avail        ? { value: avail, label: 'Availability' } : null,
+    responseTime ? { value: responseTime, label: 'Response' } : null,
+  ].filter(Boolean).map(s => `
+    <div class="stat-box"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>
+  `).join('');
+
   return res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2181,21 +2195,28 @@ app.get('/m/:slug', async (req, res) => {
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; color: #0F172A; }
-    .page { max-width: 600px; margin: 0 auto; background: #f5f5f5; min-height: 100vh; }
-    .hero { background: #0F172A; padding: 48px 20px 60px; text-align: center; color: #fff; }
-    .hero h1 { font-size: 1.6rem; font-weight: 700; }
-    .hero p { font-size: .9rem; color: #94A3B8; margin-top: 6px; }
-    .badge { display: inline-block; background: #EFF6FF; border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 600; color: #2563EB; margin-top: 10px; margin-right: 6px; }
-    .card { background: #fff; border-radius: 16px; margin: -28px 16px 16px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-    .row { display: flex; justify-content: space-between; font-size: .88rem; color: #555; margin-top: 10px; gap: 8px; flex-wrap: wrap; }
-    .row span { display: flex; align-items: center; gap: 4px; }
-    .section { margin: 0 16px 16px; }
-    .section h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: #333; }
+    .page { max-width: 600px; margin: 0 auto; background: #fff; min-height: 100vh; }
+    .hero-img { width: 100%; height: 320px; object-fit: contain; background: #0F172A; display: block; }
+    .header { padding: 20px 16px 4px; }
+    .badge-row { margin-bottom: 10px; }
+    .badge { display: inline-block; background: #DCFCE7; border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 700; color: #166534; margin-right: 6px; }
+    .name { font-size: 1.6rem; font-weight: 800; color: #0F172A; line-height: 1.2; }
+    .provider { font-size: 1rem; font-weight: 600; color: #2563EB; margin-top: 4px; }
+    .meta-row { font-size: .9rem; color: #64748B; margin-top: 8px; }
+    .meta-row .star { color: #F59E0B; }
+    .section { margin: 20px 16px 0; }
+    .section h2 { font-size: 1.05rem; font-weight: 800; margin-bottom: 10px; color: #0F172A; }
+    .desc { font-size: .92rem; color: #475569; line-height: 1.6; }
+    .service-row { padding: 12px 0; border-bottom: 1px solid #E2E8F0; font-size: .95rem; font-weight: 600; color: #0F172A; }
+    .service-row:last-child { border-bottom: none; }
+    .stats { display: flex; gap: 10px; margin-top: 14px; }
+    .stat-box { flex: 1; background: #F1F5F9; border-radius: 12px; padding: 14px; text-align: center; }
+    .stat-value { font-size: .95rem; font-weight: 800; color: #0F172A; }
+    .stat-label { font-size: .78rem; color: #94A3B8; margin-top: 2px; }
     .photo-row { display: flex; gap: 10px; overflow-x: auto; }
     .photo-row img { background: #0F172A; }
-    .desc { background: #fff; border-radius: 12px; padding: 14px 16px; font-size: .88rem; color: #444; line-height: 1.6; }
-    .actions { display: flex; gap: 10px; margin: 0 16px 32px; }
-    .btn { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 600; cursor: pointer; text-decoration: none; text-align: center; }
+    .actions { display: flex; gap: 10px; margin: 28px 16px 32px; }
+    .btn { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 700; cursor: pointer; text-decoration: none; text-align: center; }
     .btn-primary { background: #2563EB; color: #fff; }
     .btn-secondary { background: #fff; color: #2563EB; border: 1.5px solid #BFDBFE; }
     .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }
@@ -2204,19 +2225,18 @@ app.get('/m/:slug', async (req, res) => {
 </head>
 <body>
   <div class="page">
-  <div class="hero">
-    <h1>${name}</h1>
-    <p>${tagline}</p>
-    ${category ? `<span class="badge">${category}</span>` : ''}
-    ${licensed  ? `<span class="badge">${licensed}</span>`  : ''}
-  </div>
+  ${heroImage ? `<img class="hero-img" src="${heroImage}" alt="${name}">` : ''}
 
-  <div class="card">
-    <div class="row">
-      ${area      ? `<span>📍 ${area}</span>`         : ''}
-      ${rateLabel ? `<span>💰 ${rateLabel}</span>`    : ''}
-      ${avail     ? `<span>🕐 ${avail}</span>`        : ''}
-      ${phone     ? `<span>📞 ${phone}</span>`        : ''}
+  <div class="header">
+    ${(category || licensed) ? `
+    <div class="badge-row">
+      ${category ? `<span class="badge">${category}</span>` : ''}
+      ${licensed ? `<span class="badge">${licensed}</span>` : ''}
+    </div>` : ''}
+    <div class="name">${name}</div>
+    ${providerName ? `<div class="provider">${providerName}</div>` : ''}
+    <div class="meta-row">
+      <span class="star">★</span> ${rating}${category ? ` · ${category}` : ''}${area ? ` · ${area}` : ''}
     </div>
   </div>
 
@@ -2226,14 +2246,26 @@ app.get('/m/:slug', async (req, res) => {
     <div class="desc">${desc}</div>
   </div>` : ''}
 
+  ${serviceRows ? `
+  <div class="section">
+    <h2>Top Services</h2>
+    <div>${serviceRows}</div>
+  </div>` : ''}
+
+  ${statBoxes ? `
+  <div class="section">
+    <div class="stats">${statBoxes}</div>
+  </div>` : ''}
+
   ${photos.length ? `
   <div class="section">
     <h2>Portfolio</h2>
     <div class="photo-row">${photoCards}</div>
   </div>` : ''}
 
-  <style>.chat-section { margin: 0 16px 16px; }</style>
+  <div class="section">
   ${moduleChatWidget(slug, name)}
+  </div>
 
   <div class="actions">
     <a class="btn btn-primary" href="needs://service/${doc._id}">Request on Needs</a>

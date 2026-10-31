@@ -281,7 +281,7 @@ def module_chat():
     """
     Grounded Q&A for module pages.
     Body: { context: str, message: str, history: [{role, text}] }
-    Returns: { reply: str, cannotAnswer: bool }
+    Returns: { reply: str|None, cannotAnswer: bool, intent: "quote"|"question" }
     """
     body = request.get_json(silent=True) or {}
     context = (body.get("context") or "").strip()
@@ -290,6 +290,21 @@ def module_chat():
 
     if not message:
         return jsonify({"error": "message is required"}), 400
+
+    # Classify intent first — a quote request skips straight to the existing
+    # quote flow rather than attempting to answer from business info.
+    intent_prompt = f"""Classify the customer message below as QUOTE or QUESTION.
+QUOTE: they want to hire this business, get pricing for their own specific job, or start the process of getting work done.
+QUESTION: a general informational question (hours, what services are offered, general policies, etc.) that is not asking to be hired or quoted.
+
+Customer message: "{message}"
+
+Answer with exactly one word: QUOTE or QUESTION"""
+    intent_raw = (generate_response(intent_prompt) or "").strip().upper()
+    intent = "quote" if "QUOTE" in intent_raw else "question"
+
+    if intent == "quote":
+        return jsonify({"reply": None, "cannotAnswer": False, "intent": "quote"})
 
     history_text = ""
     for turn in history[-6:]:
@@ -319,7 +334,7 @@ Assistant:"""
     if cannot_answer:
         raw = "I don't have that information available. Would you like to send your question directly to this business?"
 
-    return jsonify({"reply": raw, "cannotAnswer": cannot_answer})
+    return jsonify({"reply": raw, "cannotAnswer": cannot_answer, "intent": "question"})
 
 import json as _json
 

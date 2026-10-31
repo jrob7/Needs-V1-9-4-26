@@ -20,6 +20,7 @@ import RespondToLeadModal from './RespondToLeadModal';
 import QuoteResponseModal from './QuoteResponseModal';
 import RescheduleRequestModal from './RescheduleRequestModal';
 import RescheduleResponseModal from './RescheduleResponseModal';
+import AnswerQuestionModal from './AnswerQuestionModal';
 
 import { NODE_API, FLASK_API } from '../config';
 import { IS_WEB, IS_MOBILE_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
@@ -484,6 +485,31 @@ const RescheduleRequestRow = ({ item, onRespond }) => (
   </View>
 );
 
+const ModuleQuestionRow = ({ item, onRespond }) => (
+  <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
+    <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
+      <Ionicons name="chatbubble-outline" size={W ? 26 : 20} color="#7C3AED" />
+    </View>
+    <View style={styles.rowContent}>
+      <View style={styles.rowTop}>
+        <Text style={styles.rowTitle} numberOfLines={1}>{item.title || '💬 New Question'}</Text>
+        <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+      </View>
+      <Text style={styles.rowBody}>{item.question || item.body}</Text>
+      {item.answered ? (
+        <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>✓ Answered</Text>
+      ) : (
+        <View style={styles.leadButtonsRow}>
+          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onRespond(item)}>
+            <Text style={styles.respondBtnText}>Answer</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+    {!item.read && <View style={styles.unreadDot} />}
+  </View>
+);
+
 const InfoProvidedRow = ({ item, onRespond }) => (
   <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
     <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
@@ -517,6 +543,7 @@ const NotificationsScreen = () => {
   const [quoteRespondTarget, setQuoteRespondTarget] = useState(null); // { notification, initialTab }
   const [rescheduleRequestTarget, setRescheduleRequestTarget] = useState(null); // appointment
   const [rescheduleResponseTarget, setRescheduleResponseTarget] = useState(null); // notification
+  const [answerQuestionTarget, setAnswerQuestionTarget] = useState(null); // notification
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
@@ -957,6 +984,8 @@ const NotificationsScreen = () => {
                 ? <AppointmentConfirmedRow item={item} />
               : item.type === 'reschedule_request'
                 ? <RescheduleRequestRow item={item} onRespond={i => setRescheduleResponseTarget(i)} />
+              : item.type === 'module_question'
+                ? <ModuleQuestionRow item={item} onRespond={i => setAnswerQuestionTarget(i)} />
               : item.type === 'info_provided'
                 ? <InfoProvidedRow item={item} onRespond={i => {
                     const qId = i.quoteId ? String(i.quoteId) : null;
@@ -1020,6 +1049,18 @@ const NotificationsScreen = () => {
             if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, read: true } : n));
             setRescheduleResponseTarget(null);
             fetchAppointments();
+          }}
+        />
+      )}
+
+      {answerQuestionTarget && (
+        <AnswerQuestionModal
+          notification={answerQuestionTarget}
+          onClose={() => setAnswerQuestionTarget(null)}
+          onSent={() => {
+            const id = answerQuestionTarget._id;
+            if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, answered: true, read: true } : n));
+            setAnswerQuestionTarget(null);
           }}
         />
       )}

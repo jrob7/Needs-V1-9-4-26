@@ -1768,6 +1768,15 @@ app.post('/m/:slug/chat', async (req, res) => {
       if (doc.licensed) ctx += `Licensed & Insured: Yes\n`;
       if ((doc.goodToKnow || []).length)
         ctx += `\nGood to Know:\n${doc.goodToKnow.map(g => `- ${g}`).join('\n')}\n`;
+      if ((doc.topServices || []).length)
+        ctx += `\nTop Services:\n${doc.topServices.map(s => `- ${s.name || s}`).join('\n')}\n`;
+      if (doc.pricingDetails && Object.keys(doc.pricingDetails).length) {
+        ctx += `\nPricing:\n`;
+        for (const [sub, qa] of Object.entries(doc.pricingDetails)) {
+          ctx += `${sub}:\n`;
+          for (const [q, a] of Object.entries(qa || {})) ctx += `  ${q} ${a}\n`;
+        }
+      }
     }
 
     const flaskRes = await fetch(`${FLASK_API}/module-chat`, {
@@ -1784,13 +1793,17 @@ app.post('/m/:slug/chat', async (req, res) => {
   }
 });
 
-// MODULE CONTACT  POST /m/:slug/contact  — saves unanswered question + contact info
-app.post('/m/:slug/contact', async (req, res) => {
+// MODULE ASK BUSINESS  POST /m/:slug/askBusiness  — email double opt-in, same
+// anti-spam pattern as /requestQuote. On confirm, lands in the business's
+// normal Activity/Matches feed as a module_question notification.
+app.post('/m/:slug/askBusiness', async (req, res) => {
   try {
     const { slug } = req.params;
-    const { question, name, email, phone } = req.body || {};
+    const { question, email } = req.body || {};
     if (!question) return res.status(400).json({ error: 'question required' });
-    if (!email && !phone) return res.status(400).json({ error: 'email or phone required' });
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'A valid email is required' });
+    }
 
     const db = client.db('Need');
     let doc = await db.collection('Restaurants').findOne({ slug });
@@ -1800,27 +1813,134 @@ app.post('/m/:slug/contact', async (req, res) => {
 
     const businessName = type === 'restaurant' ? doc.name : (doc.businessName || doc.providerName);
 
-    await db.collection('ModuleQuestions').insertOne({
-      slug,
-      businessId: doc._id,
-      businessName,
-      type,
-      question,
-      contactName: name || null,
-      contactEmail: email || null,
-      contactPhone: phone || null,
-      createdAt: new Date(),
+    const token = crypto.randomBytes(24).toString('hex');
+    await db.collection('PendingModuleQuestions').insertOne({
+      slug, businessId: doc._id, businessType: type, businessName,
+      question: String(question).slice(0, 1000), email, token,
+      createdAt: new Date(), confirmedAt: null,
+    });
+
+    const confirmUrl = `${NODE_API}/confirmModuleQuestion/${token}`;
+    await sendEmail({
+      to: email,
+      subject: `Confirm your question to ${businessName}`,
+      html: `
+        <p>You asked <strong>${businessName}</strong> a question on Needs:</p>
+        <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${question}</p>
+        <p><a href="${confirmUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Confirm and Send Question</a></p>
+        <p style="color:#94A3B8;font-size:.85rem;">If you did not ask this, you can safely ignore this email.</p>
+      `,
+    });
+
+    res.json({ success: true, message: 'Check your email to confirm before your question is sent.' });
+  } catch (err) {
+    console.error('❌ /m/:slug/askBusiness error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /confirmModuleQuestion/:token — clicked from the confirmation email
+app.get('/confirmModuleQuestion/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const pending = await database.collection('PendingModuleQuestions').findOne({ token });
+    if (!pending) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has already been used.'));
+    if (pending.confirmedAt) return res.send(renderConfirmPage(true, 'This question was already confirmed and sent.'));
+
+    let user = await database.collection('Users').findOne({ email: pending.email });
+    let userId;
+    if (user) {
+      userId = user._id;
+    } else {
+      const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
+      const result = await database.collection('Users').insertOne({
+        firstName: null, lastName: null, organization: null, email: pending.email,
+        password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
+        accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
+        cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
+        recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
+      });
+      userId = result.insertedId;
+    }
+
+    const service = pending.businessType === 'service'
+      ? await database.collection('Services').findOne({ _id: pending.businessId })
+      : null;
+
+    if (service?.userId) {
+      await database.collection('Notifications').insertOne({
+        userId: service.userId,
+        fromUserId: userId,
+        type: 'module_question',
+        title: '💬 New Question',
+        body: pending.question,
+        question: pending.question,
+        askerEmail: pending.email,
+        businessId: pending.businessId,
+        read: false,
+        answered: false,
+        createdAt: new Date(),
+      });
+    } else {
+      // Restaurants (or any business without a linked userId) fall back to
+      // the plain record — no Activity-tab surface for them yet.
+      await database.collection('ModuleQuestions').insertOne({
+        slug: pending.slug, businessId: pending.businessId, businessName: pending.businessName,
+        type: pending.businessType, question: pending.question, contactEmail: pending.email,
+        createdAt: new Date(),
+      });
+    }
+
+    await database.collection('PendingModuleQuestions').updateOne(
+      { _id: pending._id }, { $set: { confirmedAt: new Date() } }
+    );
+
+    res.send(renderConfirmPage(true, `Your question has been sent to ${pending.businessName}. They will respond soon.`));
+  } catch (err) {
+    console.error('❌ /confirmModuleQuestion error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your question. Please try again.'));
+  }
+});
+
+// POST /answerModuleQuestion — business answers a module_question notification;
+// the answer is emailed back to the original asker.
+app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
+  try {
+    const { notificationId, answer } = req.body || {};
+    if (!notificationId || !answer) return res.status(400).json({ error: 'notificationId and answer are required' });
+    if (!ObjectId.isValid(notificationId)) return res.status(400).json({ error: 'Invalid notificationId' });
+
+    const notification = await database.collection('Notifications').findOne({ _id: new ObjectId(notificationId) });
+    if (!notification) return res.status(404).json({ error: 'Notification not found' });
+    if (notification.userId.toString() !== req.userId) return res.status(403).json({ error: 'Not authorized' });
+
+    const service = await database.collection('Services').findOne({ _id: notification.businessId });
+    const businessName = service?.businessName || service?.providerName || 'The business';
+
+    await database.collection('Notifications').updateOne(
+      { _id: notification._id },
+      { $set: { answered: true, answer: String(answer).slice(0, 2000), answeredAt: new Date(), read: true } }
+    );
+
+    await sendEmail({
+      to: notification.askerEmail,
+      subject: `${businessName} answered your question`,
+      html: `
+        <p><strong>${businessName}</strong> answered your question on Needs:</p>
+        <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;"><em>${notification.question}</em></p>
+        <p style="background:#EFF6FF;border-radius:8px;padding:12px 16px;color:#1E3A8A;">${answer}</p>
+      `,
     });
 
     res.json({ success: true });
   } catch (err) {
-    console.error('❌ /m/:slug/contact error:', err);
-    res.status(500).json({ error: 'Something went wrong' });
+    console.error('❌ /answerModuleQuestion error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // Shared chat widget — injected into every module page
-function moduleChatWidget(slug, businessName, placeholder = 'What do you need?') {
+function moduleChatWidget(slug, businessName, placeholder = 'What do you need?', businessId = '') {
   return `
 <div class="chat-section" id="chat-section">
   <h2 class="chat-heading">Ask ${businessName}</h2>
@@ -1877,21 +1997,19 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?')
     return el;
   }
 
-  function showCannotAnswerOptions(question) {
+  function showEmailGate(question, endpoint, bodyExtra, sentLabel) {
     var wrap = document.createElement('div');
     wrap.className = 'contact-form';
     wrap.innerHTML =
-      '<p>How would you like to send your question?</p>' +
+      '<p>How would you like to send this?</p>' +
       '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
         '<button class="opt-btn" id="opt-guest" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Send as Guest</button>' +
         '<button class="opt-btn" id="opt-login" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#1a1a1a;color:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Login / Sign Up</button>' +
       '</div>' +
       '<div id="guest-form" style="display:none;">' +
-        '<input class="contact-field" id="cf-name"  type="text"  placeholder="Your name (optional)">' +
         '<input class="contact-field" id="cf-email" type="email" placeholder="Email address">' +
-        '<input class="contact-field" id="cf-phone" type="tel"   placeholder="Phone number">' +
-        '<button class="contact-submit" id="cf-submit">Send Question</button>' +
-        '<p class="contact-note">Email or phone required.</p>' +
+        '<button class="contact-submit" id="cf-submit">Send</button>' +
+        '<p class="contact-note">We will email you a confirmation link before anything is sent.</p>' +
       '</div>';
     box.appendChild(wrap);
     scrollBottom();
@@ -1906,29 +2024,39 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?')
     });
 
     document.getElementById('cf-submit').addEventListener('click', function() {
-      var name  = document.getElementById('cf-name').value.trim();
       var email = document.getElementById('cf-email').value.trim();
-      var phone = document.getElementById('cf-phone').value.trim();
-      if (!email && !phone) {
-        alert('Please enter your email or phone number.');
-        return;
-      }
+      if (!email) { alert('Please enter your email.'); return; }
       this.disabled = true;
       this.textContent = 'Sending…';
-      fetch('/m/' + slug + '/contact', {
+      var body = Object.assign({ email: email }, bodyExtra);
+      fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: question, name: name, email: email, phone: phone }),
+        body: JSON.stringify(body),
       })
       .then(function(r) { return r.json(); })
-      .then(function() {
-        wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ Question sent! The business will reach out to you.</p>';
+      .then(function(data) {
+        if (data.error) {
+          wrap.innerHTML = '<p style="color:#e53e3e;">' + data.error + '</p>';
+          return;
+        }
+        wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ ' + sentLabel + '</p>';
         scrollBottom();
       })
       .catch(function() {
         wrap.innerHTML = '<p style="color:#e53e3e;">Something went wrong. Please try again.</p>';
       });
     });
+  }
+
+  function showCannotAnswerOptions(question) {
+    showEmailGate(question, '/m/' + slug + '/askBusiness', { question: question },
+      'Check your email to confirm — the business will respond once confirmed.');
+  }
+
+  function showQuoteForm(question) {
+    showEmailGate(question, '/requestQuote', { businessId: ${JSON.stringify(businessId)}, description: question },
+      'Check your email to confirm your quote request.');
   }
 
   function send() {
@@ -1948,6 +2076,11 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       box.removeChild(typing);
+      if (data.intent === 'quote') {
+        addBubble("I'd be happy to help you get a quote for that.", 'bubble-bot');
+        showQuoteForm(msg);
+        return;
+      }
       addBubble(data.reply || 'No response received.', 'bubble-bot');
       chatHistory.push({ role: 'user', text: msg });
       chatHistory.push({ role: 'bot', text: data.reply });
@@ -2149,7 +2282,7 @@ app.get('/m/:slug', async (req, res) => {
     <ul class="gtk">${gtkItems}</ul>
   </div>` : ''}
 
-  ${moduleChatWidget(slug, name)}
+  ${moduleChatWidget(slug, name, 'What do you need?', doc._id.toString())}
 
   <div class="actions">
     <a class="btn btn-primary" href="sms:${phone || ''}">Message</a>
@@ -2296,7 +2429,7 @@ app.get('/m/:slug', async (req, res) => {
   </div>` : ''}
 
   <div class="section">
-  ${moduleChatWidget(slug, name, 'What do you Need? Ask about services or request a personalized quote')}
+  ${moduleChatWidget(slug, name, 'What do you Need? Ask about services or request a personalized quote', doc._id.toString())}
   </div>
 
   ${statBoxes ? `

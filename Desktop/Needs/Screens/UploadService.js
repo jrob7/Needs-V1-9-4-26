@@ -974,7 +974,10 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, multilin
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { padding: 20, backgroundColor: '#F8FAFD' },
+  container: {
+    padding: 20, backgroundColor: '#F8FAFD',
+    ...(IS_WEB ? { maxWidth: 720, width: '100%', alignSelf: 'center' } : {}),
+  },
   backBtn: { flexDirection: 'row', alignItems: 'center', marginBottom: 4, alignSelf: 'flex-start' },
   backBtnText: { fontSize: 16, fontWeight: '600', color: '#0A8A4A', marginLeft: 2 },
   header: {

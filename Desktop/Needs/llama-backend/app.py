@@ -303,9 +303,6 @@ Answer with exactly one word: QUOTE or QUESTION"""
     intent_raw = (generate_response(intent_prompt) or "").strip().upper()
     intent = "quote" if "QUOTE" in intent_raw else "question"
 
-    if intent == "quote":
-        return jsonify({"reply": None, "cannotAnswer": False, "intent": "quote"})
-
     history_text = ""
     for turn in history[-6:]:
         role = "Customer" if turn.get("role") == "user" else "Assistant"
@@ -331,6 +328,16 @@ Assistant:"""
         raw = parts[-1]
 
     cannot_answer = "CANNOT_ANSWER" in raw.upper()
+
+    if intent == "quote":
+        if cannot_answer:
+            return jsonify({"reply": None, "cannotAnswer": False, "intent": "quote"})
+        return jsonify({
+            "reply": f"{raw} Want a personalized quote for your exact situation?",
+            "cannotAnswer": False,
+            "intent": "quote",
+        })
+
     if cannot_answer:
         raw = "I don't have that information available. Would you like to send your question directly to this business?"
 

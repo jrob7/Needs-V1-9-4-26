@@ -2077,7 +2077,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     .then(function(data) {
       box.removeChild(typing);
       if (data.intent === 'quote') {
-        addBubble("I'd be happy to help you get a quote for that.", 'bubble-bot');
+        addBubble(data.reply || "I'd be happy to help you get a quote for that.", 'bubble-bot');
         showQuoteForm(msg);
         return;
       }

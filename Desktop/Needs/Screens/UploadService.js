@@ -490,6 +490,23 @@ const CATEGORY_QUESTIONS = {
       { label: 'Is the fee credited toward repair?', placeholder: 'e.g. Yes — the $95 is applied toward any repair completed at our shop' },
     ]},
   ],
+  'Attorney': [
+    { service: 'Terms of Service & Privacy Policy', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $750 flat fee for a standard Terms of Service and Privacy Policy package' },
+      { label: 'What is included?', placeholder: 'e.g. Custom clauses tailored to your specific app or platform features' },
+      { label: 'Turnaround time?', placeholder: 'e.g. 3-5 business days' },
+    ]},
+    { service: 'Business Formation & LLC Setup', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $600 flat fee plus state filing fees' },
+      { label: 'What is included?', placeholder: 'e.g. Articles of Organization, Operating Agreement, and EIN registration assistance' },
+      { label: 'Turnaround time?', placeholder: 'e.g. 5-7 business days' },
+    ]},
+    { service: 'Business Contracts & Agreements', questions: [
+      { label: 'Starting price?', placeholder: 'e.g. $350 for a standard independent contractor or service agreement' },
+      { label: 'Drafting or review?', placeholder: 'e.g. Both available - flat fee for drafting, hourly for complex review' },
+      { label: 'Turnaround time?', placeholder: 'e.g. 2-4 business days' },
+    ]},
+  ],
 };
 
 const AVAILABILITY = ['', 'Next Day', 'Within a Week', 'Flexible'];
@@ -998,7 +1015,8 @@ const styles = StyleSheet.create({
 
   toggleRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
   toggleBtn: {
-    flex: 1, paddingVertical: 11, borderRadius: 10,
+    ...(IS_WEB ? { width: 140 } : { flex: 1 }),
+    paddingVertical: 11, borderRadius: 10,
     borderWidth: 1.5, borderColor: '#D1D5DB', alignItems: 'center',
     backgroundColor: '#fff',
   },

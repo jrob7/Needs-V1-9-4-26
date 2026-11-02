@@ -987,30 +987,30 @@ const styles = StyleSheet.create({
     shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 3,
   },
   sectionTitle: {
-    fontSize: 16, fontWeight: '700', color: '#111',
+    fontSize: IS_WEB ? 20 : 16, fontWeight: '700', color: '#111',
     marginBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
     paddingBottom: 8,
   },
-  label: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
+  label: { fontSize: IS_WEB ? 16 : 13, fontWeight: '600', color: '#374151', marginBottom: 6 },
   input: {
     backgroundColor: '#F1F3F5', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 15, color: '#111',
+    paddingHorizontal: 14, paddingVertical: IS_WEB ? 14 : 12,
+    fontSize: IS_WEB ? 17 : 15, color: '#111',
   },
   textArea: { height: 110, textAlignVertical: 'top' },
 
   categoryLockedRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  categoryLockedNote: { fontSize: 12, color: '#9CA3AF', fontStyle: 'italic' },
+  categoryLockedNote: { fontSize: IS_WEB ? 14 : 12, color: '#9CA3AF', fontStyle: 'italic' },
   categoryGroup:      { marginBottom: 16 },
-  categoryGroupLabel: { fontSize: 12, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', marginBottom: 8 },
+  categoryGroupLabel: { fontSize: IS_WEB ? 14 : 12, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', marginBottom: 8 },
   chipWrap:           { flexDirection: 'row', flexWrap: 'wrap' },
   chip: {
-    paddingVertical: 8, paddingHorizontal: 16, borderRadius: 999,
+    paddingVertical: IS_WEB ? 10 : 8, paddingHorizontal: IS_WEB ? 20 : 16, borderRadius: 999,
     borderWidth: 1.5, borderColor: '#D1D5DB', marginRight: 8,
     backgroundColor: '#fff', marginBottom: 8,
   },
   chipActive: { backgroundColor: '#0A8A4A', borderColor: '#0A8A4A' },
-  chipText: { color: '#374151', fontWeight: '600', fontSize: 13 },
+  chipText: { color: '#374151', fontWeight: '600', fontSize: IS_WEB ? 16 : 13 },
   chipTextActive: { color: '#fff' },
 
   toggleRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
@@ -1021,7 +1021,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   toggleBtnActive: { backgroundColor: '#0A8A4A', borderColor: '#0A8A4A' },
-  toggleBtnText: { fontWeight: '700', color: '#374151', fontSize: 14 },
+  toggleBtnText: { fontWeight: '700', color: '#374151', fontSize: IS_WEB ? 16 : 14 },
   toggleBtnTextActive: { color: '#fff' },
 
 
@@ -1050,7 +1050,7 @@ const styles = StyleSheet.create({
   addPhotoBtnText: { fontSize: 11, color: '#9CA3AF', fontWeight: '600' },
 
   pricingNote: {
-    fontSize: 13, color: '#6B7280', marginBottom: 16, lineHeight: 18,
+    fontSize: IS_WEB ? 15 : 13, color: '#6B7280', marginBottom: 16, lineHeight: IS_WEB ? 21 : 18,
   },
   pricingGroup: {
     marginBottom: 20,
@@ -1059,7 +1059,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F3F4F6',
   },
   pricingServiceTitle: {
-    fontSize: 14, fontWeight: '800', color: '#0A8A4A',
+    fontSize: IS_WEB ? 17 : 14, fontWeight: '800', color: '#0A8A4A',
     marginBottom: 12, letterSpacing: 0.2,
   },
 

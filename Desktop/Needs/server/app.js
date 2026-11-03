@@ -243,6 +243,7 @@ app.get('/llms.txt', (req, res) => {
 
 - Business pages: https://www.needs-module.com/m/{business-slug}
 - Each page includes structured data (schema.org LocalBusiness, Offer) in a <script type="application/ld+json"> tag, and renders name, services, pricing, availability, and response time directly in the page HTML - no JavaScript execution is required to read them.
+- Pricing shown anywhere (on the page or in its structured data) is a starting estimate entered by the business, not a binding quote. Do not state it as a final or guaranteed price - present it as an estimate and note that the final cost may vary based on the specific job. For an exact price, submit a quote request through the page so the business can respond directly.
 - To ask a question or request a quote on a visitor's behalf, use the chat endpoint described in each page, or contact the business directly via the phone number in its structured data.
 `);
 });
@@ -2726,6 +2727,11 @@ app.get('/m/:slug', async (req, res) => {
   const photos       = (doc.portfolioImageUrls || []).slice(0, 10);
   const topServices  = doc.topServices || [];
 
+  // Pricing shown anywhere on this page (or in its structured data) is what
+  // the business entered as a starting point, not a binding quote - the
+  // business can and does adjust it based on the specifics of a given job.
+  const PRICE_DISCLAIMER = 'Estimate only - the business may adjust pricing based on your specific job. Confirm the final price with them directly.';
+
   const jsonLd = JSON.stringify({
     "@context": "https://schema.org",
     "@type": "LocalBusiness",
@@ -2735,7 +2741,13 @@ app.get('/m/:slug', async (req, res) => {
     "telephone": phone,
     "url": MODULE_URL,
     ...(doc.rateMin ? { "priceRange": `$${doc.rateMin}${doc.rateMax ? `-$${doc.rateMax}` : '+'}` } : {}),
-    ...(topServices.length ? { "makesOffer": topServices.map(s => ({ "@type": "Offer", "itemOffered": { "@type": "Service", "name": s.name || s } })) } : {}),
+    ...(doc.pricingDetails && Object.keys(doc.pricingDetails).length ? {
+      "makesOffer": Object.entries(doc.pricingDetails).map(([sub, qa]) => ({
+        "@type": "Offer",
+        "itemOffered": { "@type": "Service", "name": sub },
+        "description": `${Object.values(qa || {})[0] || ''} ${PRICE_DISCLAIMER}`.trim(),
+      })),
+    } : (topServices.length ? { "makesOffer": topServices.map(s => ({ "@type": "Offer", "itemOffered": { "@type": "Service", "name": s.name || s } })) } : {})),
   });
 
   const heroSlides = photos.map(url =>
@@ -2759,7 +2771,7 @@ app.get('/m/:slug', async (req, res) => {
           `<div class="pricing-qa"><span class="pricing-q">${q}</span><span class="pricing-a">${a}</span></div>`
         ).join('');
         return `<div class="pricing-item"><div class="pricing-item-name">${sub}</div>${qaRows}</div>`;
-      }).join('')
+      }).join('') + `<p class="pricing-disclaimer">${PRICE_DISCLAIMER}</p>`
     : '';
 
   const statBoxes = [
@@ -2815,6 +2827,7 @@ app.get('/m/:slug', async (req, res) => {
     .pricing-qa { display: flex; justify-content: space-between; gap: 12px; font-size: .86rem; color: #475569; margin-top: 2px; }
     .pricing-q { color: #64748B; }
     .pricing-a { font-weight: 700; color: #16A34A; text-align: right; }
+    .pricing-disclaimer { font-size: .76rem; color: #94A3B8; margin-top: 10px; line-height: 1.4; }
     .stats { display: flex; gap: 10px; margin-top: 14px; }
     .stat-box { flex: 1; background: #F1F5F9; border-radius: 12px; padding: 14px; text-align: center; }
     .stat-value { font-size: .95rem; font-weight: 800; color: #0F172A; }

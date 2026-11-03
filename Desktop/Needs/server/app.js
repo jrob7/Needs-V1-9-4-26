@@ -2611,7 +2611,7 @@ app.get('/m/:slug', async (req, res) => {
     .photo-row { display: flex; gap: 10px; overflow-x: auto; }
     .photo-row img { background: #0F172A; }
     .actions { display: flex; gap: 10px; margin: 28px 16px 32px; }
-    .btn { flex: 1; padding: 14px; border-radius: 12px; border: none; font-size: 1rem; font-weight: 700; cursor: pointer; text-decoration: none; text-align: center; }
+    .btn { flex: 1; padding: 10px; border-radius: 10px; border: none; font-size: .7rem; font-weight: 700; cursor: pointer; text-decoration: none; text-align: center; }
     .btn-primary { background: #2563EB; color: #fff; }
     .btn-secondary { background: #fff; color: #2563EB; border: 1.5px solid #BFDBFE; }
     .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }

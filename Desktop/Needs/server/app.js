@@ -2125,6 +2125,12 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
   var slug = ${JSON.stringify(slug)};
   var chatHistory = [];
 
+  // Every network call in this widget logs here so the full
+  // chat -> login/signup -> send sequence is traceable in the browser
+  // console instead of failing silently into a generic UI message.
+  function mlog(label, data) { console.log('[Needs Module] ' + label, data !== undefined ? data : ''); }
+  function merr(label, err)  { console.error('[Needs Module] ' + label, err); }
+
   var box   = document.getElementById('chat-box');
   var input = document.getElementById('chat-input');
   var btn   = document.getElementById('chat-send');
@@ -2211,18 +2217,21 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       if (!email || !password) { showAuthError('Enter your email and password.'); return; }
       clearAuthError();
       btn.disabled = true; btn.textContent = 'Logging in…';
+      mlog('POST /login', { email: email });
       fetch('/login', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email, password: password }),
       })
-      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
       .then(function(res) {
+        mlog('POST /login response', res);
         btn.disabled = false; btn.textContent = 'Sign In';
         if (!res.ok) { showAuthError(res.data.error || 'Login failed.'); return; }
         closeAuthModal();
         onSuccess(res.data.token);
       })
-      .catch(function() {
+      .catch(function(err) {
+        merr('POST /login failed', err);
         btn.disabled = false; btn.textContent = 'Sign In';
         showAuthError('Something went wrong. Please try again.');
       });
@@ -2244,6 +2253,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       if (password !== confirmPassword) { showAuthError('Passwords do not match.'); return; }
       clearAuthError();
       btn.disabled = true; btn.textContent = 'Creating account…';
+      mlog('POST /createUser', { email: email });
       fetch('/createUser', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2252,14 +2262,16 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           accountType: 'individual',
         }),
       })
-      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
       .then(function(res) {
+        mlog('POST /createUser response', res);
         btn.disabled = false; btn.textContent = 'Create Account';
         if (!res.ok) { showAuthError(res.data.error || 'Could not create account.'); return; }
         closeAuthModal();
         onSuccess(res.data.token);
       })
-      .catch(function() {
+      .catch(function(err) {
+        merr('POST /createUser failed', err);
         btn.disabled = false; btn.textContent = 'Create Account';
         showAuthError('Something went wrong. Please try again.');
       });
@@ -2293,43 +2305,51 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       if (!isMobile) {
         // Desktop web: there's no app to catch a deep link, so show a real
         // login/create-account form right here and send once authenticated.
+        mlog('auth success, token acquired, redirectToApp=' + redirectToApp);
         showAuthModal(function(token) {
           if (redirectToApp) {
             wrap.innerHTML = '<p style="color:#555;">Taking you to the app…</p>';
+            mlog('POST /createWebHandoff');
             fetch('/createWebHandoff', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
               body: JSON.stringify({ prefillText: question }),
             })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-              if (data.error || !data.token) {
-                wrap.innerHTML = '<p style="color:#e53e3e;">' + (data.error || 'Something went wrong.') + '</p>';
+            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+            .then(function(res) {
+              mlog('POST /createWebHandoff response', res);
+              if (!res.ok || res.data.error || !res.data.token) {
+                wrap.innerHTML = '<p style="color:#e53e3e;">' + (res.data.error || 'Something went wrong.') + '</p>';
                 return;
               }
-              window.location.href = '/?handoff=' + data.token;
+              mlog('redirecting to /?handoff=' + res.data.token);
+              window.location.href = '/?handoff=' + res.data.token;
             })
-            .catch(function() {
+            .catch(function(err) {
+              merr('POST /createWebHandoff failed', err);
               wrap.innerHTML = '<p style="color:#e53e3e;">Something went wrong. Please try again.</p>';
             });
             return;
           }
           wrap.innerHTML = '<p style="color:#555;">Sending…</p>';
+          mlog('POST ' + authedEndpoint, bodyExtra);
           fetch(authedEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
             body: JSON.stringify(bodyExtra),
           })
-          .then(function(r) { return r.json(); })
-          .then(function(data) {
-            if (data.error) {
-              wrap.innerHTML = '<p style="color:#e53e3e;">' + data.error + '</p>';
+          .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+          .then(function(res) {
+            mlog('POST ' + authedEndpoint + ' response', res);
+            if (!res.ok || res.data.error) {
+              wrap.innerHTML = '<p style="color:#e53e3e;">' + (res.data.error || 'Something went wrong.') + '</p>';
               return;
             }
-            wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ ' + (data.message || sentLabel) + '</p>';
+            wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ ' + (res.data.message || sentLabel) + '</p>';
             scrollBottom();
           })
-          .catch(function() {
+          .catch(function(err) {
+            merr('POST ' + authedEndpoint + ' failed', err);
             wrap.innerHTML = '<p style="color:#e53e3e;">Something went wrong. Please try again.</p>';
           });
         });
@@ -2337,11 +2357,16 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       }
       // Try the app; if nothing intercepts it within ~1.2s (app isn't
       // installed), fall back to the guest flow instead of a dead click.
+      mlog('mobile: attempting needsapp://login deep link, 1.2s fallback armed');
       var fallbackTimer = setTimeout(function() {
-        if (!document.hidden) document.getElementById('opt-guest').click();
+        if (!document.hidden) {
+          mlog('mobile: deep link did not open the app, falling back to guest flow');
+          document.getElementById('opt-guest').click();
+        }
       }, 1200);
       document.addEventListener('visibilitychange', function onVis() {
         if (document.hidden) {
+          mlog('mobile: page hidden, assuming the app opened');
           clearTimeout(fallbackTimer);
           document.removeEventListener('visibilitychange', onVis);
         }
@@ -2355,21 +2380,24 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       this.disabled = true;
       this.textContent = 'Sending…';
       var body = Object.assign({ email: email }, bodyExtra);
+      mlog('POST ' + endpoint + ' (guest)', { email: email });
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.error) {
-          wrap.innerHTML = '<p style="color:#e53e3e;">' + data.error + '</p>';
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+      .then(function(res) {
+        mlog('POST ' + endpoint + ' (guest) response', res);
+        if (!res.ok || res.data.error) {
+          wrap.innerHTML = '<p style="color:#e53e3e;">' + (res.data.error || 'Something went wrong.') + '</p>';
           return;
         }
         wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ ' + sentLabel + '</p>';
         scrollBottom();
       })
-      .catch(function() {
+      .catch(function(err) {
+        merr('POST ' + endpoint + ' (guest) failed', err);
         wrap.innerHTML = '<p style="color:#e53e3e;">Something went wrong. Please try again.</p>';
       });
     });
@@ -2396,6 +2424,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     addBubble(msg, 'bubble-user');
     var typing = addBubble('…', 'bubble-typing');
 
+    mlog('POST /m/' + slug + '/chat', { message: msg });
     fetch('/m/' + slug + '/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2403,6 +2432,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      mlog('POST /m/' + slug + '/chat response', data);
       box.removeChild(typing);
       if (data.intent === 'quote') {
         addBubble(data.reply || "I'd be happy to help you get a quote for that.", 'bubble-bot');
@@ -2417,6 +2447,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       }
     })
     .catch(function(err) {
+      merr('POST /m/' + slug + '/chat failed', err);
       box.removeChild(typing);
       addBubble('Error: ' + (err && err.message ? err.message : 'request failed'), 'bubble-bot');
     })

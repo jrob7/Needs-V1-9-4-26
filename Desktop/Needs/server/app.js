@@ -20,6 +20,7 @@ const FLASK_API = process.env.FLASK_API || "https://llama-go-production.up.railw
 const fundraisersCol = () => client.db('Need').collection('Fundraisers');
 const path = require('path');
 const crypto = require('crypto');
+const { registerMcpRoutes } = require('./mcp');
 const gcal = require('./googleCalendar');
 
 // ── Email (Resend) ──────────────────────────────────────────────────────────
@@ -2518,6 +2519,67 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
 </script>`;
 }
 
+// GET /m/:slug/profile — JSON version of a module's business data. This is
+// the single source of truth other consumers (the MCP server below, and
+// anything future) read from, rather than re-deriving this data themselves.
+app.get('/m/:slug/profile', async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const db = client.db('Need');
+    let doc = await db.collection('Restaurants').findOne({ slug });
+    let type = 'restaurant';
+    if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) return res.status(404).json({ error: 'Module not found' });
+
+    const MODULE_BASE = process.env.MODULE_BASE_URL || 'https://needs-module.com';
+    const url = `${MODULE_BASE}/m/${slug}`;
+
+    if (type === 'restaurant') {
+      return res.json({
+        type, slug, url,
+        name: doc.name || '',
+        description: doc.description || doc.tagline || '',
+        cuisine: doc.cuisine || '',
+        address: doc.address || '',
+        phone: doc.phone || '',
+        hours: doc.hoursOpen || '',
+        priceRange: doc.priceRange || '',
+        goodToKnow: doc.goodToKnow || [],
+        topDishes: (doc.topDishes || []).map(d => ({
+          name: d.name || '', description: d.description || '', price: d.price || null,
+        })),
+      });
+    }
+
+    const hasPricing = doc.pricingDetails && Object.keys(doc.pricingDetails).length > 0;
+    return res.json({
+      type, slug, url,
+      businessId: doc._id.toString(),
+      businessName: doc.businessName || doc.providerName || '',
+      providerName: doc.providerName || '',
+      category: doc.category || '',
+      serviceArea: doc.serviceArea || doc.businessAddress || '',
+      phone: doc.phone || '',
+      availability: doc.availability || '',
+      responseTime: doc.responseTime || '',
+      description: doc.description || doc.tagline || '',
+      licensed: !!doc.licensed,
+      rateMin: doc.rateMin || null,
+      rateMax: doc.rateMax || null,
+      topServices: (doc.topServices || []).map(s => (s.name || s)),
+      pricing: hasPricing
+        ? Object.fromEntries(Object.entries(doc.pricingDetails).map(([sub, qa]) => [sub, Object.values(qa || {})[0] || '']))
+        : null,
+      pricingDisclaimer: hasPricing
+        ? 'Estimate only - the business may adjust pricing based on your specific job. Confirm the final price with them directly.'
+        : null,
+    });
+  } catch (err) {
+    console.error('❌ /m/:slug/profile error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // MODULE PAGE  GET /m/:slug
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4843,6 +4905,8 @@ app.post('/userRespondToQuote', async (req, res) => {
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
+
+registerMcpRoutes(app, { client, NODE_API });
 
 // Render
 httpServer.listen(port, () => {

@@ -2022,6 +2022,23 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     });
 
     document.getElementById('opt-login').addEventListener('click', function() {
+      var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (!isMobile) {
+        // No app to catch the deep link on desktop — go straight to guest flow.
+        document.getElementById('opt-guest').click();
+        return;
+      }
+      // Try the app; if nothing intercepts it within ~1.2s (app isn't
+      // installed), fall back to the guest flow instead of a dead click.
+      var fallbackTimer = setTimeout(function() {
+        if (!document.hidden) document.getElementById('opt-guest').click();
+      }, 1200);
+      document.addEventListener('visibilitychange', function onVis() {
+        if (document.hidden) {
+          clearTimeout(fallbackTimer);
+          document.removeEventListener('visibilitychange', onVis);
+        }
+      });
       window.location.href = 'needs://login';
     });
 

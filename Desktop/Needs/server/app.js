@@ -3866,6 +3866,15 @@ app.post('/proposeAppointmentTime', async (req, res) => {
     if (emailResult?.error) {
       return res.status(502).json({ error: 'Could not send email', detail: emailResult.error });
     }
+
+    // Persist so the business sees a "Time Proposed" state that survives the
+    // notification poll refresh, instead of the same buttons sitting there
+    // with no feedback that anything happened.
+    await database.collection('Notifications').updateOne(
+      { quoteId: new ObjectId(quoteId), type: 'quote_accepted_by_guest' },
+      { $set: { timeProposed: true, proposedDate, proposedTime, read: true } }
+    );
+
     res.json({ success: true });
   } catch (err) {
     console.error('❌ /proposeAppointmentTime error:', err);

@@ -525,19 +525,25 @@ const QuoteAcceptedByGuestRow = ({ item, onProposeTime }) => (
       {item.guestEmail && (
         <Text style={[styles.rowBody, { marginTop: 4, fontWeight: '700' }]}>{item.guestEmail}</Text>
       )}
-      <View style={styles.leadButtonsRow}>
-        <TouchableOpacity style={styles.respondBtn} onPress={() => onProposeTime(item)}>
-          <Text style={styles.respondBtnText}>📅 Propose a Time</Text>
-        </TouchableOpacity>
-        {item.guestEmail && (
-          <TouchableOpacity
-            style={styles.requestInfoBtn}
-            onPress={() => Linking.openURL(`mailto:${item.guestEmail}`)}
-          >
-            <Text style={styles.requestInfoBtnText}>✉️ Email Them</Text>
+      {item.timeProposed ? (
+        <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>
+          ✓ Proposed {item.proposedDate} at {item.proposedTime} — waiting on customer to confirm
+        </Text>
+      ) : (
+        <View style={styles.leadButtonsRow}>
+          <TouchableOpacity style={styles.respondBtn} onPress={() => onProposeTime(item)}>
+            <Text style={styles.respondBtnText}>📅 Propose a Time</Text>
           </TouchableOpacity>
-        )}
-      </View>
+          {item.guestEmail && (
+            <TouchableOpacity
+              style={styles.requestInfoBtn}
+              onPress={() => Linking.openURL(`mailto:${item.guestEmail}`)}
+            >
+              <Text style={styles.requestInfoBtnText}>✉️ Email Them</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </View>
     {!item.read && <View style={styles.unreadDot} />}
   </View>
@@ -1105,9 +1111,11 @@ const NotificationsScreen = () => {
         <ProposeTimeModal
           notification={proposeTimeTarget}
           onClose={() => setProposeTimeTarget(null)}
-          onSent={() => {
+          onSent={({ proposedDate, proposedTime } = {}) => {
             const id = proposeTimeTarget._id;
-            if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, read: true } : n));
+            if (id) setNotifications(prev => prev.map(n => n._id === id
+              ? { ...n, read: true, timeProposed: true, proposedDate, proposedTime }
+              : n));
             setProposeTimeTarget(null);
           }}
         />

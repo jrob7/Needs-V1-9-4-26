@@ -45,7 +45,7 @@ export default function ProposeTimeModal({ notification, onClose, onSent }) {
       });
       if (!resp.ok) throw new Error('Server error');
       Alert.alert('Time Proposed', 'The customer has been emailed your proposed time to confirm.');
-      onSent?.();
+      onSent?.({ proposedDate: fmtDate(date), proposedTime: fmtTime(date) });
     } catch {
       Alert.alert('Error', "Couldn't send your proposed time. Please try again.");
     } finally { setSending(false); }

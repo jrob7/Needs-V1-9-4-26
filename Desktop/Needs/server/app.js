@@ -2441,7 +2441,6 @@ app.get('/m/:slug', async (req, res) => {
 
   <div class="actions">
     <a class="btn btn-primary" href="needs://service/${doc._id}">Request on Needs</a>
-    <a class="btn btn-secondary" href="sms:${phone || ''}">Message</a>
   </div>
 
   <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>

@@ -2384,7 +2384,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
   function showQuoteForm(question) {
     showEmailGate(question, '/requestQuote', { businessId: ${JSON.stringify(businessId)}, description: question },
       'Check your email to confirm your quote request.',
-      '/authedRequestQuote', true);
+      '/authedRequestQuote');
   }
 
   function send() {

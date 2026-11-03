@@ -116,18 +116,6 @@ export default function SearchScreen() {
   const tabBarOffset = 49 + insets.bottom;
 
   const [input, setInput] = useState('');
-
-  // A visitor who logged in from the public module page chat widget lands
-  // here with their original message carried over via UserContext — drop it
-  // into the input once, then clear it so it doesn't reapply later.
-  useEffect(() => {
-    console.log('[Needs Handoff] Tab1Content prefill effect fired, pendingPrefillText=', pendingPrefillText);
-    if (pendingPrefillText) {
-      console.log('[Needs Handoff] applying prefill to Tab1 input');
-      setInput(pendingPrefillText);
-      setPendingPrefillText(null);
-    }
-  }, [pendingPrefillText]);
   const [conversation, setConversation] = useState([]);
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [pendingQuery, setPendingQuery]         = useState(null);
@@ -193,6 +181,21 @@ export default function SearchScreen() {
     inputRef.current = '';
     if (imageEnhanceTimeoutRef.current) clearTimeout(imageEnhanceTimeoutRef.current);
   }, [currentUserId]);
+
+  // A visitor who logged in from the public module page chat widget lands
+  // here with their original message carried over via UserContext. This
+  // must be declared AFTER the user-change effect above: logging in sets
+  // currentUserId and pendingPrefillText in the same batch, so both effects
+  // fire together - whichever runs last wins, and the user-change effect's
+  // setInput('') would otherwise silently wipe this out right after it runs.
+  useEffect(() => {
+    console.log('[Needs Handoff] Tab1Content prefill effect fired, pendingPrefillText=', pendingPrefillText);
+    if (pendingPrefillText) {
+      console.log('[Needs Handoff] applying prefill to Tab1 input');
+      setInput(pendingPrefillText);
+      setPendingPrefillText(null);
+    }
+  }, [pendingPrefillText]);
 
   const scrollViewRef = useRef(null);
   const inputRef = useRef('');

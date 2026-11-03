@@ -173,6 +173,7 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploadImage', bodyParser.text({ type: 'text/plain', limit: '50mb' })); // For image uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use("/uploads", express.static("uploads"));
+app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
 
 
 
@@ -2025,19 +2026,27 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     .bubble { max-width: 90%; }
   }
 
-  .auth-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
-  .auth-modal { position: relative; background: #fff; border-radius: 16px; padding: 24px 22px 20px; width: 100%; max-width: 380px; max-height: 88vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
-  .auth-close { position: absolute; top: 10px; right: 12px; background: none; border: none; font-size: 1.4rem; line-height: 1; color: #999; cursor: pointer; padding: 4px; }
-  .auth-tabs { display: flex; gap: 6px; margin-bottom: 16px; background: #f2f2f2; border-radius: 10px; padding: 4px; }
-  .auth-tab { flex: 1; border: none; background: none; padding: 8px; border-radius: 7px; font-size: .85rem; font-weight: 700; color: #777; cursor: pointer; }
-  .auth-tab.active { background: #fff; color: #1a1a1a; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
-  .auth-field { width: 100%; border: 1.5px solid #ddd; border-radius: 8px; padding: 10px 12px; font-size: .88rem; margin-bottom: 9px; outline: none; color: #1a1a1a; background: #fff; box-sizing: border-box; }
-  .auth-field:focus { border-color: #1a1a1a; }
+  .auth-overlay { position: fixed; inset: 0; background: #F4F8FD; display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; overflow: hidden; }
+  .auth-wave-back, .auth-wave-front { position: absolute; bottom: 0; left: 0; width: 100%; }
+  .auth-wave-back { height: 160px; }
+  .auth-wave-front { height: 120px; }
+  .auth-card { position: relative; background: #fff; border-radius: 24px; padding: 32px 26px 26px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; box-shadow: 0 8px 20px rgba(30,58,138,.12); text-align: center; z-index: 1; }
+  .auth-close { position: absolute; top: 14px; right: 16px; background: none; border: none; font-size: 1.3rem; line-height: 1; color: #94A3B8; cursor: pointer; padding: 4px; }
+  .auth-logo { width: 130px; height: 65px; object-fit: contain; margin-bottom: 6px; }
+  .auth-title { font-size: 1.4rem; font-weight: 800; color: #0F172A; margin: 6px 0 4px; }
+  .auth-subtitle { font-size: .8rem; color: #64748B; margin-bottom: 22px; }
+  .auth-field { width: 100%; border: 1px solid #E2E8F0; border-radius: 12px; padding: 0 14px; height: 50px; font-size: .9rem; margin-bottom: 12px; outline: none; color: #0F172A; background: #F8FAFC; box-sizing: border-box; text-align: left; }
+  .auth-field:focus { border-color: #2563EB; }
   .auth-row { display: flex; gap: 8px; }
   .auth-row .auth-field { flex: 1; }
-  .auth-submit { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 11px 20px; font-size: .9rem; font-weight: 700; cursor: pointer; width: 100%; margin-top: 4px; }
-  .auth-submit:disabled { background: #ccc; }
-  .auth-error { background: #FEF2F2; color: #DC2626; font-size: .8rem; border-radius: 8px; padding: 9px 12px; margin-bottom: 10px; }
+  .auth-submit { background: #2563EB; color: #fff; border: none; border-radius: 12px; padding: 0; height: 50px; font-size: .92rem; font-weight: 700; cursor: pointer; width: 100%; margin-top: 4px; box-shadow: 0 4px 10px rgba(37,99,235,.28); }
+  .auth-submit:disabled { background: #93C5FD; box-shadow: none; }
+  .auth-error { background: #FEF2F2; color: #DC2626; font-size: .8rem; border-radius: 10px; padding: 9px 12px; margin-bottom: 12px; text-align: left; }
+  .auth-divider { display: flex; align-items: center; width: 100%; margin: 16px 0; }
+  .auth-divider-line { flex: 1; height: 1px; background: #E2E8F0; }
+  .auth-divider-text { font-size: .72rem; color: #94A3B8; margin: 0 10px; }
+  .auth-switch-btn { width: 100%; height: 50px; border-radius: 12px; border: 1.5px solid #2563EB; background: #fff; color: #2563EB; font-size: .88rem; font-weight: 700; cursor: pointer; }
+  .auth-back-link { display: block; margin-top: 16px; font-size: .8rem; color: #64748B; font-weight: 600; background: none; border: none; cursor: pointer; }
 </style>
 
 <script>
@@ -2064,19 +2073,24 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     var overlay = document.createElement('div');
     overlay.className = 'auth-overlay';
     overlay.innerHTML =
-      '<div class="auth-modal">' +
-        '<button class="auth-close" id="auth-close">&times;</button>' +
-        '<div class="auth-tabs">' +
-          '<button class="auth-tab active" id="auth-tab-login" type="button">Log In</button>' +
-          '<button class="auth-tab" id="auth-tab-signup" type="button">Create Account</button>' +
-        '</div>' +
+      '<svg class="auth-wave-back" viewBox="0 0 100 30" preserveAspectRatio="none"><path d="M0,12 C25,28 75,5 100,18 L100,30 L0,30 Z" fill="#DCE9FB"/></svg>' +
+      '<svg class="auth-wave-front" viewBox="0 0 100 22" preserveAspectRatio="none"><path d="M0,16 C30,2 70,26 100,14 L100,22 L0,22 Z" fill="#C7DCF6"/></svg>' +
+      '<div class="auth-card">' +
+        '<button class="auth-close" id="auth-close" type="button">&times;</button>' +
+        '<img class="auth-logo" src="/assets/NeedsLogo.png" alt="Needs">' +
         '<div id="auth-error" class="auth-error" style="display:none;"></div>' +
         '<div id="auth-login-form">' +
-          '<input class="auth-field" id="auth-login-email" type="email" placeholder="Email">' +
+          '<div class="auth-title">Welcome back</div>' +
+          '<div class="auth-subtitle">Sign in to continue to your account</div>' +
+          '<input class="auth-field" id="auth-login-email" type="email" placeholder="Email address">' +
           '<input class="auth-field" id="auth-login-password" type="password" placeholder="Password">' +
-          '<button class="auth-submit" id="auth-login-submit">Log In</button>' +
+          '<button class="auth-submit" id="auth-login-submit" type="button">Sign In</button>' +
+          '<div class="auth-divider"><div class="auth-divider-line"></div><div class="auth-divider-text">or</div><div class="auth-divider-line"></div></div>' +
+          '<button class="auth-switch-btn" id="auth-go-signup" type="button">Create Account</button>' +
         '</div>' +
         '<div id="auth-signup-form" style="display:none;">' +
+          '<div class="auth-title">Your Details</div>' +
+          '<div class="auth-subtitle">Fill in your info to continue</div>' +
           '<div class="auth-row">' +
             '<input class="auth-field" id="auth-su-first" placeholder="First Name">' +
             '<input class="auth-field" id="auth-su-last" placeholder="Last Name">' +
@@ -2087,7 +2101,8 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           '<input class="auth-field" id="auth-su-zip" placeholder="Zip Code">' +
           '<input class="auth-field" id="auth-su-password" type="password" placeholder="Password">' +
           '<input class="auth-field" id="auth-su-confirm" type="password" placeholder="Confirm Password">' +
-          '<button class="auth-submit" id="auth-signup-submit">Create Account</button>' +
+          '<button class="auth-submit" id="auth-signup-submit" type="button">Create Account</button>' +
+          '<button class="auth-back-link" id="auth-go-login" type="button">&larr; Back to Log In</button>' +
         '</div>' +
       '</div>';
     document.body.appendChild(overlay);
@@ -2107,18 +2122,14 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     document.getElementById('auth-close').addEventListener('click', closeAuthModal);
     overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAuthModal(); });
 
-    document.getElementById('auth-tab-login').addEventListener('click', function() {
-      document.getElementById('auth-tab-login').classList.add('active');
-      document.getElementById('auth-tab-signup').classList.remove('active');
-      document.getElementById('auth-login-form').style.display = 'block';
-      document.getElementById('auth-signup-form').style.display = 'none';
+    document.getElementById('auth-go-signup').addEventListener('click', function() {
+      document.getElementById('auth-login-form').style.display = 'none';
+      document.getElementById('auth-signup-form').style.display = 'block';
       clearAuthError();
     });
-    document.getElementById('auth-tab-signup').addEventListener('click', function() {
-      document.getElementById('auth-tab-signup').classList.add('active');
-      document.getElementById('auth-tab-login').classList.remove('active');
-      document.getElementById('auth-signup-form').style.display = 'block';
-      document.getElementById('auth-login-form').style.display = 'none';
+    document.getElementById('auth-go-login').addEventListener('click', function() {
+      document.getElementById('auth-signup-form').style.display = 'none';
+      document.getElementById('auth-login-form').style.display = 'block';
       clearAuthError();
     });
 
@@ -2135,13 +2146,13 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       })
       .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
       .then(function(res) {
-        btn.disabled = false; btn.textContent = 'Log In';
+        btn.disabled = false; btn.textContent = 'Sign In';
         if (!res.ok) { showAuthError(res.data.error || 'Login failed.'); return; }
         closeAuthModal();
         onSuccess(res.data.token);
       })
       .catch(function() {
-        btn.disabled = false; btn.textContent = 'Log In';
+        btn.disabled = false; btn.textContent = 'Sign In';
         showAuthError('Something went wrong. Please try again.');
       });
     });

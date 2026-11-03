@@ -524,8 +524,8 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                 <View style={st.divider} />
 
                 <TouchableOpacity
-                  style={[st.sendBtn, (sending || !selectedDay) && { opacity: 0.5 }]}
-                  onPress={handleSendQuote} disabled={sending || !selectedDay}
+                  style={[st.sendBtn, (sending || (!selectedDay && !isGuestLead)) && { opacity: 0.5 }]}
+                  onPress={handleSendQuote} disabled={sending || (!selectedDay && !isGuestLead)}
                 >
                   <Text style={st.sendBtnTxt}>{sending ? 'Sending…' : 'Send Quote'}</Text>
                 </TouchableOpacity>

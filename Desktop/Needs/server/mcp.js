@@ -54,7 +54,7 @@ function buildServer({ client, NODE_API, userId }) {
     }, async () => {
       return text({
         explanation: 'This MCP server supports OAuth for users with an existing Needs account. Once connected, request_quote and ask_business stop requiring an email and are sent immediately as that user.',
-        discovery_url: `${NODE_API}/.well-known/oauth-authorization-server`,
+        discovery_url: `${process.env.MODULE_BASE_URL || NODE_API}/.well-known/oauth-authorization-server`,
         instructions: 'Register a client via the registration_endpoint in discovery_url (RFC 7591 Dynamic Client Registration) if not already done, then direct the user to the authorization_endpoint with PKCE (S256) to sign in and approve. This is a one-time setup per client/device.',
       });
     });

@@ -4217,6 +4217,14 @@ app.post('/respondToServiceQuote', async (req, res) => {
           respondedAt:    new Date(),
         }}
       );
+      // Mark the original quote_request notification as responded so the
+      // business sees "Response sent" persist after the next poll refresh,
+      // instead of the Confirm/Edit/Ask buttons reappearing (responded was
+      // previously only set client-side and never survived a re-fetch).
+      await database.collection('Notifications').updateOne(
+        { quoteId: new ObjectId(quoteId), type: 'quote_request' },
+        { $set: { responded: true, read: true } }
+      );
       if (quote.userId) {
         await database.collection('Notifications').insertOne({
           userId: quote.userId, type: 'quote_update',

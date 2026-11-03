@@ -173,7 +173,7 @@ app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploadImage', bodyParser.text({ type: 'text/plain', limit: '50mb' })); // For image uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use("/uploads", express.static("uploads"));
-app.use('/assets', express.static(path.join(__dirname, '..', 'assets')));
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 
 

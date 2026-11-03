@@ -21,6 +21,7 @@ const fundraisersCol = () => client.db('Need').collection('Fundraisers');
 const path = require('path');
 const crypto = require('crypto');
 const { registerMcpRoutes } = require('./mcp');
+const { registerOAuthRoutes } = require('./oauth');
 const gcal = require('./googleCalendar');
 
 // ── Email (Resend) ──────────────────────────────────────────────────────────
@@ -4906,6 +4907,7 @@ app.post('/userRespondToQuote', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
 
+registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API });
 registerMcpRoutes(app, { client, NODE_API });
 
 // Render

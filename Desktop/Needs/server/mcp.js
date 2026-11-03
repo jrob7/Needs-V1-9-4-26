@@ -1,17 +1,18 @@
 // server/mcp.js
 //
-// Public, unauthenticated MCP server exposing the same operations the
-// module page chat widget already performs, as directly-callable tools
-// instead of something an agent has to simulate by typing into a chat box.
+// MCP server exposing the same operations the module page chat widget
+// already performs, as directly-callable tools instead of something an
+// agent has to simulate by typing into a chat box.
 //
-// Scope decision: no OAuth yet. Every tool here either only reads already-
-// public data, or (for request_quote / ask_business) goes through the exact
-// same email double opt-in guardrail the module page's guest flow already
-// uses - nothing here can take an action without a human confirming by
-// email first. An authenticated tool surface (acting as a real logged-in
-// Needs user, skipping that confirmation) is a deliberate follow-up once
-// OAuth 2.1 + Dynamic Client Registration is actually built, not bundled in
-// here.
+// Auth model: every tool works with no Authorization header at all, acting
+// as a guest exactly like an anonymous module-page visitor - request_quote
+// and ask_business go through the same email double opt-in guardrail the
+// guest chat flow already uses, so nothing can take an action without a
+// human confirming by email first. If the request carries a valid
+// Authorization: Bearer <token> (obtained via the OAuth flow in oauth.js),
+// request_quote and ask_business instead act as that real Needs user and
+// skip the email confirmation step, the same way the web login/handoff
+// flow already does.
 //
 // Every tool is a thin wrapper over an existing HTTP endpoint or a direct,
 // read-only DB query - nothing here re-implements business logic that
@@ -21,8 +22,9 @@
 const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { z } = require('zod');
+const jwt = require('jsonwebtoken');
 
-function buildServer({ client, NODE_API }) {
+function buildServer({ client, NODE_API, userId }) {
   const server = new McpServer({ name: 'needs-module', version: '1.0.0' });
 
   const text = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -100,17 +102,33 @@ function buildServer({ client, NODE_API }) {
 
   server.registerTool('request_quote', {
     title: 'Request a quote',
-    description: "Send a quote request to a business on a visitor's behalf. The visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra API round trip to skip.",
+    description: userId
+      ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized.'
+      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
-      description: z.string().describe("A description of what the visitor needs, in their own words"),
-      email: z.string().email().describe("The visitor's email address - they must confirm via a link sent there before this is sent to the business"),
+      description: z.string().describe('A description of what the visitor needs, in their own words'),
+      email: userId
+        ? z.string().email().optional().describe('Not needed - the request is sent as the authenticated user')
+        : z.string().email().describe("The visitor's email address - they must confirm via a link sent there before this is sent to the business"),
     },
   }, async ({ slug, description, email }) => {
     const db = client.db('Need');
     const service = await db.collection('Services').findOne({ slug }, { projection: { _id: 1 } });
     if (!service) return errorText('Business not found (or is a restaurant, which does not take quote requests)');
 
+    if (userId) {
+      const resp = await fetch(`${NODE_API}/authedRequestQuote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentBearerToken(server)}` },
+        body: JSON.stringify({ businessId: service._id.toString(), description }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
+      return text({ success: true, message: data.message });
+    }
+
+    if (!email) return errorText('email is required when not authenticated.');
     const resp = await fetch(`${NODE_API}/requestQuote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -123,13 +141,29 @@ function buildServer({ client, NODE_API }) {
 
   server.registerTool('ask_business', {
     title: 'Send a question directly to a business',
-    description: "Send a question to a business that could not be answered from its public profile. The visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email.",
+    description: userId
+      ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow."
+      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),
-      email: z.string().email().describe("The visitor's email address"),
+      email: userId
+        ? z.string().email().optional().describe('Not needed - the question is sent as the authenticated user')
+        : z.string().email().describe("The visitor's email address"),
     },
   }, async ({ slug, question, email }) => {
+    if (userId) {
+      const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/authedAskBusiness`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentBearerToken(server)}` },
+        body: JSON.stringify({ question }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not send the question');
+      return text({ success: true, message: data.message });
+    }
+
+    if (!email) return errorText('email is required when not authenticated.');
     const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/askBusiness`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -143,6 +177,22 @@ function buildServer({ client, NODE_API }) {
   return server;
 }
 
+// Validates the incoming Bearer token (same JWT_SECRET/shape /login issues)
+// and returns the userId it represents, or null if there is none/it is
+// invalid/expired - an invalid token degrades to guest access rather than
+// rejecting the request, since every tool here is safe to use as a guest.
+function getAuthedUserId(req) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return { userId: null, token: null };
+  const token = header.slice('Bearer '.length);
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    return { userId: payload.userId, token };
+  } catch {
+    return { userId: null, token: null };
+  }
+}
+
 // Stateless by design (sessionIdGenerator: undefined, a fresh server+transport
 // per request): simpler and safer for a multi-instance deployment than
 // session affinity, and every tool call here is independent anyway - nothing
@@ -150,7 +200,11 @@ function buildServer({ client, NODE_API }) {
 function registerMcpRoutes(app, { client, NODE_API }) {
   app.post('/mcp', async (req, res) => {
     try {
-      const server = buildServer({ client, NODE_API });
+      const { userId, token } = getAuthedUserId(req);
+      const server = buildServer({ client, NODE_API, userId });
+      // Stashed so the authed-tool handlers above can forward the same
+      // token to the authedRequestQuote/authedAskBusiness calls they make.
+      server._bearerToken = token;
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       res.on('close', () => { transport.close(); server.close(); });
       await server.connect(transport);
@@ -171,6 +225,10 @@ function registerMcpRoutes(app, { client, NODE_API }) {
   app.delete('/mcp', (req, res) => {
     res.status(405).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null });
   });
+}
+
+function currentBearerToken(server) {
+  return server._bearerToken;
 }
 
 module.exports = { registerMcpRoutes };

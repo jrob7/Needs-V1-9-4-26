@@ -121,7 +121,9 @@ export default function SearchScreen() {
   // here with their original message carried over via UserContext — drop it
   // into the input once, then clear it so it doesn't reapply later.
   useEffect(() => {
+    console.log('[Needs Handoff] Tab1Content prefill effect fired, pendingPrefillText=', pendingPrefillText);
     if (pendingPrefillText) {
+      console.log('[Needs Handoff] applying prefill to Tab1 input');
       setInput(pendingPrefillText);
       setPendingPrefillText(null);
     }

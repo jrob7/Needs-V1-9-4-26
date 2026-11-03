@@ -28,28 +28,39 @@ export const UserProvider = ({ children }) => {
         const handoffToken = Platform.OS === 'web'
           ? new URLSearchParams(window.location.search).get('handoff')
           : null;
+        console.log('[Needs Handoff] bootstrap: Platform.OS=', Platform.OS, 'handoffToken=', handoffToken);
 
         if (handoffToken) {
           // Strip it from the address bar immediately so a refresh/share of
           // this URL can't attempt to reuse an already-consumed token.
           window.history.replaceState({}, '', window.location.pathname);
           try {
+            console.log('[Needs Handoff] POST', `${NODE_API}/exchangeWebHandoff`);
             const resp = await fetch(`${NODE_API}/exchangeWebHandoff`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ token: handoffToken }),
             });
             const data = await resp.json();
+            console.log('[Needs Handoff] exchangeWebHandoff response: status=', resp.status, 'data=', data);
             if (resp.ok && data.userId) {
               await AuthStorage.setItem('authToken', data.token);
               await AuthStorage.setItem('refreshToken', data.refreshToken);
               setUserId(data.userId);
               setAccountType(data.accountType || 'individual');
               setBusinessType(data.businessType || null);
-              if (data.prefillText) setPendingPrefillText(data.prefillText);
+              if (data.prefillText) {
+                console.log('[Needs Handoff] setting pendingPrefillText:', data.prefillText);
+                setPendingPrefillText(data.prefillText);
+              } else {
+                console.log('[Needs Handoff] exchange succeeded but response had no prefillText');
+              }
               return;
             }
-          } catch {}
+            console.warn('[Needs Handoff] exchange did not succeed (bad status or missing userId)');
+          } catch (err) {
+            console.error('[Needs Handoff] exchangeWebHandoff fetch threw:', err);
+          }
         }
 
         const stored = await AuthStorage.getItem('userId');

@@ -110,12 +110,22 @@ function BlueSpinner({ size = 100 }) {
 
 export default function SearchScreen() {
   const navigation = useNavigation();
-  const { userId: currentUserId, accountType: currentAccountType, businessType: currentBusinessType } = useContext(UserContext);
+  const { userId: currentUserId, accountType: currentAccountType, businessType: currentBusinessType, pendingPrefillText, setPendingPrefillText } = useContext(UserContext);
   const isOrgAccount = currentAccountType === 'business' && currentBusinessType === 'nonprofit';
   const insets = useSafeAreaInsets();
   const tabBarOffset = 49 + insets.bottom;
 
   const [input, setInput] = useState('');
+
+  // A visitor who logged in from the public module page chat widget lands
+  // here with their original message carried over via UserContext — drop it
+  // into the input once, then clear it so it doesn't reapply later.
+  useEffect(() => {
+    if (pendingPrefillText) {
+      setInput(pendingPrefillText);
+      setPendingPrefillText(null);
+    }
+  }, [pendingPrefillText]);
   const [conversation, setConversation] = useState([]);
   const [authModalVisible, setAuthModalVisible] = useState(false);
   const [pendingQuery, setPendingQuery]         = useState(null);

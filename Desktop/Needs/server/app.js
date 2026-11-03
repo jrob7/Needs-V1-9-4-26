@@ -175,6 +175,15 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use("/uploads", express.static("uploads"));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
+// Exported web build of the app itself (`npm run build:web`), served from
+// the domain root so its absolute /_expo/... and /assets/... paths resolve
+// correctly. Mounted before /assets above would shadow the build's own
+// nested assets/assets/* folder, so it's registered as a second handler for
+// the same /assets prefix — Express tries each in order until one matches.
+app.use('/_expo', express.static(path.join(__dirname, 'web-build', '_expo')));
+app.use('/assets', express.static(path.join(__dirname, 'web-build', 'assets')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'web-build', 'index.html')));
+
 
 
 // ✅ Middleware to log every request
@@ -389,6 +398,62 @@ app.post('/login', async (req, res) => {
       return res.status(500).json({ error: 'Internal Server Error' });
     }
   });
+
+// POST /createWebHandoff — a visitor just logged in/signed up from the module
+// chat widget and should land in the real app (Tab1, prefilled with their
+// original message) instead of the request being sent silently. Rather than
+// put the JWT or the request text in a URL (logged, cached, kept in browser
+// history), this stores them server-side behind a random single-use token
+// that is only valid for 2 minutes and is deleted the moment it is used.
+app.post('/createWebHandoff', requireAuth, async (req, res) => {
+  try {
+    const { prefillText } = req.body || {};
+    if (!prefillText) return res.status(400).json({ error: 'prefillText required' });
+    const token = crypto.randomBytes(24).toString('hex');
+    await database.collection('PendingWebHandoffs').insertOne({
+      token, userId: new ObjectId(req.userId),
+      prefillText: String(prefillText).slice(0, 2000),
+      createdAt: new Date(),
+    });
+    res.json({ token });
+  } catch (err) {
+    console.error('❌ /createWebHandoff error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /exchangeWebHandoff — the web app calls this once on load with the
+// token from the URL; it is deleted immediately whether valid or not, so a
+// given handoff link can only ever be used a single time.
+app.post('/exchangeWebHandoff', async (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ error: 'token required' });
+    const pending = await database.collection('PendingWebHandoffs').findOne({ token });
+    if (pending) {
+      await database.collection('PendingWebHandoffs').deleteOne({ _id: pending._id });
+    }
+    const isExpired = !pending || (Date.now() - new Date(pending.createdAt).getTime()) > 2 * 60 * 1000;
+    if (!pending || isExpired) {
+      return res.status(404).json({ error: 'This link has expired or was already used.' });
+    }
+    const user = await database.collection('Users').findOne({ _id: pending.userId });
+    if (!user) return res.status(404).json({ error: 'Account not found' });
+
+    const { token: accessToken, refreshToken } = signTokens(pending.userId.toString());
+    res.json({
+      token: accessToken,
+      refreshToken,
+      userId: pending.userId.toString(),
+      accountType: user.accountType || 'individual',
+      businessType: user.businessType || null,
+      prefillText: pending.prefillText,
+    });
+  } catch (err) {
+    console.error('❌ /exchangeWebHandoff error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 // POST /refreshToken — exchange a valid refresh token for a new access token
 app.post('/refreshToken', async (req, res) => {
@@ -2195,7 +2260,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     });
   }
 
-  function showEmailGate(question, endpoint, bodyExtra, sentLabel, authedEndpoint) {
+  function showEmailGate(question, endpoint, bodyExtra, sentLabel, authedEndpoint, redirectToApp) {
     var wrap = document.createElement('div');
     wrap.className = 'contact-form';
     wrap.innerHTML =
@@ -2223,6 +2288,26 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         // Desktop web: there's no app to catch a deep link, so show a real
         // login/create-account form right here and send once authenticated.
         showAuthModal(function(token) {
+          if (redirectToApp) {
+            wrap.innerHTML = '<p style="color:#555;">Taking you to the app…</p>';
+            fetch('/createWebHandoff', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+              body: JSON.stringify({ prefillText: question }),
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (data.error || !data.token) {
+                wrap.innerHTML = '<p style="color:#e53e3e;">' + (data.error || 'Something went wrong.') + '</p>';
+                return;
+              }
+              window.location.href = '/?handoff=' + data.token;
+            })
+            .catch(function() {
+              wrap.innerHTML = '<p style="color:#e53e3e;">Something went wrong. Please try again.</p>';
+            });
+            return;
+          }
           wrap.innerHTML = '<p style="color:#555;">Sending…</p>';
           fetch(authedEndpoint, {
             method: 'POST',
@@ -2255,7 +2340,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           document.removeEventListener('visibilitychange', onVis);
         }
       });
-      window.location.href = 'needs://login';
+      window.location.href = 'needsapp://login';
     });
 
     document.getElementById('cf-submit').addEventListener('click', function() {
@@ -2293,7 +2378,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
   function showQuoteForm(question) {
     showEmailGate(question, '/requestQuote', { businessId: ${JSON.stringify(businessId)}, description: question },
       'Check your email to confirm your quote request.',
-      '/authedRequestQuote');
+      '/authedRequestQuote', true);
   }
 
   function send() {

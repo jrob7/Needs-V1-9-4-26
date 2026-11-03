@@ -16,6 +16,9 @@ llama-backend/**/__pycache__/
 .expo/
 dist/
 web-build/
+# server/web-build/ is the deployed export (npm run build:web) - tracked on purpose
+!server/web-build/
+!server/web-build/**
 *.jks
 *.p8
 *.p12

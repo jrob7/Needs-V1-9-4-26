@@ -1904,6 +1904,53 @@ app.get('/confirmModuleQuestion/:token', async (req, res) => {
   }
 });
 
+// POST /m/:slug/authedAskBusiness — same as /m/:slug/askBusiness, but for a
+// visitor who just logged in or created an account from the module chat
+// widget. A verified JWT already proves who they are, so this skips the
+// email double opt-in and sends the question immediately.
+app.post('/m/:slug/authedAskBusiness', requireAuth, async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { question } = req.body || {};
+    if (!question) return res.status(400).json({ error: 'question required' });
+
+    const db = client.db('Need');
+    let doc = await db.collection('Restaurants').findOne({ slug });
+    let type = 'restaurant';
+    if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) return res.status(404).json({ error: 'Module not found' });
+
+    const businessName = type === 'restaurant' ? doc.name : (doc.businessName || doc.providerName);
+    const trimmedQuestion = String(question).slice(0, 1000);
+
+    if (type === 'service' && doc.userId) {
+      await db.collection('Notifications').insertOne({
+        userId: doc.userId,
+        fromUserId: new ObjectId(req.userId),
+        type: 'module_question',
+        title: '💬 New Question',
+        body: trimmedQuestion,
+        question: trimmedQuestion,
+        businessId: doc._id,
+        read: false,
+        answered: false,
+        createdAt: new Date(),
+      });
+    } else {
+      await db.collection('ModuleQuestions').insertOne({
+        slug, businessId: doc._id, businessName, type,
+        question: trimmedQuestion, userId: new ObjectId(req.userId),
+        createdAt: new Date(),
+      });
+    }
+
+    res.json({ success: true, message: `Your question has been sent to ${businessName}.` });
+  } catch (err) {
+    console.error('❌ /m/:slug/authedAskBusiness error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // POST /answerModuleQuestion — business answers a module_question notification;
 // the answer is emailed back to the original asker.
 app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
@@ -1977,6 +2024,20 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     .chat-section { margin: 0 12px 16px; }
     .bubble { max-width: 90%; }
   }
+
+  .auth-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+  .auth-modal { position: relative; background: #fff; border-radius: 16px; padding: 24px 22px 20px; width: 100%; max-width: 380px; max-height: 88vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.2); }
+  .auth-close { position: absolute; top: 10px; right: 12px; background: none; border: none; font-size: 1.4rem; line-height: 1; color: #999; cursor: pointer; padding: 4px; }
+  .auth-tabs { display: flex; gap: 6px; margin-bottom: 16px; background: #f2f2f2; border-radius: 10px; padding: 4px; }
+  .auth-tab { flex: 1; border: none; background: none; padding: 8px; border-radius: 7px; font-size: .85rem; font-weight: 700; color: #777; cursor: pointer; }
+  .auth-tab.active { background: #fff; color: #1a1a1a; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  .auth-field { width: 100%; border: 1.5px solid #ddd; border-radius: 8px; padding: 10px 12px; font-size: .88rem; margin-bottom: 9px; outline: none; color: #1a1a1a; background: #fff; box-sizing: border-box; }
+  .auth-field:focus { border-color: #1a1a1a; }
+  .auth-row { display: flex; gap: 8px; }
+  .auth-row .auth-field { flex: 1; }
+  .auth-submit { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 11px 20px; font-size: .9rem; font-weight: 700; cursor: pointer; width: 100%; margin-top: 4px; }
+  .auth-submit:disabled { background: #ccc; }
+  .auth-error { background: #FEF2F2; color: #DC2626; font-size: .8rem; border-radius: 8px; padding: 9px 12px; margin-bottom: 10px; }
 </style>
 
 <script>
@@ -1999,7 +2060,131 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     return el;
   }
 
-  function showEmailGate(question, endpoint, bodyExtra, sentLabel) {
+  function showAuthModal(onSuccess) {
+    var overlay = document.createElement('div');
+    overlay.className = 'auth-overlay';
+    overlay.innerHTML =
+      '<div class="auth-modal">' +
+        '<button class="auth-close" id="auth-close">&times;</button>' +
+        '<div class="auth-tabs">' +
+          '<button class="auth-tab active" id="auth-tab-login" type="button">Log In</button>' +
+          '<button class="auth-tab" id="auth-tab-signup" type="button">Create Account</button>' +
+        '</div>' +
+        '<div id="auth-error" class="auth-error" style="display:none;"></div>' +
+        '<div id="auth-login-form">' +
+          '<input class="auth-field" id="auth-login-email" type="email" placeholder="Email">' +
+          '<input class="auth-field" id="auth-login-password" type="password" placeholder="Password">' +
+          '<button class="auth-submit" id="auth-login-submit">Log In</button>' +
+        '</div>' +
+        '<div id="auth-signup-form" style="display:none;">' +
+          '<div class="auth-row">' +
+            '<input class="auth-field" id="auth-su-first" placeholder="First Name">' +
+            '<input class="auth-field" id="auth-su-last" placeholder="Last Name">' +
+          '</div>' +
+          '<input class="auth-field" id="auth-su-email" type="email" placeholder="Email">' +
+          '<input class="auth-field" id="auth-su-phone" type="tel" placeholder="Phone Number">' +
+          '<input class="auth-field" id="auth-su-address" placeholder="Street Address">' +
+          '<input class="auth-field" id="auth-su-zip" placeholder="Zip Code">' +
+          '<input class="auth-field" id="auth-su-password" type="password" placeholder="Password">' +
+          '<input class="auth-field" id="auth-su-confirm" type="password" placeholder="Confirm Password">' +
+          '<button class="auth-submit" id="auth-signup-submit">Create Account</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    function showAuthError(msg) {
+      var el = document.getElementById('auth-error');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+    function clearAuthError() {
+      document.getElementById('auth-error').style.display = 'none';
+    }
+    function closeAuthModal() {
+      if (overlay.parentNode) document.body.removeChild(overlay);
+    }
+
+    document.getElementById('auth-close').addEventListener('click', closeAuthModal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeAuthModal(); });
+
+    document.getElementById('auth-tab-login').addEventListener('click', function() {
+      document.getElementById('auth-tab-login').classList.add('active');
+      document.getElementById('auth-tab-signup').classList.remove('active');
+      document.getElementById('auth-login-form').style.display = 'block';
+      document.getElementById('auth-signup-form').style.display = 'none';
+      clearAuthError();
+    });
+    document.getElementById('auth-tab-signup').addEventListener('click', function() {
+      document.getElementById('auth-tab-signup').classList.add('active');
+      document.getElementById('auth-tab-login').classList.remove('active');
+      document.getElementById('auth-signup-form').style.display = 'block';
+      document.getElementById('auth-login-form').style.display = 'none';
+      clearAuthError();
+    });
+
+    document.getElementById('auth-login-submit').addEventListener('click', function() {
+      var btn = this;
+      var email = document.getElementById('auth-login-email').value.trim();
+      var password = document.getElementById('auth-login-password').value;
+      if (!email || !password) { showAuthError('Enter your email and password.'); return; }
+      clearAuthError();
+      btn.disabled = true; btn.textContent = 'Logging in…';
+      fetch('/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: password }),
+      })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        btn.disabled = false; btn.textContent = 'Log In';
+        if (!res.ok) { showAuthError(res.data.error || 'Login failed.'); return; }
+        closeAuthModal();
+        onSuccess(res.data.token);
+      })
+      .catch(function() {
+        btn.disabled = false; btn.textContent = 'Log In';
+        showAuthError('Something went wrong. Please try again.');
+      });
+    });
+
+    document.getElementById('auth-signup-submit').addEventListener('click', function() {
+      var btn = this;
+      var firstName = document.getElementById('auth-su-first').value.trim();
+      var lastName = document.getElementById('auth-su-last').value.trim();
+      var email = document.getElementById('auth-su-email').value.trim();
+      var phoneNumber = document.getElementById('auth-su-phone').value.trim();
+      var streetAddress = document.getElementById('auth-su-address').value.trim();
+      var zipcode = document.getElementById('auth-su-zip').value.trim();
+      var password = document.getElementById('auth-su-password').value;
+      var confirmPassword = document.getElementById('auth-su-confirm').value;
+      if (!firstName || !lastName || !email || !phoneNumber || !streetAddress || !zipcode || !password) {
+        showAuthError('All fields are required.'); return;
+      }
+      if (password !== confirmPassword) { showAuthError('Passwords do not match.'); return; }
+      clearAuthError();
+      btn.disabled = true; btn.textContent = 'Creating account…';
+      fetch('/createUser', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName: firstName, lastName: lastName, email: email, password: password,
+          phoneNumber: phoneNumber, streetAddress: streetAddress, zipcode: zipcode,
+          accountType: 'individual',
+        }),
+      })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        btn.disabled = false; btn.textContent = 'Create Account';
+        if (!res.ok) { showAuthError(res.data.error || 'Could not create account.'); return; }
+        closeAuthModal();
+        onSuccess(res.data.token);
+      })
+      .catch(function() {
+        btn.disabled = false; btn.textContent = 'Create Account';
+        showAuthError('Something went wrong. Please try again.');
+      });
+    });
+  }
+
+  function showEmailGate(question, endpoint, bodyExtra, sentLabel, authedEndpoint) {
     var wrap = document.createElement('div');
     wrap.className = 'contact-form';
     wrap.innerHTML =
@@ -2024,8 +2209,28 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     document.getElementById('opt-login').addEventListener('click', function() {
       var isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
       if (!isMobile) {
-        // No app to catch the deep link on desktop — go straight to guest flow.
-        document.getElementById('opt-guest').click();
+        // Desktop web: there's no app to catch a deep link, so show a real
+        // login/create-account form right here and send once authenticated.
+        showAuthModal(function(token) {
+          wrap.innerHTML = '<p style="color:#555;">Sending…</p>';
+          fetch(authedEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify(bodyExtra),
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.error) {
+              wrap.innerHTML = '<p style="color:#e53e3e;">' + data.error + '</p>';
+              return;
+            }
+            wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ ' + (data.message || sentLabel) + '</p>';
+            scrollBottom();
+          })
+          .catch(function() {
+            wrap.innerHTML = '<p style="color:#e53e3e;">Something went wrong. Please try again.</p>';
+          });
+        });
         return;
       }
       // Try the app; if nothing intercepts it within ~1.2s (app isn't
@@ -2070,12 +2275,14 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
 
   function showCannotAnswerOptions(question) {
     showEmailGate(question, '/m/' + slug + '/askBusiness', { question: question },
-      'Check your email to confirm — the business will respond once confirmed.');
+      'Check your email to confirm — the business will respond once confirmed.',
+      '/m/' + slug + '/authedAskBusiness');
   }
 
   function showQuoteForm(question) {
     showEmailGate(question, '/requestQuote', { businessId: ${JSON.stringify(businessId)}, description: question },
-      'Check your email to confirm your quote request.');
+      'Check your email to confirm your quote request.',
+      '/authedRequestQuote');
   }
 
   function send() {
@@ -3791,6 +3998,46 @@ app.get('/confirmQuoteRequest/:token', async (req, res) => {
   } catch (err) {
     console.error('❌ /confirmQuoteRequest error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your request. Please try again.'));
+  }
+});
+
+// POST /authedRequestQuote — same as /requestQuote, but for a visitor who just
+// logged in or created an account from the module chat widget. A verified
+// JWT already proves who they are, so this skips the email double opt-in
+// entirely and sends the request immediately.
+app.post('/authedRequestQuote', requireAuth, async (req, res) => {
+  try {
+    const { businessId, description } = req.body || {};
+    if (!businessId || !description) {
+      return res.status(400).json({ error: 'businessId and description are required' });
+    }
+    if (!ObjectId.isValid(businessId)) return res.status(400).json({ error: 'Invalid businessId' });
+
+    const service = await database.collection('Services').findOne({ _id: new ObjectId(businessId) });
+    if (!service) return res.status(404).json({ error: 'Business not found' });
+
+    const needResult = await database.collection('NeedRequests').insertOne({
+      searchText: description, urgency: 'ASAP', bidprice: 0,
+      context: description, needType: 'service', userId: new ObjectId(req.userId),
+      serviceMatchStatus: 'processing', mediaType: null, mediaUri: null, fileName: 'media',
+      date: new Date(), createdAt: new Date(),
+    });
+
+    fetch(`${NODE_API}/triggerServiceMatching`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        needId: needResult.insertedId.toString(),
+        userId: req.userId,
+        query: description,
+      }),
+    }).catch(e => console.warn('⚠️ triggerServiceMatching call failed:', e?.message));
+
+    const businessName = service.businessName || service.providerName || 'this business';
+    res.json({ success: true, message: `Your request has been sent to ${businessName}.` });
+  } catch (err) {
+    console.error('❌ /authedRequestQuote error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

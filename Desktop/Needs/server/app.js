@@ -4,6 +4,7 @@ const http = require('http');
 const { Server: SocketIOServer } = require('socket.io');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const { MongoClient, GridFSBucket, ObjectId } = require('mongodb');
 const { spawn } = require('child_process');
 const { Readable } = require('stream');
@@ -27,6 +28,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { registerMcpRoutes } = require('./mcp');
 const { registerOAuthRoutes } = require('./oauth');
+const { escapeHtml } = require('./htmlEscape');
 const gcal = require('./googleCalendar');
 
 // ── Email (Resend) ──────────────────────────────────────────────────────────
@@ -123,6 +125,30 @@ const requireAuthAnyScope = (req, res, next) => {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 };
+
+// Guard the two guest-facing endpoints that send a real email to an address
+// the caller fully controls (no auth required) - /requestQuote and
+// /m/:slug/askBusiness. Both the MCP tools and the module page's own guest
+// flow call these, so with no limit at all, anyone could email-bomb an
+// arbitrary victim's inbox with confirmation emails, or burn through the
+// sending domain's reputation. Limited per *target email*, not just per IP,
+// since the actual harm is to that inbox regardless of how many different
+// IPs/agents the requests come from.
+const guestRequestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'rate_limited', error_description: 'Too many requests from this address. Try again later.' },
+});
+const guestRequestEmailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.body?.email || '').trim().toLowerCase() || req.ip,
+  message: { error: 'rate_limited', error_description: 'Too many requests to this email address. Try again later.' },
+});
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 const io = new SocketIOServer(httpServer, {
@@ -1973,7 +1999,7 @@ app.post('/m/:slug/chat', async (req, res) => {
 // MODULE ASK BUSINESS  POST /m/:slug/askBusiness  — email double opt-in, same
 // anti-spam pattern as /requestQuote. On confirm, lands in the business's
 // normal Activity/Matches feed as a module_question notification.
-app.post('/m/:slug/askBusiness', async (req, res) => {
+app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
     const { slug } = req.params;
     const { question, email } = req.body || {};
@@ -2017,7 +2043,31 @@ app.post('/m/:slug/askBusiness', async (req, res) => {
 });
 
 // GET /confirmModuleQuestion/:token — clicked from the confirmation email
+// GET renders a landing page only - no side effect, so an email link
+// scanner prefetching it cannot send the question on the recipient's
+// behalf. The actual send happens only on the POST below, which requires an
+// explicit button click.
 app.get('/confirmModuleQuestion/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const pending = await database.collection('PendingModuleQuestions').findOne({ token });
+    if (!pending) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has already been used.'));
+    if (pending.confirmedAt) return res.send(renderConfirmPage(true, 'This question was already confirmed and sent.'));
+
+    res.send(renderClickToConfirmPage(
+      'Confirm Your Question',
+      `<p>You asked <strong>${escapeHtml(pending.businessName)}</strong> a question:</p>
+       <div class="preview">${escapeHtml(pending.question)}</div>
+       <p>Click below to send it.</p>`,
+      `/confirmModuleQuestion/${encodeURIComponent(token)}`
+    ));
+  } catch (err) {
+    console.error('❌ GET /confirmModuleQuestion error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+app.post('/confirmModuleQuestion/:token', async (req, res) => {
   try {
     const { token } = req.params;
     const pending = await database.collection('PendingModuleQuestions').findOne({ token });
@@ -2072,7 +2122,7 @@ app.get('/confirmModuleQuestion/:token', async (req, res) => {
       { _id: pending._id }, { $set: { confirmedAt: new Date() } }
     );
 
-    res.send(renderConfirmPage(true, `Your question has been sent to ${pending.businessName}. They will respond soon.`));
+    res.send(renderConfirmPage(true, `Your question has been sent to ${escapeHtml(pending.businessName)}. They will respond soon.`));
   } catch (err) {
     console.error('❌ /confirmModuleQuestion error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your question. Please try again.'));
@@ -4228,8 +4278,46 @@ function renderConfirmPage(success, message) {
 </html>`;
 }
 
+// Landing page a guest confirmation email link opens to - shows what is
+// about to happen and requires an explicit button click (a real POST) to
+// actually do it. GET itself has no side effect, specifically so that an
+// email security scanner (Microsoft Defender Safe Links, Proofpoint, etc.)
+// auto-visiting the link to check it is safe cannot silently confirm a
+// request the real recipient never saw - those scanners routinely prefetch
+// every link in an email within seconds of delivery, which would otherwise
+// defeat the entire point of this double opt-in step.
+function renderClickToConfirmPage(title, bodyHtml, formAction) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #fff; border-radius: 16px; padding: 36px 28px; max-width: 440px; text-align: center; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .icon { font-size: 2.6rem; margin-bottom: 12px; }
+    h1 { font-size: 1.2rem; color: #0F172A; margin-bottom: 8px; }
+    p { font-size: .95rem; color: #64748B; line-height: 1.5; }
+    .preview { background: #F1F5F9; border-radius: 10px; padding: 12px 16px; margin: 16px 0; color: #334155; font-size: .88rem; text-align: left; line-height: 1.5; }
+    button { background: #2563EB; color: #fff; border: none; border-radius: 10px; padding: 13px 28px; font-size: .95rem; font-weight: 700; cursor: pointer; margin-top: 8px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">📩</div>
+    <h1>${escapeHtml(title)}</h1>
+    ${bodyHtml}
+    <form method="POST" action="${formAction}">
+      <button type="submit">Confirm</button>
+    </form>
+  </div>
+</body>
+</html>`;
+}
+
 // POST /requestQuote — body: { businessId, description, email }
-app.post('/requestQuote', async (req, res) => {
+app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
     const { businessId, description, email } = req.body || {};
     if (!businessId || !description || !email) {
@@ -4275,7 +4363,37 @@ app.post('/requestQuote', async (req, res) => {
 });
 
 // GET /confirmQuoteRequest/:token — clicked from the confirmation email
+// GET renders a landing page only - no side effect, so an email link
+// scanner prefetching it cannot send the request on the recipient's behalf.
+// The actual send happens only on the POST below, which requires an
+// explicit button click.
 app.get('/confirmQuoteRequest/:token', async (req, res) => {
+  try {
+    const { token } = req.params;
+    const pending = await database.collection('PendingQuoteRequests').findOne({ token });
+    if (!pending) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has already been used.'));
+    }
+    if (pending.confirmedAt) {
+      return res.send(renderConfirmPage(true, 'This request was already confirmed and sent.'));
+    }
+
+    const service = await database.collection('Services').findOne({ _id: pending.serviceId });
+    const businessName = service?.businessName || service?.providerName || 'this business';
+    res.send(renderClickToConfirmPage(
+      'Confirm Your Quote Request',
+      `<p>You requested a quote from <strong>${escapeHtml(businessName)}</strong>:</p>
+       <div class="preview">${escapeHtml(pending.description)}</div>
+       <p>Click below to send it.</p>`,
+      `/confirmQuoteRequest/${encodeURIComponent(token)}`
+    ));
+  } catch (err) {
+    console.error('❌ GET /confirmQuoteRequest error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+app.post('/confirmQuoteRequest/:token', async (req, res) => {
   try {
     const { token } = req.params;
     const pending = await database.collection('PendingQuoteRequests').findOne({ token });
@@ -4330,7 +4448,7 @@ app.get('/confirmQuoteRequest/:token', async (req, res) => {
     }).catch(e => console.warn('⚠️ triggerServiceMatching call failed:', e?.message));
 
     const businessName = service?.businessName || service?.providerName || 'the business';
-    res.send(renderConfirmPage(true, `Your request has been confirmed and sent to ${businessName}. They will reach out soon.`));
+    res.send(renderConfirmPage(true, `Your request has been confirmed and sent to ${escapeHtml(businessName)}. They will reach out soon.`));
   } catch (err) {
     console.error('❌ /confirmQuoteRequest error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your request. Please try again.'));
@@ -4381,7 +4499,34 @@ app.post('/authedRequestQuote', requireAuthAnyScope, async (req, res) => {
 // Quote" email link. Guest leads have no app login, so acceptance happens by
 // email rather than an in-app Confirm tap. Price-only — no date/time required
 // yet; the business is notified to schedule next (in-app or by reaching out).
+// GET renders a landing page only - no side effect, so an email link
+// scanner prefetching it cannot accept the quote on the recipient's behalf.
+// The actual acceptance happens only on the POST below.
 app.get('/confirmGuestQuoteAccept/:quoteId/:token', async (req, res) => {
+  try {
+    const { quoteId, token } = req.params;
+    if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote || !quote.guestToken || quote.guestToken !== token) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
+    }
+    if (quote.status === 'guest_accepted' || quote.status === 'awaiting_guest_time_confirmation' || quote.status === 'appointment_confirmed') {
+      return res.send(renderConfirmPage(true, 'You already accepted this quote.'));
+    }
+
+    res.send(renderClickToConfirmPage(
+      'Confirm You Accept This Quote',
+      `<p>Accept the quote from <strong>${escapeHtml(quote.businessName)}</strong>${quote.confirmedPrice ? ` of $${escapeHtml(String(quote.confirmedPrice))}` : ''}?</p>
+       <p>They will reach out to schedule a time once you confirm.</p>`,
+      `/confirmGuestQuoteAccept/${encodeURIComponent(quoteId)}/${encodeURIComponent(token)}`
+    ));
+  } catch (err) {
+    console.error('❌ GET /confirmGuestQuoteAccept error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+app.post('/confirmGuestQuoteAccept/:quoteId/:token', async (req, res) => {
   try {
     const { quoteId, token } = req.params;
     if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
@@ -4414,7 +4559,7 @@ app.get('/confirmGuestQuoteAccept/:quoteId/:token', async (req, res) => {
       });
     }
 
-    res.send(renderConfirmPage(true, `You accepted the quote from ${quote.businessName}. They will reach out to schedule a time.`));
+    res.send(renderConfirmPage(true, `You accepted the quote from ${escapeHtml(quote.businessName)}. They will reach out to schedule a time.`));
   } catch (err) {
     console.error('❌ /confirmGuestQuoteAccept error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
@@ -4483,7 +4628,35 @@ app.post('/proposeAppointmentTime', async (req, res) => {
 
 // GET /confirmGuestAppointmentTime/:quoteId/:token — guest confirms the time
 // the business proposed; finalizes the real Appointment.
+// GET renders a landing page only - no side effect, so an email link
+// scanner prefetching it cannot book the appointment on the recipient's
+// behalf. The actual booking happens only on the POST below.
 app.get('/confirmGuestAppointmentTime/:quoteId/:token', async (req, res) => {
+  try {
+    const { quoteId, token } = req.params;
+    if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote || !quote.guestToken || quote.guestToken !== token) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
+    }
+    if (quote.status === 'appointment_confirmed') {
+      return res.send(renderConfirmPage(true, 'This appointment is already confirmed.'));
+    }
+
+    res.send(renderClickToConfirmPage(
+      'Confirm This Appointment Time',
+      `<p><strong>${escapeHtml(quote.businessName)}</strong> proposed:</p>
+       <div class="preview">${escapeHtml(quote.proposedDate)} at ${escapeHtml(quote.proposedTime)}</div>
+       <p>Click below to confirm this time works for you.</p>`,
+      `/confirmGuestAppointmentTime/${encodeURIComponent(quoteId)}/${encodeURIComponent(token)}`
+    ));
+  } catch (err) {
+    console.error('❌ GET /confirmGuestAppointmentTime error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+app.post('/confirmGuestAppointmentTime/:quoteId/:token', async (req, res) => {
   try {
     const { quoteId, token } = req.params;
     if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
@@ -4497,7 +4670,7 @@ app.get('/confirmGuestAppointmentTime/:quoteId/:token', async (req, res) => {
 
     await finalizeAppointmentConfirmation(quote, quoteId);
 
-    res.send(renderConfirmPage(true, `Your appointment with ${quote.businessName} is confirmed for ${quote.proposedDate} at ${quote.proposedTime}.`));
+    res.send(renderConfirmPage(true, `Your appointment with ${escapeHtml(quote.businessName)} is confirmed for ${escapeHtml(quote.proposedDate)} at ${escapeHtml(quote.proposedTime)}.`));
   } catch (err) {
     console.error('❌ /confirmGuestAppointmentTime error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));

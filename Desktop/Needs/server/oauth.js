@@ -26,6 +26,7 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const { escapeHtml } = require('./htmlEscape');
 
 const AUTH_CODE_TTL_MS = 60 * 1000; // single-use, exchanged almost immediately
 
@@ -44,8 +45,15 @@ const registerLimiter = rateLimit({
 });
 
 function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, error }) {
+  // client_name and redirect_uri are both attacker-controlled free text at
+  // registration time (POST /oauth/register accepts any string) - this page
+  // renders on our own real domain, so without escaping, a malicious
+  // client_name would execute as script in the context of a trusted origin
+  // while a real user is actively typing their password into the form here.
+  const safeClientName = escapeHtml(clientName);
+  const safeRedirectUri = escapeHtml(redirectUri);
   const hiddenInputs = Object.entries(hidden)
-    .map(([k, v]) => `<input type="hidden" name="${k}" value="${(v || '').replace(/"/g, '&quot;')}">`)
+    .map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v || '')}">`)
     .join('');
 
   return `<!DOCTYPE html>
@@ -53,7 +61,7 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Authorize ${clientName} — Needs</title>
+<title>Authorize ${safeClientName} — Needs</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F4F8FD; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; overflow: hidden; position: relative; }
@@ -79,29 +87,32 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
   <svg class="wave-front" viewBox="0 0 100 22" preserveAspectRatio="none"><path d="M0,16 C30,2 70,26 100,14 L100,22 L0,22 Z" fill="#C7DCF6"/></svg>
   <div class="card">
     <img class="logo" src="/assets/NeedsLogo.png" alt="Needs">
-    <div class="title">Authorize ${clientName}</div>
-    <div class="subtitle"><b>${clientName}</b> wants to access your Needs account. Log in to approve.</div>
-    <div class="redirect-box"><b>You will be returned to</b>${redirectUri}</div>
-    ${error ? `<div class="error">${error}</div>` : ''}
+    <div class="title">Authorize ${safeClientName}</div>
+    <div class="subtitle"><b>${safeClientName}</b> wants to access your Needs account. Log in to approve.</div>
+    <div class="redirect-box"><b>You will be returned to</b>${safeRedirectUri}</div>
+    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}
     <form method="POST" action="${formAction}">
       ${hiddenInputs}
       <input class="field" type="email" name="email" placeholder="Email address" required autofocus>
       <input class="field" type="password" name="password" placeholder="Password" required>
       <button class="submit" type="submit">Log In &amp; Authorize</button>
     </form>
-    <div class="scope-note">This lets ${clientName} request quotes and ask businesses questions as you, skipping the usual email confirmation step. You can revoke access by changing your password.</div>
+    <div class="scope-note">This lets ${safeClientName} request quotes and ask businesses questions as you, skipping the usual email confirmation step. You can revoke access by changing your password.</div>
   </div>
 </body>
 </html>`;
 }
 
 function renderOAuthError(message) {
+  // Every current call site passes a fixed string we wrote, never user
+  // input - escaped anyway so that stays true even if a future call site
+  // forgets to, rather than relying on every caller remembering to.
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><title>Authorization Error — Needs</title>
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F0F2F5;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;}
 .card{background:#fff;border-radius:16px;padding:36px 28px;max-width:420px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.08);}
 h1{font-size:1.2rem;color:#0F172A;margin-bottom:8px;}p{font-size:.95rem;color:#64748B;line-height:1.5;}</style></head>
-<body><div class="card"><div style="font-size:2.6rem;margin-bottom:12px;">⚠️</div><h1>Authorization Error</h1><p>${message}</p></div></body></html>`;
+<body><div class="card"><div style="font-size:2.6rem;margin-bottom:12px;">⚠️</div><h1>Authorization Error</h1><p>${escapeHtml(message)}</p></div></body></html>`;
 }
 
 function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {

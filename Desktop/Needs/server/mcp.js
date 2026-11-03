@@ -41,6 +41,25 @@ function buildServer({ client, NODE_API, userId }) {
     return text(data);
   });
 
+  // Only offered when not already authenticated - the whole point is to
+  // surface an option that is otherwise invisible to a client that has no
+  // Authorization header, since /mcp itself always succeeds either way and
+  // never forces discovery via a 401 challenge (that would break guest
+  // access entirely, which is deliberately not required here).
+  if (!userId) {
+    server.registerTool('get_sign_in_url', {
+      title: 'Check if the user can sign in to Needs',
+      description: 'Call this if the user has (or might have) an existing Needs account and would prefer not to confirm every request by email. Returns how to connect their account so future quote requests and questions are sent instantly instead of needing an email confirmation click each time.',
+      inputSchema: {},
+    }, async () => {
+      return text({
+        explanation: 'This MCP server supports OAuth for users with an existing Needs account. Once connected, request_quote and ask_business stop requiring an email and are sent immediately as that user.',
+        discovery_url: `${NODE_API}/.well-known/oauth-authorization-server`,
+        instructions: 'Register a client via the registration_endpoint in discovery_url (RFC 7591 Dynamic Client Registration) if not already done, then direct the user to the authorization_endpoint with PKCE (S256) to sign in and approve. This is a one-time setup per client/device.',
+      });
+    });
+  }
+
   server.registerTool('search_businesses', {
     title: 'Search businesses',
     description: 'Search Needs businesses and restaurants by name, category, or description. Returns matching slugs - use get_business to fetch full details for one.',
@@ -104,7 +123,7 @@ function buildServer({ client, NODE_API, userId }) {
     title: 'Request a quote',
     description: userId
       ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized.'
-      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip.",
+      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. If the visitor has a Needs account, call get_sign_in_url first to skip this step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       description: z.string().describe('A description of what the visitor needs, in their own words'),
@@ -143,7 +162,7 @@ function buildServer({ client, NODE_API, userId }) {
     title: 'Send a question directly to a business',
     description: userId
       ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow."
-      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email.",
+      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. If the visitor has a Needs account, call get_sign_in_url first to skip this step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),

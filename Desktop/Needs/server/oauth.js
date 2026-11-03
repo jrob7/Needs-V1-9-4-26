@@ -28,7 +28,6 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
   const hiddenInputs = Object.entries(hidden)
     .map(([k, v]) => `<input type="hidden" name="${k}" value="${(v || '').replace(/"/g, '&quot;')}">`)
     .join('');
-  const host = (() => { try { return new URL(redirectUri).host; } catch { return redirectUri; } })();
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -52,6 +51,8 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
   .error { background: #FEF2F2; color: #DC2626; font-size: .8rem; border-radius: 10px; padding: 9px 12px; margin-bottom: 12px; text-align: left; }
   .submit { background: #2563EB; color: #fff; border: none; border-radius: 12px; height: 50px; font-size: .92rem; font-weight: 700; cursor: pointer; width: 100%; box-shadow: 0 4px 10px rgba(37,99,235,.28); }
   .scope-note { font-size: .76rem; color: #94A3B8; margin-top: 16px; line-height: 1.5; }
+  .redirect-box { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; margin-bottom: 18px; font-size: .76rem; color: #334155; word-break: break-all; text-align: left; }
+  .redirect-box b { display: block; font-size: .68rem; color: #94A3B8; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -60,7 +61,8 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
   <div class="card">
     <img class="logo" src="/assets/NeedsLogo.png" alt="Needs">
     <div class="title">Authorize ${clientName}</div>
-    <div class="subtitle"><b>${clientName}</b> wants to access your Needs account (${host}). Log in to approve.</div>
+    <div class="subtitle"><b>${clientName}</b> wants to access your Needs account. Log in to approve.</div>
+    <div class="redirect-box"><b>You will be returned to</b>${redirectUri}</div>
     ${error ? `<div class="error">${error}</div>` : ''}
     <form method="POST" action="${formAction}">
       ${hiddenInputs}
@@ -115,8 +117,20 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
         return res.status(400).json({ error: 'invalid_client_metadata', error_description: 'redirect_uris is required' });
       }
       for (const uri of redirect_uris) {
-        try { new URL(uri); } catch {
+        let parsed;
+        try { parsed = new URL(uri); } catch {
           return res.status(400).json({ error: 'invalid_redirect_uri', error_description: `Not a valid URL: ${uri}` });
+        }
+        // OAuth 2.1 requires redirect_uris to be HTTPS, with the standard
+        // exception for loopback addresses used by local/dev clients - an
+        // http:// redirect anywhere else lets the authorization code (and
+        // the account access it grants) be intercepted in transit.
+        const isLoopback = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+        if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLoopback)) {
+          return res.status(400).json({
+            error: 'invalid_redirect_uri',
+            error_description: `redirect_uri must be https:// (or http://localhost for local development): ${uri}`,
+          });
         }
       }
       const client_id = crypto.randomBytes(16).toString('hex');

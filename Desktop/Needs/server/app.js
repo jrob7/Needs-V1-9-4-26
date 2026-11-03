@@ -29,12 +29,14 @@ const { Resend } = require('resend');
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'Needs <onboarding@resend.dev>';
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, replyTo }) {
   if (!resend) {
     console.warn('⚠️ sendEmail skipped — RESEND_API_KEY not set');
     return { skipped: true };
   }
-  const result = await resend.emails.send({ from: EMAIL_FROM, to, subject, html });
+  const payload = { from: EMAIL_FROM, to, subject, html };
+  if (replyTo) payload.replyTo = replyTo;
+  const result = await resend.emails.send(payload);
   if (result?.error) {
     console.error('❌ Resend send failed:', JSON.stringify(result.error));
   } else {
@@ -3776,6 +3778,124 @@ app.get('/confirmQuoteRequest/:token', async (req, res) => {
   }
 });
 
+// GET /confirmGuestQuoteAccept/:quoteId/:token — clicked from the "Accept This
+// Quote" email link. Guest leads have no app login, so acceptance happens by
+// email rather than an in-app Confirm tap. Price-only — no date/time required
+// yet; the business is notified to schedule next (in-app or by reaching out).
+app.get('/confirmGuestQuoteAccept/:quoteId/:token', async (req, res) => {
+  try {
+    const { quoteId, token } = req.params;
+    if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote || !quote.guestToken || quote.guestToken !== token) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
+    }
+    if (quote.status === 'guest_accepted' || quote.status === 'awaiting_guest_time_confirmation' || quote.status === 'appointment_confirmed') {
+      return res.send(renderConfirmPage(true, 'You already accepted this quote.'));
+    }
+
+    const requester = await database.collection('Users').findOne({ _id: quote.userId }, { projection: { email: 1 } });
+
+    await database.collection('ServiceQuotes').updateOne(
+      { _id: quote._id },
+      { $set: { status: 'guest_accepted', guestAcceptedAt: new Date() } }
+    );
+
+    if (quote.serviceUserId) {
+      await database.collection('Notifications').insertOne({
+        userId: quote.serviceUserId,
+        type: 'quote_accepted_by_guest',
+        title: '🎉 Customer Accepted Your Quote',
+        body: `${requester?.email || 'The customer'} accepted your quote${quote.confirmedPrice ? ` of $${quote.confirmedPrice}` : ''}. Propose a time below, or reach out directly to schedule.`,
+        needId: quote.needId,
+        quoteId: quote._id,
+        guestEmail: requester?.email || null,
+        read: false,
+        createdAt: new Date(),
+      });
+    }
+
+    res.send(renderConfirmPage(true, `You accepted the quote from ${quote.businessName}. They will reach out to schedule a time.`));
+  } catch (err) {
+    console.error('❌ /confirmGuestQuoteAccept error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+// POST /proposeAppointmentTime — business proposes a specific date/time to a
+// guest lead that already accepted the price. Emails a one-click confirm
+// link; the appointment is only created once the guest confirms that time.
+app.post('/proposeAppointmentTime', async (req, res) => {
+  try {
+    const { quoteId, proposedDate, proposedTime } = req.body || {};
+    if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+    if (!proposedDate || !proposedTime) return res.status(400).json({ error: 'proposedDate and proposedTime are required' });
+
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    const requester = await database.collection('Users').findOne({ _id: quote.userId }, { projection: { email: 1 } });
+    if (!requester?.email) return res.status(400).json({ error: 'No guest email on file for this quote' });
+
+    const business = quote.serviceUserId
+      ? await database.collection('Users').findOne({ _id: new ObjectId(quote.serviceUserId) }, { projection: { email: 1 } })
+      : null;
+
+    const guestToken = crypto.randomBytes(24).toString('hex');
+    await database.collection('ServiceQuotes').updateOne(
+      { _id: quote._id },
+      { $set: {
+        status: 'awaiting_guest_time_confirmation',
+        proposedDate, proposedTime, guestToken,
+        timeProposedAt: new Date(),
+      }}
+    );
+
+    const confirmUrl = `${NODE_API}/confirmGuestAppointmentTime/${quoteId}/${guestToken}`;
+    const emailResult = await sendEmail({
+      to: requester.email,
+      subject: `${quote.businessName} proposed a time to meet`,
+      replyTo: business?.email || undefined,
+      html: `
+        <p><strong>${quote.businessName}</strong> proposed a time for your request:</p>
+        <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${proposedDate} at ${proposedTime}</p>
+        <p><a href="${confirmUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Confirm This Time</a></p>
+        <p style="color:#94A3B8;font-size:.85rem;">Doesn't work for you? Reply to this email and let them know.</p>
+      `,
+    });
+    if (emailResult?.error) {
+      return res.status(502).json({ error: 'Could not send email', detail: emailResult.error });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ /proposeAppointmentTime error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /confirmGuestAppointmentTime/:quoteId/:token — guest confirms the time
+// the business proposed; finalizes the real Appointment.
+app.get('/confirmGuestAppointmentTime/:quoteId/:token', async (req, res) => {
+  try {
+    const { quoteId, token } = req.params;
+    if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote || !quote.guestToken || quote.guestToken !== token) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
+    }
+    if (quote.status === 'appointment_confirmed') {
+      return res.send(renderConfirmPage(true, 'This appointment is already confirmed.'));
+    }
+
+    await finalizeAppointmentConfirmation(quote, quoteId);
+
+    res.send(renderConfirmPage(true, `Your appointment with ${quote.businessName} is confirmed for ${quote.proposedDate} at ${quote.proposedTime}.`));
+  } catch (err) {
+    console.error('❌ /confirmGuestAppointmentTime error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
 // ─── Needs Logic Flow: Service Matching ───────────────────────────────────────
 // POST /triggerServiceMatching — returns immediately; runs background matching
 app.post('/triggerServiceMatching', async (req, res) => {
@@ -3788,6 +3908,18 @@ app.post('/triggerServiceMatching', async (req, res) => {
   setImmediate(async () => {
     const needObjId = new ObjectId(needId);
     try {
+      // Tag whether the requester is a guest (ghost account from the email
+      // double opt-in flow, no app login) so business-side screens know not
+      // to assume in-app messaging/scheduling is possible for this lead.
+      let isGuestLead = false;
+      if (ObjectId.isValid(String(userId))) {
+        const requesterDoc = await database.collection('Users').findOne(
+          { _id: new ObjectId(String(userId)) },
+          { projection: { createdViaAgent: 1 } }
+        );
+        isGuestLead = !!requesterDoc?.createdViaAgent;
+      }
+
       // 1. Mark finding_matches
       await database.collection('NeedRequests').updateOne(
         { _id: needObjId },
@@ -3866,6 +3998,7 @@ app.post('/triggerServiceMatching', async (req, res) => {
               breakdown: qData.breakdown || null,
               needText: query,
               status: 'pending_business',
+              isGuestLead,
               createdAt: new Date(),
             };
             const inserted = await database.collection('ServiceQuotes').insertOne(quoteDoc);
@@ -3886,6 +4019,7 @@ app.post('/triggerServiceMatching', async (req, res) => {
                 estimateMax: qData.estimateMax ?? null,
                 subService: qData.subService || null,
                 businessName: serviceDoc.businessName,
+                isGuestLead,
                 read: false,
                 createdAt: new Date(),
               });
@@ -4004,6 +4138,63 @@ app.get('/needRequest/:id', async (req, res) => {
   }
 });
 
+// Shared by /userRespondToQuote (in-app confirm) and /confirmGuestAppointmentTime
+// (guest email confirm) — finalizes a quote into a real Appointment once a
+// specific date/time has been agreed on by both sides.
+async function finalizeAppointmentConfirmation(quote, quoteId) {
+  await database.collection('ServiceQuotes').updateOne(
+    { _id: new ObjectId(quoteId) },
+    { $set: { status: 'appointment_confirmed', userConfirmedAt: new Date() } }
+  );
+  if (quote.needId) {
+    await database.collection('NeedRequests').updateOne(
+      { _id: quote.needId },
+      { $set: { serviceMatchStatus: 'appointment_confirmed' } }
+    );
+  }
+  await database.collection('Appointments').insertOne({
+    serviceUserId: quote.serviceUserId ? new ObjectId(quote.serviceUserId) : null,
+    requesterId: quote.userId ? new ObjectId(quote.userId) : null,
+    needText: quote.needText || null,
+    businessName: quote.businessName || null,
+    price: quote.confirmedPrice || null,
+    date: quote.proposedDate || null,
+    time: quote.proposedTime || null,
+    address: null,
+    status: 'confirmed',
+    quoteId: new ObjectId(quoteId),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  const updated = await database.collection('Notifications').updateOne(
+    { quoteId: new ObjectId(quoteId), type: 'quote_request' },
+    { $set: { appointmentConfirmed: true, read: true } }
+  );
+  if (updated.matchedCount === 0 && quote.serviceUserId) {
+    await database.collection('Notifications').insertOne({
+      userId: quote.serviceUserId, type: 'appointment_confirmed',
+      title: '🎉 Appointment Confirmed',
+      body: `Customer confirmed your appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}`,
+      needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
+    });
+  }
+  setImmediate(async () => {
+    try {
+      if (!quote.serviceUserId) return;
+      const provider = await database.collection('Users').findOne(
+        { _id: quote.serviceUserId },
+        { projection: { 'googleCalendar.tokens': 1 } }
+      );
+      if (provider?.googleCalendar?.tokens) {
+        await gcal.createCalendarEvent(provider.googleCalendar.tokens, {
+          needText: quote.needText, businessName: quote.businessName,
+          date: quote.proposedDate, time: quote.proposedTime, price: quote.confirmedPrice,
+        });
+      }
+    } catch (_) {}
+  });
+}
+
 // POST /respondToServiceQuote — business responds to a quote_request.
 // Stores the response directly in ServiceQuotes (no messages sent).
 // No requireAuth — quoteId (24-char ObjectId) acts as the access token.
@@ -4033,6 +4224,33 @@ app.post('/respondToServiceQuote', async (req, res) => {
           body: `${quote.businessName} sent a quote${proposedDate ? ` for ${proposedDate}` : ''}`,
           needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
         });
+
+        // Guest leads have no app login, so the in-app Notification above is
+        // invisible to them — email the quote instead, with a one-click accept link.
+        const requester = await database.collection('Users').findOne(
+          { _id: quote.userId }, { projection: { email: 1, createdViaAgent: 1 } }
+        );
+        if (requester?.createdViaAgent && requester.email) {
+          const guestToken = crypto.randomBytes(24).toString('hex');
+          await database.collection('ServiceQuotes').updateOne(
+            { _id: new ObjectId(quoteId) },
+            { $set: { guestToken } }
+          );
+          const acceptUrl = `${NODE_API}/confirmGuestQuoteAccept/${quoteId}/${guestToken}`;
+          const priceText = confirmedPrice ? `$${confirmedPrice}` : 'See details below';
+          await sendEmail({
+            to: requester.email,
+            subject: `${quote.businessName} sent you a quote`,
+            html: `
+              <p><strong>${quote.businessName}</strong> responded to your request:</p>
+              <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${quote.needText || ''}</p>
+              <p><strong>Price:</strong> ${priceText}</p>
+              ${businessNote ? `<p><strong>Note:</strong> ${businessNote}</p>` : ''}
+              ${proposedDate ? `<p><strong>Suggested time:</strong> ${proposedDate}${proposedTime ? ' at ' + proposedTime : ''}</p>` : ''}
+              <p><a href="${acceptUrl}" style="background:#10B981;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Accept This Quote</a></p>
+            `,
+          });
+        }
       }
     } else if (action === 'ask') {
       const archiveOps = {};
@@ -4077,63 +4295,7 @@ app.post('/userRespondToQuote', async (req, res) => {
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
 
     if (action === 'confirm') {
-      await database.collection('ServiceQuotes').updateOne(
-        { _id: new ObjectId(quoteId) },
-        { $set: { status: 'appointment_confirmed', userConfirmedAt: new Date() } }
-      );
-      if (quote.needId) {
-        await database.collection('NeedRequests').updateOne(
-          { _id: quote.needId },
-          { $set: { serviceMatchStatus: 'appointment_confirmed' } }
-        );
-      }
-      // Insert into Appointments so it shows in Scheduler
-      await database.collection('Appointments').insertOne({
-        serviceUserId: quote.serviceUserId ? new ObjectId(quote.serviceUserId) : null,
-        requesterId: quote.userId ? new ObjectId(quote.userId) : null,
-        needText: quote.needText || null,
-        businessName: quote.businessName || null,
-        price: quote.confirmedPrice || null,
-        date: quote.proposedDate || null,
-        time: quote.proposedTime || null,
-        address: null,
-        status: 'confirmed',
-        quoteId: new ObjectId(quoteId),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-      // Mark original quote_request notification as confirmed in-place.
-      // Match only on quoteId+type — userId type may differ between collections.
-      const updated = await database.collection('Notifications').updateOne(
-        { quoteId: new ObjectId(quoteId), type: 'quote_request' },
-        { $set: { appointmentConfirmed: true, read: true } }
-      );
-      if (updated.matchedCount === 0 && quote.serviceUserId) {
-        // Fallback: no quote_request notification found — create appointment_confirmed
-        await database.collection('Notifications').insertOne({
-          userId: quote.serviceUserId, type: 'appointment_confirmed',
-          title: '🎉 Appointment Confirmed',
-          body: `Customer confirmed your appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}`,
-          needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
-        });
-      }
-      // Add to business's Google Calendar (fire-and-forget)
-      setImmediate(async () => {
-        try {
-          if (!quote.serviceUserId) return;
-          const provider = await database.collection('Users').findOne(
-            { _id: quote.serviceUserId },
-            { projection: { 'googleCalendar.tokens': 1 } }
-          );
-          if (provider?.googleCalendar?.tokens) {
-            await gcal.createCalendarEvent(provider.googleCalendar.tokens, {
-              needText: quote.needText, businessName: quote.businessName,
-              date: quote.proposedDate, time: quote.proposedTime, price: quote.confirmedPrice,
-            });
-          }
-        } catch (_) {}
-      });
-
+      await finalizeAppointmentConfirmation(quote, quoteId);
     } else if (action === 'reschedule') {
       await database.collection('ServiceQuotes').updateOne(
         { _id: new ObjectId(quoteId) },

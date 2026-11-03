@@ -193,15 +193,19 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
   };
 
   // ── Send quote ───────────────────────────────────────────────────────────
+  // Guest leads (no app account) accept the price first and schedule a time
+  // afterward, so a date isn't required at this step for them.
+  const isGuestLead = !!notification?.isGuestLead;
+
   const handleSendQuote = async () => {
-    if (!selectedDay) { Alert.alert('Select a date', 'Please pick a date from the calendar.'); return; }
+    if (!selectedDay && !isGuestLead) { Alert.alert('Select a date', 'Please pick a date from the calendar.'); return; }
     const quoteId = notification?.quoteId;
     if (!quoteId) { Alert.alert('Error', 'Quote ID missing.'); return; }
 
     setSending(true);
     try {
-      const dateStr = fmtDate(appointmentDate);
-      const timeStr = fmtTime(appointmentDate);
+      const dateStr = selectedDay ? fmtDate(appointmentDate) : null;
+      const timeStr = selectedDay ? fmtTime(appointmentDate) : null;
       const resp = await fetch(`${NODE_API}/respondToServiceQuote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -222,7 +226,11 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
         body: JSON.stringify({ notificationIds: [notification._id] }),
       }).catch(() => {});
 
-      Alert.alert('✅ Quote Sent', `Your quote for ${dateStr} at ${timeStr} has been sent to the customer.`);
+      Alert.alert(
+        '✅ Quote Sent',
+        dateStr ? `Your quote for ${dateStr} at ${timeStr} has been sent to the customer.`
+                : 'Your quote has been sent to the customer.'
+      );
       onSent?.();
     } catch {
       Alert.alert('Error', "Couldn't send your quote. Please try again.");
@@ -388,9 +396,14 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                 })()}
 
                 <View style={st.sectionRow}>
-                  <Text style={st.sectionTitle}>Select a Date</Text>
+                  <Text style={st.sectionTitle}>Select a Date{isGuestLead ? ' (optional)' : ''}</Text>
                   {loadingMonth && <ActivityIndicator size="small" color="#2563EB" style={{ marginLeft: 8 }} />}
                 </View>
+                {isGuestLead && (
+                  <Text style={st.guestNote}>
+                    This customer isn't on the app yet — you can send pricing now and propose a time once they accept.
+                  </Text>
+                )}
 
                 <MonthCalendar
                   selectedDay={selectedDay}
@@ -638,6 +651,7 @@ const st = StyleSheet.create({
 
   sectionRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   sectionTitle:{ fontSize: IS_WEB ? 17 : 14, fontWeight: '800', color: '#0F172A', marginBottom: 8 },
+  guestNote: { fontSize: 12, color: '#64748B', marginBottom: 12, lineHeight: 17 },
 
   slotsLoading: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12 },
   slotsLoadingTxt: { fontSize: 13, color: '#64748B' },

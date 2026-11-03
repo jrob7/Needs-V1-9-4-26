@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useContext, useEffect } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  SafeAreaView, Image, ActivityIndicator, ScrollView, Alert, Animated,
+  SafeAreaView, Image, ActivityIndicator, ScrollView, Alert, Animated, Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -21,6 +21,7 @@ import QuoteResponseModal from './QuoteResponseModal';
 import RescheduleRequestModal from './RescheduleRequestModal';
 import RescheduleResponseModal from './RescheduleResponseModal';
 import AnswerQuestionModal from './AnswerQuestionModal';
+import ProposeTimeModal from './ProposeTimeModal';
 
 import { NODE_API, FLASK_API } from '../config';
 import { IS_WEB, IS_MOBILE_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
@@ -510,6 +511,38 @@ const ModuleQuestionRow = ({ item, onRespond }) => (
   </View>
 );
 
+const QuoteAcceptedByGuestRow = ({ item, onProposeTime }) => (
+  <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start', backgroundColor: '#F0FDF4' }]}>
+    <View style={[styles.iconWrap, { backgroundColor: '#DCFCE7' }]}>
+      <Ionicons name="checkmark-circle" size={W ? 26 : 20} color="#16A34A" />
+    </View>
+    <View style={styles.rowContent}>
+      <View style={styles.rowTop}>
+        <Text style={[styles.rowTitle, { color: '#15803D' }]} numberOfLines={1}>{item.title || '🎉 Customer Accepted Your Quote'}</Text>
+        <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+      </View>
+      <Text style={styles.rowBody}>{item.body}</Text>
+      {item.guestEmail && (
+        <Text style={[styles.rowBody, { marginTop: 4, fontWeight: '700' }]}>{item.guestEmail}</Text>
+      )}
+      <View style={styles.leadButtonsRow}>
+        <TouchableOpacity style={styles.respondBtn} onPress={() => onProposeTime(item)}>
+          <Text style={styles.respondBtnText}>📅 Propose a Time</Text>
+        </TouchableOpacity>
+        {item.guestEmail && (
+          <TouchableOpacity
+            style={styles.requestInfoBtn}
+            onPress={() => Linking.openURL(`mailto:${item.guestEmail}`)}
+          >
+            <Text style={styles.requestInfoBtnText}>✉️ Email Them</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+    {!item.read && <View style={styles.unreadDot} />}
+  </View>
+);
+
 const InfoProvidedRow = ({ item, onRespond }) => (
   <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
     <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
@@ -544,10 +577,11 @@ const NotificationsScreen = () => {
   const [rescheduleRequestTarget, setRescheduleRequestTarget] = useState(null); // appointment
   const [rescheduleResponseTarget, setRescheduleResponseTarget] = useState(null); // notification
   const [answerQuestionTarget, setAnswerQuestionTarget] = useState(null); // notification
+  const [proposeTimeTarget, setProposeTimeTarget] = useState(null); // notification (quote_accepted_by_guest)
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
-  const BUSINESS_QUOTE_TYPES = ['appointment_confirmed', 'reschedule_request', 'info_provided', 'quote_update'];
+  const BUSINESS_QUOTE_TYPES = ['appointment_confirmed', 'reschedule_request', 'info_provided', 'quote_update', 'quote_accepted_by_guest'];
 
   const fetchNotifications = useCallback(async () => {
     if (!userId) return;
@@ -986,6 +1020,8 @@ const NotificationsScreen = () => {
                 ? <RescheduleRequestRow item={item} onRespond={i => setRescheduleResponseTarget(i)} />
               : item.type === 'module_question'
                 ? <ModuleQuestionRow item={item} onRespond={i => setAnswerQuestionTarget(i)} />
+              : item.type === 'quote_accepted_by_guest'
+                ? <QuoteAcceptedByGuestRow item={item} onProposeTime={i => setProposeTimeTarget(i)} />
               : item.type === 'info_provided'
                 ? <InfoProvidedRow item={item} onRespond={i => {
                     const qId = i.quoteId ? String(i.quoteId) : null;
@@ -1061,6 +1097,18 @@ const NotificationsScreen = () => {
             const id = answerQuestionTarget._id;
             if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, answered: true, read: true } : n));
             setAnswerQuestionTarget(null);
+          }}
+        />
+      )}
+
+      {proposeTimeTarget && (
+        <ProposeTimeModal
+          notification={proposeTimeTarget}
+          onClose={() => setProposeTimeTarget(null)}
+          onSent={() => {
+            const id = proposeTimeTarget._id;
+            if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, read: true } : n));
+            setProposeTimeTarget(null);
           }}
         />
       )}

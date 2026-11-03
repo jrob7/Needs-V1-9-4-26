@@ -182,7 +182,13 @@ app.use('/assets', express.static(path.join(__dirname, 'assets')));
 // the same /assets prefix — Express tries each in order until one matches.
 app.use('/_expo', express.static(path.join(__dirname, 'web-build', '_expo')));
 app.use('/assets', express.static(path.join(__dirname, 'web-build', 'assets')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'web-build', 'index.html')));
+// index.html must never be cached — it references the current build's
+// content-hashed JS filename, so a stale cached copy silently keeps serving
+// an old version of the app indefinitely after every future deploy.
+app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, 'web-build', 'index.html'));
+});
 
 
 

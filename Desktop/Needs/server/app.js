@@ -190,6 +190,63 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'web-build', 'index.html'));
 });
 
+// robots.txt — explicitly allow the known AI crawlers/agents in addition to
+// standard search engines. Several of these (GPTBot, ClaudeBot, etc.) are
+// blocked by default on a lot of sites simply because nobody opted them in.
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send(
+`User-agent: *
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+`);
+});
+
+// llms.txt — an emerging convention (llmstxt.org) pointing AI agents at a
+// short, structured summary of the site instead of making them infer it
+// from a full crawl. Describes the platform; individual module pages carry
+// their own structured data (schema.org) and are linked from here as a
+// pattern, not enumerated (there is no fixed list - pass ?format=llms on a
+// module page would be the per-business equivalent if ever needed).
+app.get('/llms.txt', (req, res) => {
+  res.type('text/plain').send(
+`# Needs
+
+> Needs connects customers with local service businesses. Each business has a public page with real pricing, services, and availability, plus a conversational assistant that can answer questions and submit quote requests on a customer's behalf.
+
+## For AI agents and assistants
+
+- Business pages: https://www.needs-module.com/m/{business-slug}
+- Each page includes structured data (schema.org LocalBusiness, Offer) in a <script type="application/ld+json"> tag, and renders name, services, pricing, availability, and response time directly in the page HTML - no JavaScript execution is required to read them.
+- To ask a question or request a quote on a visitor's behalf, use the chat endpoint described in each page, or contact the business directly via the phone number in its structured data.
+`);
+});
+
 
 
 // ✅ Middleware to log every request
@@ -2677,6 +2734,8 @@ app.get('/m/:slug', async (req, res) => {
     "areaServed": area,
     "telephone": phone,
     "url": MODULE_URL,
+    ...(doc.rateMin ? { "priceRange": `$${doc.rateMin}${doc.rateMax ? `-$${doc.rateMax}` : '+'}` } : {}),
+    ...(topServices.length ? { "makesOffer": topServices.map(s => ({ "@type": "Offer", "itemOffered": { "@type": "Service", "name": s.name || s } })) } : {}),
   });
 
   const heroSlides = photos.map(url =>
@@ -2689,6 +2748,19 @@ app.get('/m/:slug', async (req, res) => {
   const serviceRows = topServices.map(s =>
     `<div class="service-row">${s.name || s}</div>`
   ).join('');
+
+  // Pricing is already collected per-service (pricingDetails) and was only
+  // ever used internally to ground the chat widget's answers - never shown
+  // on the page itself, so a crawler or agent reading the raw HTML (without
+  // using the chat) couldn't see it at all. Render it directly too.
+  const pricingRows = (doc.pricingDetails && Object.keys(doc.pricingDetails).length)
+    ? Object.entries(doc.pricingDetails).map(([sub, qa]) => {
+        const qaRows = Object.entries(qa || {}).map(([q, a]) =>
+          `<div class="pricing-qa"><span class="pricing-q">${q}</span><span class="pricing-a">${a}</span></div>`
+        ).join('');
+        return `<div class="pricing-item"><div class="pricing-item-name">${sub}</div>${qaRows}</div>`;
+      }).join('')
+    : '';
 
   const statBoxes = [
     avail        ? { value: avail, label: 'Availability' } : null,
@@ -2737,6 +2809,12 @@ app.get('/m/:slug', async (req, res) => {
     .desc { font-size: .92rem; color: #475569; line-height: 1.6; }
     .service-row { padding: 12px 0; border-bottom: 1px solid #E2E8F0; font-size: .95rem; font-weight: 600; color: #0F172A; }
     .service-row:last-child { border-bottom: none; }
+    .pricing-item { padding: 12px 0; border-bottom: 1px solid #E2E8F0; }
+    .pricing-item:last-child { border-bottom: none; }
+    .pricing-item-name { font-size: .95rem; font-weight: 700; color: #0F172A; margin-bottom: 4px; }
+    .pricing-qa { display: flex; justify-content: space-between; gap: 12px; font-size: .86rem; color: #475569; margin-top: 2px; }
+    .pricing-q { color: #64748B; }
+    .pricing-a { font-weight: 700; color: #16A34A; text-align: right; }
     .stats { display: flex; gap: 10px; margin-top: 14px; }
     .stat-box { flex: 1; background: #F1F5F9; border-radius: 12px; padding: 14px; text-align: center; }
     .stat-value { font-size: .95rem; font-weight: 800; color: #0F172A; }
@@ -2785,6 +2863,12 @@ app.get('/m/:slug', async (req, res) => {
   <div class="section">
     <h2>Top Services</h2>
     <div>${serviceRows}</div>
+  </div>` : ''}
+
+  ${pricingRows ? `
+  <div class="section">
+    <h2>Pricing</h2>
+    <div>${pricingRows}</div>
   </div>` : ''}
 
   <div class="section">

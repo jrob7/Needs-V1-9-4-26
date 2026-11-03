@@ -10,19 +10,38 @@
 // Flow: POST /oauth/register (Dynamic Client Registration, RFC 7591) once
 // per client -> GET /oauth/authorize (the user logs into their real Needs
 // account and approves the client; PKCE challenge recorded against a
-// single-use code) -> POST /oauth/token (code + verifier -> the same
-// access/refresh tokens /login already issues) -> client calls /mcp with
-// Authorization: Bearer <token>.
+// single-use code) -> POST /oauth/token (code + verifier -> an mcp-scoped
+// access/refresh token pair, shaped like but distinct from what /login
+// issues) -> client calls /mcp with Authorization: Bearer <token>.
 //
 // Deliberately scoped: login only at /oauth/authorize, not full signup -
 // someone without an account yet creates one through the app itself first.
-// One implicit scope (full account access, matching what /login already
-// grants) rather than a scope negotiation system nothing here needs yet.
+// The `signTokens` passed in here is app.js's signMcpTokens, not its plain
+// signTokens - every token this module issues carries scope: 'mcp', which
+// requireAuth (app.js) refuses everywhere except the couple of endpoints an
+// MCP client is actually meant to call. Keeps this module's own code
+// agnostic to that distinction; it just calls whatever token-signing
+// function it was handed.
 
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 
 const AUTH_CODE_TTL_MS = 60 * 1000; // single-use, exchanged almost immediately
+
+// Registration itself grants no access (a real user still has to approve a
+// client by logging in at /oauth/authorize), so this isn't a hard security
+// boundary - it just raises the cost of mass-registering throwaway clients
+// for a phishing campaign (see the security review). 10/hour per IP is
+// generous for real use (registering one client per app/device is rare)
+// while meaningfully limiting bulk abuse.
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'rate_limited', error_description: 'Too many client registrations from this address. Try again later.' },
+});
 
 function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, error }) {
   const hiddenInputs = Object.entries(hidden)
@@ -110,7 +129,7 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
   });
 
   // ── Dynamic Client Registration (RFC 7591) ───────────────────────────────
-  app.post('/oauth/register', async (req, res) => {
+  app.post('/oauth/register', registerLimiter, async (req, res) => {
     try {
       const { redirect_uris, client_name } = req.body || {};
       if (!Array.isArray(redirect_uris) || redirect_uris.length === 0) {
@@ -247,7 +266,14 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
       if (authCode.redirect_uri !== redirect_uri) return res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
 
       const computedChallenge = crypto.createHash('sha256').update(code_verifier).digest('base64url');
-      if (computedChallenge !== authCode.code_challenge) {
+      // Not exploitable here (code_challenge is public, not a secret - see
+      // the security review), but timing-safe comparison is the correct
+      // default discipline for crypto code regardless. timingSafeEqual
+      // throws on mismatched lengths rather than returning false, hence the
+      // length check first.
+      const challengeMatches = computedChallenge.length === authCode.code_challenge.length
+        && crypto.timingSafeEqual(Buffer.from(computedChallenge), Buffer.from(authCode.code_challenge));
+      if (!challengeMatches) {
         return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
       }
 

@@ -12,6 +12,11 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const videoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 150 * 1024 * 1024 } });
 const app = express();
+// Railway terminates TLS and proxies every request through one edge hop, so
+// without this req.ip (and anything rate-limiting off it) would see
+// Railway's internal address instead of the real client IP for every
+// request.
+app.set('trust proxy', 1);
 const httpServer = http.createServer(app);
 const port = process.env.PORT || 3000;
 // 🔥 REQUIRED FOR IMAGE HYDRATION
@@ -67,7 +72,45 @@ function signTokens(userId) {
   return { token: signAccessToken(userId), refreshToken: signRefreshToken(userId) };
 }
 
+// Tokens minted for an OAuth-authorized MCP client carry scope: 'mcp' so
+// requireAuth can tell them apart from a full app session token and refuse
+// them everywhere except the specific endpoints an MCP client legitimately
+// calls. A token with no scope claim at all (every token issued before this
+// existed, and everything /login/createUser/web-handoff still issue today)
+// is treated as full access, unchanged from before this existed.
+function signMcpTokens(userId) {
+  return {
+    token: jwt.sign({ userId, scope: 'mcp' }, JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL }),
+    refreshToken: jwt.sign({ userId, scope: 'mcp' }, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }),
+  };
+}
+
+// Used by every route except the small set an MCP client is meant to reach -
+// rejects an mcp-scoped token outright, same as no token at all. A token
+// with no scope claim (every non-OAuth login path) is unaffected.
 const requireAuth = (req, res, next) => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  try {
+    const payload = jwt.verify(header.split(' ')[1], JWT_SECRET);
+    if (payload.scope === 'mcp') {
+      return res.status(403).json({ error: 'This token is scoped for MCP use only and cannot access this endpoint' });
+    }
+    req.userId = payload.userId;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+};
+
+// Used only by /authedRequestQuote and /m/:slug/authedAskBusiness, the two
+// endpoints an OAuth-authorized MCP client is meant to call. Unlike
+// requireAuth, this accepts an mcp-scoped token in addition to a regular
+// full-access one - the module page's own login modal calls these same two
+// endpoints with a plain /login token, so both must keep working here.
+const requireAuthAnyScope = (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -2040,7 +2083,7 @@ app.get('/confirmModuleQuestion/:token', async (req, res) => {
 // visitor who just logged in or created an account from the module chat
 // widget. A verified JWT already proves who they are, so this skips the
 // email double opt-in and sends the question immediately.
-app.post('/m/:slug/authedAskBusiness', requireAuth, async (req, res) => {
+app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => {
   try {
     const { slug } = req.params;
     const { question } = req.body || {};
@@ -4298,7 +4341,7 @@ app.get('/confirmQuoteRequest/:token', async (req, res) => {
 // logged in or created an account from the module chat widget. A verified
 // JWT already proves who they are, so this skips the email double opt-in
 // entirely and sends the request immediately.
-app.post('/authedRequestQuote', requireAuth, async (req, res) => {
+app.post('/authedRequestQuote', requireAuthAnyScope, async (req, res) => {
   try {
     const { businessId, description } = req.body || {};
     if (!businessId || !description) {
@@ -4907,7 +4950,7 @@ app.post('/userRespondToQuote', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
 
-registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API });
+registerOAuthRoutes(app, { database, bcrypt, signTokens: signMcpTokens, NODE_API });
 registerMcpRoutes(app, { client, NODE_API });
 
 // Render

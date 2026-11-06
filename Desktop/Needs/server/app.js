@@ -150,6 +150,16 @@ const guestRequestEmailLimiter = rateLimit({
   message: { error: 'rate_limited', error_description: 'Too many requests to this email address. Try again later.' },
 });
 
+// trackingKeys are 128-bit random tokens, not practically guessable, but a
+// light limit is still cheap defense in depth against someone trying to
+// brute-force/enumerate at volume.
+const trackRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 const io = new SocketIOServer(httpServer, {
   cors: {
@@ -2017,9 +2027,13 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
     const businessName = type === 'restaurant' ? doc.name : (doc.businessName || doc.providerName);
 
     const token = crypto.randomBytes(24).toString('hex');
+    // See /requestQuote for why this is separate from the email-confirm
+    // token - a durable reference an MCP/AI caller can check status with
+    // later, including in a different conversation, without needing email.
+    const trackingKey = crypto.randomBytes(16).toString('hex');
     await db.collection('PendingModuleQuestions').insertOne({
       slug, businessId: doc._id, businessType: type, businessName,
-      question: String(question).slice(0, 1000), email, token,
+      question: String(question).slice(0, 1000), email, token, trackingKey,
       createdAt: new Date(), confirmedAt: null,
     });
 
@@ -2035,7 +2049,7 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
       `,
     });
 
-    res.json({ success: true, message: 'Check your email to confirm before your question is sent.' });
+    res.json({ success: true, message: 'Check your email to confirm before your question is sent.', trackingKey });
   } catch (err) {
     console.error('❌ /m/:slug/askBusiness error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -2104,6 +2118,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
         question: pending.question,
         askerEmail: pending.email,
         businessId: pending.businessId,
+        trackingKey: pending.trackingKey || null,
         read: false,
         answered: false,
         createdAt: new Date(),
@@ -2114,6 +2129,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
       await database.collection('ModuleQuestions').insertOne({
         slug: pending.slug, businessId: pending.businessId, businessName: pending.businessName,
         type: pending.businessType, question: pending.question, contactEmail: pending.email,
+        trackingKey: pending.trackingKey || null,
         createdAt: new Date(),
       });
     }
@@ -2126,6 +2142,81 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
   } catch (err) {
     console.error('❌ /confirmModuleQuestion error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your question. Please try again.'));
+  }
+});
+
+// GET /trackRequest/:trackingKey — guest-facing status lookup, keyed by the
+// unguessable tracking key returned when request_quote/ask_business was
+// first called (see mcp.js). Deliberately not keyed by email - anyone who
+// knows an email could ask about someone else's request, but only the
+// original caller ever receives this key, so possession of it is itself
+// real proof of having made the original request. Works for both quote
+// requests and questions, at whatever stage they are currently at.
+app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    if (!trackingKey) return res.status(400).json({ error: 'trackingKey required' });
+
+    const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey });
+    if (pendingQuote && !pendingQuote.confirmedAt) {
+      return res.json({ type: 'quote', status: 'awaiting_confirmation', message: 'Check your email to confirm this request before it is sent.' });
+    }
+    const pendingQuestion = await database.collection('PendingModuleQuestions').findOne({ trackingKey });
+    if (pendingQuestion && !pendingQuestion.confirmedAt) {
+      return res.json({ type: 'question', status: 'awaiting_confirmation', message: 'Check your email to confirm this question before it is sent.' });
+    }
+
+    // Confirmed quote request - report wherever it currently is in the
+    // matching/quote pipeline.
+    const need = await database.collection('NeedRequests').findOne({ trackingKey });
+    if (need) {
+      const quotes = await database.collection('ServiceQuotes').find({ needId: need._id }).toArray();
+      if (quotes.length === 0) {
+        return res.json({
+          type: 'quote',
+          status: need.serviceMatchStatus || 'processing',
+          message: 'Still being matched to businesses.',
+        });
+      }
+      return res.json({
+        type: 'quote',
+        status: 'has_responses',
+        quotes: quotes.map(q => ({
+          businessName: q.businessName,
+          status: q.status,
+          confirmedPrice: q.confirmedPrice || null,
+          estimate: q.estimate || null,
+          proposedDate: q.proposedDate || null,
+          proposedTime: q.proposedTime || null,
+        })),
+      });
+    }
+
+    // Confirmed question - service businesses answer through Notifications;
+    // businesses without a linked app user (restaurants, etc.) only have the
+    // plain ModuleQuestions record and no in-app reply flow yet.
+    const notif = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
+    if (notif) {
+      return res.json({
+        type: 'question',
+        status: notif.answered ? 'answered' : 'pending_answer',
+        question: notif.question,
+        answer: notif.answered ? (notif.answer || null) : null,
+      });
+    }
+    const moduleQuestion = await database.collection('ModuleQuestions').findOne({ trackingKey });
+    if (moduleQuestion) {
+      return res.json({
+        type: 'question',
+        status: 'sent',
+        message: 'This business does not have an in-app reply flow yet - they will respond to your email directly.',
+      });
+    }
+
+    return res.status(404).json({ error: 'No request found for this tracking key.' });
+  } catch (err) {
+    console.error('❌ /trackRequest error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -2172,6 +2263,49 @@ app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => 
     res.json({ success: true, message: `Your question has been sent to ${businessName}.` });
   } catch (err) {
     console.error('❌ /m/:slug/authedAskBusiness error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /m/:slug/myRequests — authenticated status lookup. No tracking key
+// needed here: the OAuth access token already persists across conversations
+// at the connector/account level (unlike a guest, who has no durable
+// credential at all - see /trackRequest above), so looking this up by
+// req.userId just works automatically in any future call, same session or
+// a brand new one.
+app.get('/m/:slug/myRequests', requireAuthAnyScope, async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const db = client.db('Need');
+    const service = await db.collection('Services').findOne({ slug });
+    if (!service) return res.status(404).json({ error: 'Module not found' });
+
+    const quotes = await db.collection('ServiceQuotes')
+      .find({ userId: new ObjectId(req.userId), serviceId: service._id })
+      .sort({ createdAt: -1 }).limit(5).toArray();
+
+    const questions = await db.collection('Notifications')
+      .find({ fromUserId: new ObjectId(req.userId), businessId: service._id, type: 'module_question' })
+      .sort({ createdAt: -1 }).limit(5).toArray();
+
+    res.json({
+      quotes: quotes.map(q => ({
+        status: q.status,
+        confirmedPrice: q.confirmedPrice || null,
+        estimate: q.estimate || null,
+        proposedDate: q.proposedDate || null,
+        proposedTime: q.proposedTime || null,
+        createdAt: q.createdAt,
+      })),
+      questions: questions.map(n => ({
+        question: n.question,
+        answered: !!n.answered,
+        answer: n.answered ? (n.answer || null) : null,
+        createdAt: n.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error('❌ /m/:slug/myRequests error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -4330,11 +4464,18 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
     if (!service) return res.status(404).json({ error: 'Business not found' });
 
     const token = crypto.randomBytes(24).toString('hex');
+    // Separate from the email-confirm token above: a durable reference an
+    // MCP/AI caller gets back immediately (see mcp.js) so it can check on
+    // this request later - including in a different conversation - without
+    // needing to know the requester's email. Unguessable, so possession of
+    // it is itself proof of having made the original request.
+    const trackingKey = crypto.randomBytes(16).toString('hex');
     await database.collection('PendingQuoteRequests').insertOne({
       serviceId: new ObjectId(businessId),
       description: String(description).slice(0, 2000),
       email,
       token,
+      trackingKey,
       createdAt: new Date(),
       confirmedAt: null,
     });
@@ -4355,7 +4496,11 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
     if (emailResult?.error) {
       return res.status(502).json({ error: 'Could not send confirmation email', detail: emailResult.error });
     }
-    res.json({ success: true, skipped: !!emailResult?.skipped, message: 'Check your email to confirm your request before it is sent to the business.' });
+    res.json({
+      success: true, skipped: !!emailResult?.skipped,
+      message: 'Check your email to confirm your request before it is sent to the business.',
+      trackingKey,
+    });
   } catch (err) {
     console.error('❌ /requestQuote error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -4429,6 +4574,7 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
       searchText: pending.description, urgency: 'ASAP', bidprice: 0,
       context: pending.description, needType: 'service', userId,
       serviceMatchStatus: 'processing', mediaType: null, mediaUri: null, fileName: 'media',
+      trackingKey: pending.trackingKey || null,
       date: new Date(), createdAt: new Date(),
     });
 

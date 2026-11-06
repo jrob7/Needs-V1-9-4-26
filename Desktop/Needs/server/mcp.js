@@ -122,8 +122,8 @@ function buildServer({ client, NODE_API, userId }) {
   server.registerTool('request_quote', {
     title: 'Request a quote',
     description: userId
-      ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized.'
-      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. If the visitor has a Needs account, call get_sign_in_url first to skip this step on future requests.",
+      ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized. Check on it later anytime with check_my_requests(slug) - no key or email needed, it is tied to this account.'
+      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result includes a trackingKey - keep using it silently within this conversation to check on the request with check_request_status, no need to mention it. Only tell the user the trackingKey once, briefly, framed as optional ('you don't need to do anything with this unless you want to check back in a different conversation later') - do not repeat it every time. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       description: z.string().describe('A description of what the visitor needs, in their own words'),
@@ -155,14 +155,14 @@ function buildServer({ client, NODE_API, userId }) {
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
-    return text({ success: true, message: data.message });
+    return text({ success: true, message: data.message, trackingKey: data.trackingKey });
   });
 
   server.registerTool('ask_business', {
     title: 'Send a question directly to a business',
     description: userId
-      ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow."
-      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. If the visitor has a Needs account, call get_sign_in_url first to skip this step on future requests.",
+      ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow. Check on it later anytime with check_my_requests(slug) - no key or email needed, it is tied to this account."
+      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. The result includes a trackingKey - keep using it silently within this conversation to check on the question with check_request_status, no need to mention it. Only tell the user the trackingKey once, briefly, framed as optional - do not repeat it every time. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),
@@ -190,8 +190,44 @@ function buildServer({ client, NODE_API, userId }) {
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the question');
-    return text({ success: true, message: data.message });
+    return text({ success: true, message: data.message, trackingKey: data.trackingKey });
   });
+
+  // Guest-only: a guest has no durable credential of their own (see
+  // get_sign_in_url), so checking status later relies on the trackingKey
+  // handed back when the request was first made, not an identity the
+  // server can verify on its own.
+  if (!userId) {
+    server.registerTool('check_request_status', {
+      title: 'Check on a request made as a guest',
+      description: 'Check the status of a quote request or question sent as a guest (not signed in), using the trackingKey returned when it was originally submitted. Works even in a different conversation than the one that made the request, as long as the trackingKey is known.',
+      inputSchema: { trackingKey: z.string().describe('The trackingKey returned by request_quote or ask_business when the request was made') },
+    }, async ({ trackingKey }) => {
+      const resp = await fetch(`${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}`);
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'No request found for that tracking key');
+      return text(data);
+    });
+  }
+
+  // Authenticated-only: no key needed here at all. The OAuth access token
+  // already persists across conversations at the connector/account level
+  // (unlike a guest, who has nothing durable), so this just works
+  // automatically in any future call, same session or a brand new one.
+  if (userId) {
+    server.registerTool('check_my_requests', {
+      title: 'Check my requests to a business',
+      description: 'Check the status of the authenticated Needs user’s recent quote requests and questions to a specific business. No key or email needed - this is tied to the signed-in account and works the same in any future conversation.',
+      inputSchema: { slug: z.string().describe('The business slug') },
+    }, async ({ slug }) => {
+      const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/myRequests`, {
+        headers: { 'Authorization': `Bearer ${currentBearerToken(server)}` },
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not look up your requests for this business');
+      return text(data);
+    });
+  }
 
   return server;
 }

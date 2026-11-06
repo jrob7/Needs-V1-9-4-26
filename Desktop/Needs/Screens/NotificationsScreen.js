@@ -527,7 +527,7 @@ const QuoteAcceptedByGuestRow = ({ item, onProposeTime }) => (
       )}
       {item.timeProposed ? (
         <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>
-          ✓ Proposed {item.proposedDate} at {item.proposedTime} — waiting on customer to confirm
+          ✓ Proposed {(item.proposedOptions || []).map(o => `${o.date} at ${o.time}`).join(', ')} — waiting on customer to choose
         </Text>
       ) : (
         <View style={styles.leadButtonsRow}>
@@ -1111,10 +1111,10 @@ const NotificationsScreen = () => {
         <ProposeTimeModal
           notification={proposeTimeTarget}
           onClose={() => setProposeTimeTarget(null)}
-          onSent={({ proposedDate, proposedTime } = {}) => {
+          onSent={({ options } = {}) => {
             const id = proposeTimeTarget._id;
             if (id) setNotifications(prev => prev.map(n => n._id === id
-              ? { ...n, read: true, timeProposed: true, proposedDate, proposedTime }
+              ? { ...n, read: true, timeProposed: true, proposedOptions: options }
               : n));
             setProposeTimeTarget(null);
           }}

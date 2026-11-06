@@ -4569,11 +4569,28 @@ app.post('/confirmGuestQuoteAccept/:quoteId/:token', async (req, res) => {
 // POST /proposeAppointmentTime — business proposes a specific date/time to a
 // guest lead that already accepted the price. Emails a one-click confirm
 // link; the appointment is only created once the guest confirms that time.
+// Finds which proposed time option a confirm-link token belongs to - a quote
+// can have up to 3 candidate options out at once (see /proposeAppointmentTime
+// below), each with its own token so the guest can confirm whichever one
+// actually works without a round trip.
+function findProposedOption(quote, token) {
+  return (quote.proposedOptions || []).find(opt => opt.token === token) || null;
+}
+
+// POST /proposeAppointmentTime — business proposes 1-3 candidate times to a
+// guest lead that already accepted the price. Emails all of them with a
+// one-click confirm link each; the appointment is only created once the
+// guest confirms whichever one works for them.
 app.post('/proposeAppointmentTime', async (req, res) => {
   try {
-    const { quoteId, proposedDate, proposedTime } = req.body || {};
+    const { quoteId, options } = req.body || {};
     if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
-    if (!proposedDate || !proposedTime) return res.status(400).json({ error: 'proposedDate and proposedTime are required' });
+    if (!Array.isArray(options) || options.length === 0 || options.length > 3) {
+      return res.status(400).json({ error: 'Provide 1 to 3 proposed times' });
+    }
+    for (const opt of options) {
+      if (!opt?.date || !opt?.time) return res.status(400).json({ error: 'Each option needs a date and a time' });
+    }
 
     const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
@@ -4585,26 +4602,36 @@ app.post('/proposeAppointmentTime', async (req, res) => {
       ? await database.collection('Users').findOne({ _id: new ObjectId(quote.serviceUserId) }, { projection: { email: 1 } })
       : null;
 
-    const guestToken = crypto.randomBytes(24).toString('hex');
+    const proposedOptions = options.map(opt => ({
+      date: String(opt.date).slice(0, 100),
+      time: String(opt.time).slice(0, 100),
+      token: crypto.randomBytes(16).toString('hex'),
+    }));
+
     await database.collection('ServiceQuotes').updateOne(
       { _id: quote._id },
-      { $set: {
-        status: 'awaiting_guest_time_confirmation',
-        proposedDate, proposedTime, guestToken,
-        timeProposedAt: new Date(),
-      }}
+      {
+        $set: { status: 'awaiting_guest_time_confirmation', proposedOptions, timeProposedAt: new Date() },
+        $unset: { guestToken: '' },
+      }
     );
 
-    const confirmUrl = `${NODE_API}/confirmGuestAppointmentTime/${quoteId}/${guestToken}`;
+    const multiple = proposedOptions.length > 1;
+    const optionRows = proposedOptions.map(opt => `
+      <div style="background:#F1F5F9;border-radius:8px;padding:12px 16px;margin-bottom:10px;">
+        <div style="color:#334155;font-weight:600;margin-bottom:8px;">${escapeHtml(opt.date)} at ${escapeHtml(opt.time)}</div>
+        <a href="${NODE_API}/confirmGuestAppointmentTime/${quoteId}/${opt.token}" style="background:#2563EB;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;font-size:.9rem;">Confirm This Time</a>
+      </div>
+    `).join('');
+
     const emailResult = await sendEmail({
       to: requester.email,
-      subject: `${quote.businessName} proposed a time to meet`,
+      subject: `${quote.businessName} proposed ${multiple ? 'a few times' : 'a time'} to meet`,
       replyTo: business?.email || undefined,
       html: `
-        <p><strong>${quote.businessName}</strong> proposed a time for your request:</p>
-        <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${proposedDate} at ${proposedTime}</p>
-        <p><a href="${confirmUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Confirm This Time</a></p>
-        <p style="color:#94A3B8;font-size:.85rem;">Doesn't work for you? Reply to this email and let them know.</p>
+        <p><strong>${escapeHtml(quote.businessName)}</strong> proposed ${multiple ? 'a few times' : 'a time'} for your request:</p>
+        ${optionRows}
+        <p style="color:#94A3B8;font-size:.85rem;">None of these work? Reply to this email and let them know.</p>
       `,
     });
     if (emailResult?.error) {
@@ -4616,7 +4643,7 @@ app.post('/proposeAppointmentTime', async (req, res) => {
     // with no feedback that anything happened.
     await database.collection('Notifications').updateOne(
       { quoteId: new ObjectId(quoteId), type: 'quote_accepted_by_guest' },
-      { $set: { timeProposed: true, proposedDate, proposedTime, read: true } }
+      { $set: { timeProposed: true, proposedOptions, read: true } }
     );
 
     res.json({ success: true });
@@ -4626,8 +4653,8 @@ app.post('/proposeAppointmentTime', async (req, res) => {
   }
 });
 
-// GET /confirmGuestAppointmentTime/:quoteId/:token — guest confirms the time
-// the business proposed; finalizes the real Appointment.
+// GET /confirmGuestAppointmentTime/:quoteId/:token — guest confirms one of
+// the proposed time options; finalizes the real Appointment.
 // GET renders a landing page only - no side effect, so an email link
 // scanner prefetching it cannot book the appointment on the recipient's
 // behalf. The actual booking happens only on the POST below.
@@ -4636,17 +4663,19 @@ app.get('/confirmGuestAppointmentTime/:quoteId/:token', async (req, res) => {
     const { quoteId, token } = req.params;
     if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
     const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
-    if (!quote || !quote.guestToken || quote.guestToken !== token) {
-      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
-    }
+    if (!quote) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
     if (quote.status === 'appointment_confirmed') {
       return res.send(renderConfirmPage(true, 'This appointment is already confirmed.'));
+    }
+    const option = findProposedOption(quote, token);
+    if (!option) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid, or a different time from this list was already chosen.'));
     }
 
     res.send(renderClickToConfirmPage(
       'Confirm This Appointment Time',
       `<p><strong>${escapeHtml(quote.businessName)}</strong> proposed:</p>
-       <div class="preview">${escapeHtml(quote.proposedDate)} at ${escapeHtml(quote.proposedTime)}</div>
+       <div class="preview">${escapeHtml(option.date)} at ${escapeHtml(option.time)}</div>
        <p>Click below to confirm this time works for you.</p>`,
       `/confirmGuestAppointmentTime/${encodeURIComponent(quoteId)}/${encodeURIComponent(token)}`
     ));
@@ -4661,16 +4690,24 @@ app.post('/confirmGuestAppointmentTime/:quoteId/:token', async (req, res) => {
     const { quoteId, token } = req.params;
     if (!ObjectId.isValid(quoteId)) return res.status(404).send(renderConfirmPage(false, 'Invalid link.'));
     const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
-    if (!quote || !quote.guestToken || quote.guestToken !== token) {
-      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
-    }
+    if (!quote) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid.'));
     if (quote.status === 'appointment_confirmed') {
       return res.send(renderConfirmPage(true, 'This appointment is already confirmed.'));
     }
+    const option = findProposedOption(quote, token);
+    if (!option) {
+      return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid, or a different time from this list was already chosen.'));
+    }
 
-    await finalizeAppointmentConfirmation(quote, quoteId);
+    // Lock in the chosen option as the quote's final date/time, then finalize
+    // exactly like the single-option flow always did.
+    await database.collection('ServiceQuotes').updateOne(
+      { _id: quote._id },
+      { $set: { proposedDate: option.date, proposedTime: option.time } }
+    );
+    await finalizeAppointmentConfirmation({ ...quote, proposedDate: option.date, proposedTime: option.time }, quoteId);
 
-    res.send(renderConfirmPage(true, `Your appointment with ${escapeHtml(quote.businessName)} is confirmed for ${escapeHtml(quote.proposedDate)} at ${escapeHtml(quote.proposedTime)}.`));
+    res.send(renderConfirmPage(true, `Your appointment with ${escapeHtml(quote.businessName)} is confirmed for ${escapeHtml(option.date)} at ${escapeHtml(option.time)}.`));
   } catch (err) {
     console.error('❌ /confirmGuestAppointmentTime error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));

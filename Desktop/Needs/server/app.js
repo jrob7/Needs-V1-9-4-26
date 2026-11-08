@@ -2012,7 +2012,7 @@ app.post('/m/:slug/chat', async (req, res) => {
 app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
     const { slug } = req.params;
-    const { question, email, wantsMonitoring } = req.body || {};
+    const { question, email, trackMethod } = req.body || {};
     if (!question) return res.status(400).json({ error: 'question required' });
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'A valid email is required' });
@@ -2034,7 +2034,7 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
     await db.collection('PendingModuleQuestions').insertOne({
       slug, businessId: doc._id, businessType: type, businessName,
       question: String(question).slice(0, 1000), email, token, trackingKey,
-      wantsMonitoring: wantsMonitoring !== false,
+      trackMethod: trackMethod || 'agent',
       createdAt: new Date(), confirmedAt: null,
     });
 
@@ -2120,7 +2120,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
         askerEmail: pending.email,
         businessId: pending.businessId,
         trackingKey: pending.trackingKey || null,
-        wantsMonitoring: pending.wantsMonitoring !== false,
+        trackMethod: pending.trackMethod || 'agent',
         read: false,
         answered: false,
         createdAt: new Date(),
@@ -2132,7 +2132,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
         slug: pending.slug, businessId: pending.businessId, businessName: pending.businessName,
         type: pending.businessType, question: pending.question, contactEmail: pending.email,
         trackingKey: pending.trackingKey || null,
-        wantsMonitoring: pending.wantsMonitoring !== false,
+        trackMethod: pending.trackMethod || 'agent',
         createdAt: new Date(),
       });
     }
@@ -2160,25 +2160,28 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
     const { trackingKey } = req.params;
     if (!trackingKey) return res.status(400).json({ error: 'trackingKey required' });
 
-    // Shown only while there is still no final answer, so an agent that was
-    // asked to keep checking (see the wantsMonitoring checkbox on the
-    // guest form) is reminded of that on every poll, not just once at
-    // submission - a one-time note is easy to lose track of across a check
-    // that happens hours later, possibly in an unrelated conversation.
+    // Shown only while there is still no final answer, and only for the
+    // "agent" tracking method - the "email" method already gets a real
+    // notification email when there is a response (see
+    // /answerModuleQuestion and /respondToServiceQuote), and "manual" means
+    // the requester chose to check in on their own, so a reminder would be
+    // noise for both. Repeated on every poll, not just once at submission,
+    // since a one-time note is easy to lose track of across a check that
+    // happens hours later, possibly in an unrelated conversation.
     const REMINDER = 'No response yet - the next check should happen in about an hour.';
 
     const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey });
     if (pendingQuote && !pendingQuote.confirmedAt) {
       return res.json({
         type: 'quote', status: 'awaiting_confirmation', message: 'Check your email to confirm this request before it is sent.',
-        ...(pendingQuote.wantsMonitoring !== false ? { reminder: REMINDER } : {}),
+        ...(pendingQuote.trackMethod === 'agent' ? { reminder: REMINDER } : {}),
       });
     }
     const pendingQuestion = await database.collection('PendingModuleQuestions').findOne({ trackingKey });
     if (pendingQuestion && !pendingQuestion.confirmedAt) {
       return res.json({
         type: 'question', status: 'awaiting_confirmation', message: 'Check your email to confirm this question before it is sent.',
-        ...(pendingQuestion.wantsMonitoring !== false ? { reminder: REMINDER } : {}),
+        ...(pendingQuestion.trackMethod === 'agent' ? { reminder: REMINDER } : {}),
       });
     }
 
@@ -2192,7 +2195,7 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
           type: 'quote',
           status: need.serviceMatchStatus || 'processing',
           message: 'Still being matched to businesses.',
-          ...(need.wantsMonitoring !== false ? { reminder: REMINDER } : {}),
+          ...(need.trackMethod === 'agent' ? { reminder: REMINDER } : {}),
         });
       }
       return res.json({
@@ -2219,7 +2222,7 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
         status: notif.answered ? 'answered' : 'pending_answer',
         question: notif.question,
         answer: notif.answered ? (notif.answer || null) : null,
-        ...(!notif.answered && notif.wantsMonitoring !== false ? { reminder: REMINDER } : {}),
+        ...(!notif.answered && notif.trackMethod === 'agent' ? { reminder: REMINDER } : {}),
       });
     }
     const moduleQuestion = await database.collection('ModuleQuestions').findOne({ trackingKey });
@@ -2594,11 +2597,24 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       '</div>' +
       '<div id="guest-form" style="display:none;">' +
         '<input class="contact-field" id="cf-email" type="email" placeholder="Email address">' +
-        '<label style="display:flex;align-items:flex-start;gap:8px;font-size:.82rem;color:#555;margin:2px 0 10px;cursor:pointer;">' +
-          '<input type="checkbox" id="cf-monitor" checked style="margin-top:2px;">' +
-          '<span>Check back about every hour and report any update - recommended if an AI agent is handling this for someone.</span>' +
-        '</label>' +
-        '<button class="contact-submit" id="cf-submit">Send</button>' +
+        '<p style="font-size:.82rem;color:#333;font-weight:600;margin:4px 0 6px;">' +
+          'Please confirm your email, and how would you like to track the status of your request: via email, AI agent or bot, or manually?' +
+        '</p>' +
+        '<div id="cf-track-options" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:#555;cursor:pointer;">' +
+            '<input type="radio" name="cf-track" value="email" id="cf-track-email">' +
+            '<span>Email me when there is a response</span>' +
+          '</label>' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:#555;cursor:pointer;">' +
+            '<input type="radio" name="cf-track" value="agent" id="cf-track-agent">' +
+            '<span>An AI agent or bot will check back about every hour</span>' +
+          '</label>' +
+          '<label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:#555;cursor:pointer;">' +
+            '<input type="radio" name="cf-track" value="manual" id="cf-track-manual">' +
+            '<span>I will check manually using the tracking link</span>' +
+          '</label>' +
+        '</div>' +
+        '<button class="contact-submit" id="cf-submit" disabled>Send</button>' +
         '<p class="contact-note">We will email you a confirmation link before anything is sent.</p>' +
       '</div>';
     box.appendChild(wrap);
@@ -2607,6 +2623,19 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     document.getElementById('opt-guest').addEventListener('click', function() {
       document.getElementById('guest-form').style.display = 'block';
       scrollBottom();
+    });
+
+    // Send stays disabled until both an email is typed and one of the three
+    // tracking methods is picked - a required, blocking choice instead of a
+    // pre-checked default, so it cannot be silently skipped.
+    function updateSendEnabled() {
+      var hasEmail = document.getElementById('cf-email').value.trim().length > 0;
+      var hasMethod = !!document.querySelector('input[name="cf-track"]:checked');
+      document.getElementById('cf-submit').disabled = !(hasEmail && hasMethod);
+    }
+    document.getElementById('cf-email').addEventListener('input', updateSendEnabled);
+    document.querySelectorAll('input[name="cf-track"]').forEach(function(r) {
+      r.addEventListener('change', updateSendEnabled);
     });
 
     document.getElementById('opt-login').addEventListener('click', function() {
@@ -2685,12 +2714,13 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
 
     document.getElementById('cf-submit').addEventListener('click', function() {
       var email = document.getElementById('cf-email').value.trim();
-      if (!email) { alert('Please enter your email.'); return; }
-      var wantsMonitoring = document.getElementById('cf-monitor').checked;
+      var methodEl = document.querySelector('input[name="cf-track"]:checked');
+      if (!email || !methodEl) { alert('Please enter your email and choose how to track this.'); return; }
+      var trackMethod = methodEl.value;
       this.disabled = true;
       this.textContent = 'Sending…';
-      var body = Object.assign({ email: email, wantsMonitoring: wantsMonitoring }, bodyExtra);
-      mlog('POST ' + endpoint + ' (guest)', { email: email, wantsMonitoring: wantsMonitoring });
+      var body = Object.assign({ email: email, trackMethod: trackMethod }, bodyExtra);
+      mlog('POST ' + endpoint + ' (guest)', { email: email, trackMethod: trackMethod });
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2706,9 +2736,12 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         var successHtml = '<p style="color:#4CAF50;font-weight:600;">✓ ' + (res.data.message || sentLabel) + '</p>';
         if (res.data.trackingKey) {
           var trackUrl = '${NODE_API}/trackRequest/' + res.data.trackingKey;
-          successHtml += '<p class="contact-note">To check the status of your request later, use this link: ' +
+          var methodNote = trackMethod === 'agent'
+            ? ' Status updates on this will come back about every hour.'
+            : (trackMethod === 'email' ? ' You will be emailed automatically when there is a response.' : '');
+          successHtml += '<p class="contact-note">To check the status of your request anytime, use this link: ' +
             '<a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a>.' +
-            (wantsMonitoring ? ' Status updates on this will come back about every hour - you can also check it yourself anytime using the link above.' : '') +
+            methodNote +
             '</p>';
         }
         wrap.innerHTML = successHtml;
@@ -4468,7 +4501,7 @@ function renderClickToConfirmPage(title, bodyHtml, formAction) {
 // POST /requestQuote — body: { businessId, description, email }
 app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
-    const { businessId, description, email, wantsMonitoring } = req.body || {};
+    const { businessId, description, email, trackMethod } = req.body || {};
     if (!businessId || !description || !email) {
       return res.status(400).json({ error: 'businessId, description, and email are required' });
     }
@@ -4491,7 +4524,7 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
       email,
       token,
       trackingKey,
-      wantsMonitoring: wantsMonitoring !== false,
+      trackMethod: trackMethod || 'agent',
       createdAt: new Date(),
       confirmedAt: null,
     });
@@ -4591,7 +4624,7 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
       context: pending.description, needType: 'service', userId,
       serviceMatchStatus: 'processing', mediaType: null, mediaUri: null, fileName: 'media',
       trackingKey: pending.trackingKey || null,
-      wantsMonitoring: pending.wantsMonitoring !== false,
+      trackMethod: pending.trackMethod || 'agent',
       date: new Date(), createdAt: new Date(),
     });
 

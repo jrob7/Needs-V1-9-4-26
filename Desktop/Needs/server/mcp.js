@@ -38,7 +38,7 @@ function buildServer({ client, NODE_API, userId }) {
   // got dropped in practice. Putting the same question inside the one
   // string the model already treats as load-bearing content is the fix.
   const withMonitoringAsk = (message, checkTool, checkArgs) =>
-    `${message} Would you like me to check back on this about once an hour and let you know when there's a response? If so, I can set up a recurring task (calling ${checkTool}(${checkArgs})) automatically.`;
+    `${message} Would you like me to check back on this about once an hour and let you know when there's a response? If so, set up a recurring task (calling ${checkTool}(${checkArgs})) on that cadence - if you already have a recurring check running for something else, say so and offer to switch it to about once an hour too instead of leaving it on whatever interval it was already running at.`;
 
   server.registerTool('get_business', {
     title: 'Get business profile',

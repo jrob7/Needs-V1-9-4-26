@@ -2680,7 +2680,14 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           wrap.innerHTML = '<p style="color:#e53e3e;">' + (res.data.error || 'Something went wrong.') + '</p>';
           return;
         }
-        wrap.innerHTML = '<p style="color:#4CAF50;font-weight:600;">✓ ' + sentLabel + '</p>';
+        var successHtml = '<p style="color:#4CAF50;font-weight:600;">✓ ' + (res.data.message || sentLabel) + '</p>';
+        if (res.data.trackingKey) {
+          successHtml += '<p class="contact-note">Tracking key: ' + res.data.trackingKey +
+            '. If an AI agent is handling this, it can check the status anytime, even in a new session, at ' +
+            '${NODE_API}/trackRequest/' + res.data.trackingKey +
+            ' and should consider checking back periodically and reporting any update.</p>';
+        }
+        wrap.innerHTML = successHtml;
         scrollBottom();
       })
       .catch(function(err) {

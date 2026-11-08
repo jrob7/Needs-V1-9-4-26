@@ -2685,7 +2685,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           successHtml += '<p class="contact-note">Tracking key: ' + res.data.trackingKey +
             '. If an AI agent is handling this, it can check the status anytime, even in a new session, at ' +
             '${NODE_API}/trackRequest/' + res.data.trackingKey +
-            ' and should consider checking back periodically and reporting any update.</p>';
+            ' and should consider checking back about every hour and reporting any update.</p>';
         }
         wrap.innerHTML = successHtml;
         scrollBottom();

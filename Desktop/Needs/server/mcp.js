@@ -30,16 +30,15 @@ function buildServer({ client, NODE_API, userId }) {
   const text = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
   const errorText = (message) => ({ isError: true, content: [{ type: 'text', text: message }] });
 
-  // A required input field, not a hint in a description or result. Those
-  // are both easy for the model to skip or paraphrase away; a required
-  // field cannot be filled in without a real answer, which forces the
-  // question "would you like me to check back on this?" to actually reach
-  // the user before the request goes out - not as an afterthought in the
-  // confirmation. The field's own description tells the model that
-  // filling it in means asking, not guessing.
-  const monitoringNote = (wantsMonitoring, checkTool, checkArgs) => wantsMonitoring
-    ? `User asked to be notified - set up a recurring task now that calls ${checkTool}(${checkArgs}) every couple hours until there is a response, then stop it.`
-    : `User does not want automatic monitoring - they can ask you to check anytime with ${checkTool}.`;
+  // Folded into the same message the server already returns for the
+  // email-confirmation step, instead of a separate field. The confirmation
+  // line gets relayed to the user reliably because it reads as the actual
+  // fact of what happened, not a behavioral instruction about what to say;
+  // a separate "nextStep"/"monitoring" field read as an optional aside and
+  // got dropped in practice. Putting the same question inside the one
+  // string the model already treats as load-bearing content is the fix.
+  const withMonitoringAsk = (message, checkTool, checkArgs) =>
+    `${message} Would you like me to check back on this periodically and let you know when there's a response? If so, I can set up a recurring check (calling ${checkTool}(${checkArgs})) automatically.`;
 
   server.registerTool('get_business', {
     title: 'Get business profile',
@@ -133,17 +132,16 @@ function buildServer({ client, NODE_API, userId }) {
   server.registerTool('request_quote', {
     title: 'Request a quote',
     description: userId
-      ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized. Before calling this, ask the user directly: "Would you like me to check back on this periodically and let you know when the business responds?" - set wantsMonitoring from their actual answer, do not guess it. Regardless of that answer, you can also check anytime yourself with check_my_requests(slug) - no key or email needed, it is tied to this account.'
-      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. Before calling this, ask the user directly: \"Would you like me to check back on this periodically and let you know when the business responds?\" - set wantsMonitoring from their actual answer, do not guess it. The result includes a trackingKey - keep using it silently within this conversation to check on the request with check_request_status, no need to mention it. Only tell the user the trackingKey once, briefly, framed as optional ('you don't need to do anything with this unless you want to check back in a different conversation later') - do not repeat it every time. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) every couple hours until there is a response, then stop it.'
+      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_request_status with the trackingKey every couple hours until there is a response, then stop it. The result also includes the trackingKey itself - keep using it silently within this conversation to check on the request with check_request_status, no need to mention it again. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       description: z.string().describe('A description of what the visitor needs, in their own words'),
-      wantsMonitoring: z.boolean().describe('Required. Ask the user directly before setting this - do not guess or default it: "Would you like me to check back on this periodically and let you know when the business responds?" true if they want that, false if they will ask manually.'),
       email: userId
         ? z.string().email().optional().describe('Not needed - the request is sent as the authenticated user')
         : z.string().email().describe("The visitor's email address - they must confirm via a link sent there before this is sent to the business"),
     },
-  }, async ({ slug, description, wantsMonitoring, email }) => {
+  }, async ({ slug, description, email }) => {
     const db = client.db('Need');
     const service = await db.collection('Services').findOne({ slug }, { projection: { _id: 1 } });
     if (!service) return errorText('Business not found (or is a restaurant, which does not take quote requests)');
@@ -157,8 +155,8 @@ function buildServer({ client, NODE_API, userId }) {
       const data = await resp.json();
       if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
       return text({
-        success: true, message: data.message,
-        monitoring: monitoringNote(wantsMonitoring, 'check_my_requests', `slug: "${slug}"`),
+        success: true,
+        message: withMonitoringAsk(data.message, 'check_my_requests', `slug: "${slug}"`),
       });
     }
 
@@ -171,25 +169,24 @@ function buildServer({ client, NODE_API, userId }) {
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
     return text({
-      success: true, message: data.message, trackingKey: data.trackingKey,
-      monitoring: monitoringNote(wantsMonitoring, 'check_request_status', `trackingKey: "${data.trackingKey}"`),
+      success: true, trackingKey: data.trackingKey,
+      message: withMonitoringAsk(data.message, 'check_request_status', `trackingKey: "${data.trackingKey}"`),
     });
   });
 
   server.registerTool('ask_business', {
     title: 'Send a question directly to a business',
     description: userId
-      ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow. Before calling this, ask the user directly: \"Would you like me to check back on this periodically and let you know when the business responds?\" - set wantsMonitoring from their actual answer, do not guess it. Regardless of that answer, you can also check anytime yourself with check_my_requests(slug) - no key or email needed, it is tied to this account."
-      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. Before calling this, ask the user directly: \"Would you like me to check back on this periodically and let you know when the business responds?\" - set wantsMonitoring from their actual answer, do not guess it. The result includes a trackingKey - keep using it silently within this conversation to check on the question with check_request_status, no need to mention it. Only tell the user the trackingKey once, briefly, framed as optional - do not repeat it every time. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) every couple hours until there is a response, then stop it."
+      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_request_status with the trackingKey every couple hours until there is a response, then stop it. The result also includes the trackingKey itself - keep using it silently within this conversation to check on the question with check_request_status, no need to mention it again. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),
-      wantsMonitoring: z.boolean().describe('Required. Ask the user directly before setting this - do not guess or default it: "Would you like me to check back on this periodically and let you know when the business responds?" true if they want that, false if they will ask manually.'),
       email: userId
         ? z.string().email().optional().describe('Not needed - the question is sent as the authenticated user')
         : z.string().email().describe("The visitor's email address"),
     },
-  }, async ({ slug, question, wantsMonitoring, email }) => {
+  }, async ({ slug, question, email }) => {
     if (userId) {
       const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/authedAskBusiness`, {
         method: 'POST',
@@ -199,8 +196,8 @@ function buildServer({ client, NODE_API, userId }) {
       const data = await resp.json();
       if (!resp.ok) return errorText(data.error || 'Could not send the question');
       return text({
-        success: true, message: data.message,
-        monitoring: monitoringNote(wantsMonitoring, 'check_my_requests', `slug: "${slug}"`),
+        success: true,
+        message: withMonitoringAsk(data.message, 'check_my_requests', `slug: "${slug}"`),
       });
     }
 
@@ -213,8 +210,8 @@ function buildServer({ client, NODE_API, userId }) {
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the question');
     return text({
-      success: true, message: data.message, trackingKey: data.trackingKey,
-      monitoring: monitoringNote(wantsMonitoring, 'check_request_status', `trackingKey: "${data.trackingKey}"`),
+      success: true, trackingKey: data.trackingKey,
+      message: withMonitoringAsk(data.message, 'check_request_status', `trackingKey: "${data.trackingKey}"`),
     });
   });
 

@@ -2351,7 +2351,7 @@ app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
 function moduleChatWidget(slug, businessName, placeholder = 'What do you need?', businessId = '') {
   return `
 <div class="chat-section" id="chat-section">
-  <h2 class="chat-heading">Ask ${businessName}</h2>
+  <h2 class="chat-heading">Ask ${businessName} a Question or Request a Quote</h2>
   <div class="chat-box" id="chat-box"></div>
   <div class="chat-input-row" id="chat-input-row">
     <input class="chat-input" id="chat-input" type="text" placeholder="${placeholder}" autocomplete="off" maxlength="300">
@@ -3047,22 +3047,19 @@ app.get('/m/:slug', async (req, res) => {
     `<span class="dot${i === 0 ? ' active' : ''}"></span>`
   ).join('');
 
-  const serviceRows = topServices.map(s =>
-    `<div class="service-row">${s.name || s}</div>`
-  ).join('');
+  // Service names collected per-service for pricing (pricingDetails) are
+  // folded in here too, so a business's priced offerings still show up as
+  // services on the page even though the page itself no longer displays
+  // the Q&A pricing details - just the names, deduped against topServices.
+  const pricingServiceNames = (doc.pricingDetails && Object.keys(doc.pricingDetails).length)
+    ? Object.keys(doc.pricingDetails)
+    : [];
+  const allServiceNames = [...topServices.map(s => s.name || s), ...pricingServiceNames]
+    .filter((name, i, arr) => name && arr.findIndex(n => n.toLowerCase() === name.toLowerCase()) === i);
 
-  // Pricing is already collected per-service (pricingDetails) and was only
-  // ever used internally to ground the chat widget's answers - never shown
-  // on the page itself, so a crawler or agent reading the raw HTML (without
-  // using the chat) couldn't see it at all. Render it directly too.
-  const pricingRows = (doc.pricingDetails && Object.keys(doc.pricingDetails).length)
-    ? Object.entries(doc.pricingDetails).map(([sub, qa]) => {
-        const qaRows = Object.entries(qa || {}).map(([q, a]) =>
-          `<div class="pricing-qa"><span class="pricing-q">${q}</span><span class="pricing-a">${a}</span></div>`
-        ).join('');
-        return `<div class="pricing-item"><div class="pricing-item-name">${sub}</div>${qaRows}</div>`;
-      }).join('') + `<p class="pricing-disclaimer">${PRICE_DISCLAIMER}</p>`
-    : '';
+  const serviceRows = allServiceNames.map(name =>
+    `<div class="service-row">${name}</div>`
+  ).join('');
 
   const statBoxes = [
     avail        ? { value: avail, label: 'Availability' } : null,
@@ -3111,13 +3108,6 @@ app.get('/m/:slug', async (req, res) => {
     .desc { font-size: .92rem; color: #475569; line-height: 1.6; }
     .service-row { padding: 12px 0; border-bottom: 1px solid #E2E8F0; font-size: .95rem; font-weight: 600; color: #0F172A; }
     .service-row:last-child { border-bottom: none; }
-    .pricing-item { padding: 12px 0; border-bottom: 1px solid #E2E8F0; }
-    .pricing-item:last-child { border-bottom: none; }
-    .pricing-item-name { font-size: .95rem; font-weight: 700; color: #0F172A; margin-bottom: 4px; }
-    .pricing-qa { display: flex; justify-content: space-between; gap: 12px; font-size: .86rem; color: #475569; margin-top: 2px; }
-    .pricing-q { color: #64748B; }
-    .pricing-a { font-weight: 700; color: #16A34A; text-align: right; }
-    .pricing-disclaimer { font-size: .76rem; color: #94A3B8; margin-top: 10px; line-height: 1.4; }
     .stats { display: flex; gap: 10px; margin-top: 14px; }
     .stat-box { flex: 1; background: #F1F5F9; border-radius: 12px; padding: 14px; text-align: center; }
     .stat-value { font-size: .95rem; font-weight: 800; color: #0F172A; }
@@ -3166,12 +3156,6 @@ app.get('/m/:slug', async (req, res) => {
   <div class="section">
     <h2>Top Services</h2>
     <div>${serviceRows}</div>
-  </div>` : ''}
-
-  ${pricingRows ? `
-  <div class="section">
-    <h2>Pricing</h2>
-    <div>${pricingRows}</div>
   </div>` : ''}
 
   <div class="section">

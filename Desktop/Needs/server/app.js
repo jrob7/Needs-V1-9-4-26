@@ -3106,8 +3106,8 @@ app.get('/m/:slug', async (req, res) => {
     .section { margin: 20px 16px 0; }
     .section h2 { font-size: 1.05rem; font-weight: 800; margin-bottom: 10px; color: #0F172A; }
     .desc { font-size: .92rem; color: #475569; line-height: 1.6; }
-    .service-row { padding: 12px 0; border-bottom: 1px solid #E2E8F0; font-size: .95rem; font-weight: 600; color: #0F172A; }
-    .service-row:last-child { border-bottom: none; }
+    .service-row { padding: 12px 14px; margin-bottom: 8px; border: 1px solid #E2E8F0; border-radius: 10px; font-size: .95rem; font-weight: 600; color: #0F172A; }
+    .service-row:last-child { margin-bottom: 0; }
     .stats { display: flex; gap: 10px; margin-top: 14px; }
     .stat-box { flex: 1; background: #F1F5F9; border-radius: 12px; padding: 14px; text-align: center; }
     .stat-value { font-size: .95rem; font-weight: 800; color: #0F172A; }

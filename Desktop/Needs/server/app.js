@@ -2165,7 +2165,7 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
     // guest form) is reminded of that on every poll, not just once at
     // submission - a one-time note is easy to lose track of across a check
     // that happens hours later, possibly in an unrelated conversation.
-    const REMINDER = 'You were asked to check back about every hour until there is a response - keep checking back and report any update.';
+    const REMINDER = 'No response yet - the next check should happen in about an hour.';
 
     const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey });
     if (pendingQuote && !pendingQuote.confirmedAt) {
@@ -2708,7 +2708,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           var trackUrl = '${NODE_API}/trackRequest/' + res.data.trackingKey;
           successHtml += '<p class="contact-note">To check the status of your request later, use this link: ' +
             '<a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a>.' +
-            (wantsMonitoring ? ' You asked to be checked on about every hour - if an AI agent is handling this, keep checking back and report any update.' : '') +
+            (wantsMonitoring ? ' Status updates on this will come back about every hour - you can also check it yourself anytime using the link above.' : '') +
             '</p>';
         }
         wrap.innerHTML = successHtml;

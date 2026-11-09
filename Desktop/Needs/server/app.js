@@ -2163,11 +2163,10 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
     // Shown only while there is still no final answer, and only for the
     // "agent" tracking method - the "email" method already gets a real
     // notification email when there is a response (see
-    // /answerModuleQuestion and /respondToServiceQuote), and "manual" means
-    // the requester chose to check in on their own, so a reminder would be
-    // noise for both. Repeated on every poll, not just once at submission,
-    // since a one-time note is easy to lose track of across a check that
-    // happens hours later, possibly in an unrelated conversation.
+    // /answerModuleQuestion and /respondToServiceQuote), so a reminder
+    // would be redundant there. Repeated on every poll, not just once at
+    // submission, since a one-time note is easy to lose track of across a
+    // check that happens hours later, possibly in an unrelated conversation.
     const REMINDER = 'No response yet - the next check should happen in about an hour.';
 
     const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey });
@@ -2598,7 +2597,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       '<div id="guest-form" style="display:none;">' +
         '<input class="contact-field" id="cf-email" type="email" placeholder="Email address">' +
         '<p style="font-size:.82rem;color:#333;font-weight:600;margin:4px 0 6px;">' +
-          'Please confirm your email, and how would you like to track the status of your request: via email, AI agent or bot, or manually?' +
+          'Please confirm your email, and how would you like to track the status of your request: via email, or AI agent or bot?' +
         '</p>' +
         '<div id="cf-track-options" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">' +
           '<label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:#555;cursor:pointer;">' +
@@ -2608,10 +2607,6 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           '<label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:#555;cursor:pointer;">' +
             '<input type="radio" name="cf-track" value="agent" id="cf-track-agent">' +
             '<span>An AI agent or bot will check back about every hour</span>' +
-          '</label>' +
-          '<label style="display:flex;align-items:center;gap:8px;font-size:.82rem;color:#555;cursor:pointer;">' +
-            '<input type="radio" name="cf-track" value="manual" id="cf-track-manual">' +
-            '<span>I will check manually using the tracking link</span>' +
           '</label>' +
         '</div>' +
         '<button class="contact-submit" id="cf-submit" disabled>Send</button>' +
@@ -2736,12 +2731,13 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         var successHtml = '<p style="color:#4CAF50;font-weight:600;">✓ ' + (res.data.message || sentLabel) + '</p>';
         if (res.data.trackingKey) {
           var trackUrl = '${NODE_API}/trackRequest/' + res.data.trackingKey;
-          var methodNote = trackMethod === 'agent'
-            ? ' Status updates on this will come back about every hour.'
-            : (trackMethod === 'email' ? ' You will be emailed automatically when there is a response.' : '');
-          successHtml += '<p class="contact-note">To check the status of your request anytime, use this link: ' +
-            '<a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a>.' +
-            methodNote +
+          // Restated here, next to the link, every time - not only as a
+          // form option that is easy to miss during submission. An AI
+          // assistant reading this needs to see the capability at the
+          // exact moment the link itself is shown.
+          successHtml += '<p class="contact-note">Your request is pending - <a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a>. ' +
+            'An AI assistant can check this link for updates and report back when there is a response (suggested interval: about once an hour).' +
+            (trackMethod === 'email' ? ' You will also be emailed automatically when there is a response.' : '') +
             '</p>';
         }
         wrap.innerHTML = successHtml;

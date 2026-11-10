@@ -857,11 +857,14 @@ const NotificationsScreen = () => {
   const messagesCount  = notifications.filter(n => n.type === 'message' && !n.read).length;
   const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request' || CONNECTION_TYPES.includes(n.type) || BUSINESS_QUOTE_TYPES.includes(n.type)) && !n.read).length;
   const schedulerCount = appointments.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length;
+  // label is just the display text - the Matches key itself stays as-is
+  // everywhere else in this file (activeTab checks, fetch triggers, data
+  // filtering), only the rendered tab text changes.
   const TAB_META = {
-    Messages:  { icon: 'chatbubbles-outline', count: messagesCount },
-    Matches:   { icon: 'people-outline',      count: matchesCount },
-    Scheduler: { icon: 'calendar-outline',    count: schedulerCount },
-    Status:    { icon: 'pulse-outline',       count: null },
+    Messages:  { icon: 'chatbubbles-outline', count: messagesCount,  label: 'Messages' },
+    Matches:   { icon: 'people-outline',      count: matchesCount,   label: 'Notifications' },
+    Scheduler: { icon: 'calendar-outline',    count: schedulerCount, label: 'Scheduler' },
+    Status:    { icon: 'pulse-outline',       count: null,           label: 'Status' },
   };
 
   // --- Activity buckets ---
@@ -904,7 +907,7 @@ const NotificationsScreen = () => {
       <View style={styles.tabs}>
         {TABS.map(tab => {
           const isActive = activeTab === tab;
-          const { icon, count } = TAB_META[tab];
+          const { icon, count, label } = TAB_META[tab];
           return (
             <TouchableOpacity
               key={tab}
@@ -916,7 +919,7 @@ const NotificationsScreen = () => {
                 {W && (
                   <Ionicons name={icon} size={23} color={isActive ? '#2563EB' : '#64748B'} />
                 )}
-                <Text style={[styles.tabTxt, isActive && styles.tabTxtActive]}>{tab}</Text>
+                <Text style={[styles.tabTxt, isActive && styles.tabTxtActive]}>{label}</Text>
                 {count != null && count > 0 && (
                   <View style={styles.tabBadge}>
                     <Text style={styles.tabBadgeTxt}>{count}</Text>

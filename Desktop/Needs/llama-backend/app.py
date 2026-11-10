@@ -287,21 +287,28 @@ def module_chat():
     context = (body.get("context") or "").strip()
     message = (body.get("message") or "").strip()
     history = body.get("history") or []
+    allow_quotes = body.get("allowQuotes", True)
 
     if not message:
         return jsonify({"error": "message is required"}), 400
 
     # Classify intent first — a quote request skips straight to the existing
-    # quote flow rather than attempting to answer from business info.
-    intent_prompt = f"""Classify the customer message below as QUOTE or QUESTION.
+    # quote flow rather than attempting to answer from business info. Skipped
+    # entirely when the business does not take quotes (e.g. nonprofits) -
+    # every message is treated as a question, and there is no point paying
+    # for a classification call whose answer would be discarded anyway.
+    if not allow_quotes:
+        intent = "question"
+    else:
+        intent_prompt = f"""Classify the customer message below as QUOTE or QUESTION.
 QUOTE: they want to hire this business, get pricing for their own specific job, or start the process of getting work done.
 QUESTION: a general informational question (hours, what services are offered, general policies, etc.) that is not asking to be hired or quoted.
 
 Customer message: "{message}"
 
 Answer with exactly one word: QUOTE or QUESTION"""
-    intent_raw = (generate_response(intent_prompt) or "").strip().upper()
-    intent = "quote" if "QUOTE" in intent_raw else "question"
+        intent_raw = (generate_response(intent_prompt) or "").strip().upper()
+        intent = "quote" if "QUOTE" in intent_raw else "question"
 
     history_text = ""
     for turn in history[-6:]:

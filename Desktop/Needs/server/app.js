@@ -2083,11 +2083,27 @@ app.post('/m/:slug/chat', async (req, res) => {
     let doc = await db.collection('Restaurants').findOne({ slug });
     let type = 'restaurant';
     if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) { doc = await db.collection('Nonprofits').findOne({ slug }); type = 'nonprofit'; }
     if (!doc) return res.status(404).json({ error: 'Module not found' });
 
     // Build context string from all profile fields
     let ctx = '';
-    if (type === 'restaurant') {
+    if (type === 'nonprofit') {
+      ctx += `Organization Name: ${doc.orgName || ''}\n`;
+      ctx += `Type: ${doc.orgType || ''}\n`;
+      ctx += `Who They Help: ${doc.whoYouHelp || ''}\n`;
+      ctx += `Service Area: ${doc.serviceArea || doc.address || ''}\n`;
+      ctx += `Cost: ${doc.cost || ''}\n`;
+      ctx += `Requirements: ${doc.requirements || ''}\n`;
+      ctx += `Availability: ${doc.availability || ''}\n`;
+      ctx += `Languages: ${(doc.languages || []).join(', ')}\n`;
+      ctx += `Phone: ${doc.phone || ''}\n`;
+      ctx += `Email: ${doc.email || ''}\n`;
+      ctx += `Website: ${doc.website || ''}\n`;
+      ctx += `Description: ${doc.description || ''}\n`;
+      if ((doc.helpTypes || []).length)
+        ctx += `\nHow They Help:\n${doc.helpTypes.map(h => `- ${h}`).join('\n')}\n`;
+    } else if (type === 'restaurant') {
       ctx += `Name: ${doc.name || ''}\n`;
       ctx += `Cuisine: ${doc.cuisine || ''}\n`;
       ctx += `Address: ${doc.address || ''}\n`;
@@ -2137,7 +2153,7 @@ app.post('/m/:slug/chat', async (req, res) => {
     const flaskRes = await fetch(`${FLASK_API}/module-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context: ctx, message, history }),
+      body: JSON.stringify({ context: ctx, message, history, allowQuotes: type !== 'nonprofit' }),
     });
     if (!flaskRes.ok) throw new Error(`Flask ${flaskRes.status}`);
     const data = await flaskRes.json();
@@ -2164,9 +2180,12 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
     let doc = await db.collection('Restaurants').findOne({ slug });
     let type = 'restaurant';
     if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) { doc = await db.collection('Nonprofits').findOne({ slug }); type = 'nonprofit'; }
     if (!doc) return res.status(404).json({ error: 'Module not found' });
 
-    const businessName = type === 'restaurant' ? doc.name : (doc.businessName || doc.providerName);
+    const businessName = type === 'restaurant' ? doc.name
+      : type === 'nonprofit' ? doc.orgName
+      : (doc.businessName || doc.providerName);
 
     const token = crypto.randomBytes(24).toString('hex');
     // See /requestQuote for why this is separate from the email-confirm
@@ -2385,9 +2404,12 @@ app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => 
     let doc = await db.collection('Restaurants').findOne({ slug });
     let type = 'restaurant';
     if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) { doc = await db.collection('Nonprofits').findOne({ slug }); type = 'nonprofit'; }
     if (!doc) return res.status(404).json({ error: 'Module not found' });
 
-    const businessName = type === 'restaurant' ? doc.name : (doc.businessName || doc.providerName);
+    const businessName = type === 'restaurant' ? doc.name
+      : type === 'nonprofit' ? doc.orgName
+      : (doc.businessName || doc.providerName);
     const trimmedQuestion = String(question).slice(0, 1000);
 
     if (type === 'service' && doc.userId) {
@@ -2499,10 +2521,10 @@ app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
 });
 
 // Shared chat widget — injected into every module page
-function moduleChatWidget(slug, businessName, placeholder = 'What do you need?', businessId = '') {
+function moduleChatWidget(slug, businessName, placeholder = 'What do you need?', businessId = '', allowQuotes = true) {
   return `
 <div class="chat-section" id="chat-section">
-  <h2 class="chat-heading">Ask ${businessName} a Question or Request a Quote</h2>
+  <h2 class="chat-heading">Ask ${businessName} a Question${allowQuotes ? ' or Request a Quote' : ''}</h2>
   <div class="chat-box" id="chat-box"></div>
   <div class="chat-input-row" id="chat-input-row">
     <input class="chat-input" id="chat-input" type="text" placeholder="${placeholder}" autocomplete="off" maxlength="300">
@@ -2561,6 +2583,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
 <script>
 (function() {
   var slug = ${JSON.stringify(slug)};
+  var allowQuotes = ${allowQuotes ? 'true' : 'false'};
   var chatHistory = [];
 
   // Every network call in this widget logs here so the full
@@ -2918,7 +2941,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     .then(function(data) {
       mlog('POST /m/' + slug + '/chat response', data);
       box.removeChild(typing);
-      if (data.intent === 'quote') {
+      if (allowQuotes && data.intent === 'quote') {
         addBubble(data.reply || "I'd be happy to help you get a quote for that.", 'bubble-bot');
         showQuoteForm(msg);
         return;
@@ -2954,6 +2977,7 @@ app.get('/m/:slug/profile', async (req, res) => {
     let doc = await db.collection('Restaurants').findOne({ slug });
     let type = 'restaurant';
     if (!doc) { doc = await db.collection('Services').findOne({ slug }); type = 'service'; }
+    if (!doc) { doc = await db.collection('Nonprofits').findOne({ slug }); type = 'nonprofit'; }
     if (!doc) return res.status(404).json({ error: 'Module not found' });
 
     const MODULE_BASE = process.env.MODULE_BASE_URL || 'https://needs-module.com';
@@ -2973,6 +2997,26 @@ app.get('/m/:slug/profile', async (req, res) => {
         topDishes: (doc.topDishes || []).map(d => ({
           name: d.name || '', description: d.description || '', price: d.price || null,
         })),
+      });
+    }
+
+    if (type === 'nonprofit') {
+      return res.json({
+        type, slug, url,
+        name: doc.orgName || '',
+        orgType: doc.orgType || '',
+        description: doc.description || '',
+        whoYouHelp: doc.whoYouHelp || '',
+        helpTypes: doc.helpTypes || [],
+        cost: doc.cost || '',
+        requirements: doc.requirements || '',
+        availability: doc.availability || '',
+        languages: doc.languages || [],
+        serviceArea: doc.serviceArea || doc.address || '',
+        phone: doc.phone || '',
+        email: doc.email || '',
+        website: doc.website || '',
+        takesQuotes: false,
       });
     }
 
@@ -3012,13 +3056,17 @@ app.get('/m/:slug', async (req, res) => {
   const { slug } = req.params;
   const db = client.db('Need');
 
-  // Search restaurants first, then services
+  // Search restaurants first, then services, then nonprofits
   let doc = await db.collection('Restaurants').findOne({ slug });
   let type = 'restaurant';
   if (!doc) {
     doc = await db.collection('Services').findOne({ slug });
 
     type = 'service';
+  }
+  if (!doc) {
+    doc = await db.collection('Nonprofits').findOne({ slug });
+    type = 'nonprofit';
   }
   if (!doc) return res.status(404).send('<h1>Module not found</h1>');
 
@@ -3199,6 +3247,7 @@ app.get('/m/:slug', async (req, res) => {
 </html>`);
   }
 
+  if (type === 'service') {
   // ── SERVICE MODULE ────────────────────────────────────────────────────────
   const name         = doc.businessName || doc.providerName || '';
   const providerName = doc.providerName && doc.providerName !== name ? doc.providerName : '';
@@ -3382,6 +3431,129 @@ app.get('/m/:slug', async (req, res) => {
     function heroPrev() { heroGoto(heroIdx - 1); }
     function heroNext() { heroGoto(heroIdx + 1); }
   </script>` : ''}
+</body>
+</html>`);
+  }
+
+  // ── NONPROFIT MODULE ──────────────────────────────────────────────────────
+  const orgName   = doc.orgName || '';
+  const orgType   = doc.orgType || '';
+  const desc      = doc.description || '';
+  const area      = doc.serviceArea || doc.address || '';
+  const phone     = doc.phone || '';
+  const email     = doc.email || '';
+  const website   = doc.website || '';
+  const whoHelp   = doc.whoYouHelp || '';
+  const cost      = doc.cost || '';
+  const reqs      = doc.requirements || '';
+  const avail     = doc.availability || '';
+  const languages = (doc.languages || []).join(', ');
+  const logo      = resolveImageUrl(doc.logoUrl);
+  const helpTypes = doc.helpTypes || [];
+
+  const jsonLd = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "NGO",
+    "name": orgName,
+    "description": desc,
+    "areaServed": area,
+    "telephone": phone,
+    "email": email,
+    "url": MODULE_URL,
+    ...(website ? { "sameAs": website } : {}),
+  });
+
+  const helpRows = helpTypes.map(h => `<div class="service-row">${h}</div>`).join('');
+
+  const infoRows = [
+    whoHelp ? { label: 'Who They Help', value: whoHelp } : null,
+    cost    ? { label: 'Cost', value: cost } : null,
+    reqs    ? { label: 'Requirements', value: reqs } : null,
+    avail   ? { label: 'Availability', value: avail } : null,
+    languages ? { label: 'Languages', value: languages } : null,
+  ].filter(Boolean).map(r => `
+    <div class="info-row"><span class="info-label">${r.label}</span><span class="info-value">${r.value}</span></div>
+  `).join('');
+
+  const contactActions = [
+    phone   ? { href: `tel:${phone}`, label: 'Call' } : null,
+    email   ? { href: `mailto:${email}`, label: 'Email' } : null,
+    website ? { href: website, label: 'Website' } : null,
+  ].filter(Boolean).map(a => `<a class="btn btn-secondary" href="${a.href}">${a.label}</a>`).join('');
+
+  return res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${orgName} — Needs Module</title>
+  <meta name="description" content="${desc.replace(/"/g, '&quot;')}">
+  <meta property="og:title" content="${orgName}">
+  <meta property="og:description" content="${desc.replace(/"/g, '&quot;')}">
+  <meta property="og:url" content="${MODULE_URL}">
+  <script type="application/ld+json">${jsonLd}</script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; color: #0F172A; }
+    .page { max-width: 750px; margin: 0 auto; background: #fff; min-height: 100vh; }
+    .logo-wrap { width: 100%; height: 260px; background: #0F172A; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .logo-wrap img { width: 100%; height: 100%; object-fit: contain; }
+    .header { padding: 20px 16px 4px; }
+    .badge-row { margin-bottom: 10px; }
+    .badge { display: inline-block; background: #DCFCE7; border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 700; color: #166534; margin-right: 6px; }
+    .name { font-size: 1.6rem; font-weight: 800; color: #0F172A; line-height: 1.2; }
+    .meta-row { font-size: .9rem; color: #64748B; margin-top: 8px; }
+    .section { margin: 20px 16px 0; }
+    .section h2 { font-size: 1.05rem; font-weight: 800; margin-bottom: 10px; color: #0F172A; }
+    .desc { font-size: .92rem; color: #475569; line-height: 1.6; }
+    .service-row { width: 50%; padding: 12px 14px; margin-bottom: 8px; border: 1px solid #E2E8F0; border-radius: 10px; font-size: .95rem; font-weight: 600; color: #0F172A; }
+    .service-row:last-child { margin-bottom: 0; }
+    .info-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F1F5F9; }
+    .info-row:last-child { border-bottom: none; }
+    .info-label { font-size: .85rem; color: #64748B; font-weight: 600; }
+    .info-value { font-size: .88rem; color: #0F172A; text-align: right; }
+    .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 28px 16px 32px; }
+    .btn { flex: 1; min-width: 100px; padding: 10px; border-radius: 10px; border: none; font-size: .8rem; font-weight: 700; cursor: pointer; text-decoration: none; text-align: center; }
+    .btn-secondary { background: #fff; color: #2563EB; border: 1.5px solid #BFDBFE; }
+    .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }
+    .powered a { color: #aaa; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="page">
+  ${logo ? `<div class="logo-wrap"><img src="${logo}" alt="${orgName}"></div>` : ''}
+
+  <div class="header">
+    ${orgType ? `<div class="badge-row"><span class="badge">${orgType}</span></div>` : ''}
+    <div class="name">${orgName}</div>
+    ${area ? `<div class="meta-row">${area}</div>` : ''}
+  </div>
+
+  ${desc ? `
+  <div class="section">
+    <h2>About</h2>
+    <div class="desc">${desc}</div>
+  </div>` : ''}
+
+  ${helpRows ? `
+  <div class="section">
+    <h2>How They Help</h2>
+    <div>${helpRows}</div>
+  </div>` : ''}
+
+  <div class="section">
+  ${moduleChatWidget(slug, orgName, 'Ask a question...', doc._id.toString(), false)}
+  </div>
+
+  ${infoRows ? `
+  <div class="section">
+    <div style="background:#F8FAFC;border-radius:12px;padding:4px 14px;">${infoRows}</div>
+  </div>` : ''}
+
+  ${contactActions ? `<div class="actions">${contactActions}</div>` : ''}
+
+  <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>
+  </div>
 </body>
 </html>`);
 });
@@ -3629,6 +3801,11 @@ app.post('/createNonprofit', requireAuth, async (req, res) => {
   try {
     const payload = { ...req.body, userId: req.userId, createdAt: new Date(), updatedAt: new Date() };
     if (ObjectId.isValid(payload.userId)) payload.userId = new ObjectId(payload.userId);
+    // Auto-generate slug from org name, same pattern as /createService
+    if (!payload.slug && payload.orgName) {
+      const base = makeSlug(payload.orgName);
+      payload.slug = await ensureUniqueSlug(database.collection('Nonprofits'), base);
+    }
     const geoPoint = await geocodeAddress(payload.address || payload.serviceArea);
     if (geoPoint) payload.geoPoint = geoPoint;
     const result = await database.collection('Nonprofits').insertOne(payload);
@@ -3666,6 +3843,13 @@ app.put('/nonprofits/:id', requireAuth, async (req, res) => {
     if (!ObjectId.isValid(id)) return res.status(400).json({ error: 'Invalid nonprofit id' });
     const { _id, userId, ...updates } = req.body || {};
     updates.updatedAt = new Date();
+    if (updates.orgName && !updates.slug) {
+      const existing = await database.collection('Nonprofits').findOne({ _id: new ObjectId(id) }, { projection: { slug: 1 } });
+      if (!existing?.slug) {
+        const base = makeSlug(updates.orgName);
+        updates.slug = await ensureUniqueSlug(database.collection('Nonprofits'), base, new ObjectId(id));
+      }
+    }
     if (updates.address || updates.serviceArea) {
       const geoPoint = await geocodeAddress(updates.address || updates.serviceArea);
       if (geoPoint) updates.geoPoint = geoPoint;
@@ -3706,6 +3890,29 @@ app.post('/backfillNonprofitNames', requireAuth, async (req, res) => {
         { $set: { organization: npo.orgName } }
       );
       if (r.modifiedCount) updated++;
+    }
+    res.json({ success: true, updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /backfillNonprofitSlugs — one-time admin fix: slug generation was
+// added after some nonprofits already existed, so their module pages
+// (GET /m/:slug) are unreachable until they have one.
+app.post('/backfillNonprofitSlugs', requireAuth, async (req, res) => {
+  try {
+    const npos = await database.collection('Nonprofits').find({
+      $or: [{ slug: { $exists: false } }, { slug: null }, { slug: '' }],
+      orgName: { $exists: true },
+    }).toArray();
+    let updated = 0;
+    for (const npo of npos) {
+      if (!npo.orgName) continue;
+      const base = makeSlug(npo.orgName);
+      const slug = await ensureUniqueSlug(database.collection('Nonprofits'), base, npo._id);
+      await database.collection('Nonprofits').updateOne({ _id: npo._id }, { $set: { slug } });
+      updated++;
     }
     res.json({ success: true, updated });
   } catch (err) {

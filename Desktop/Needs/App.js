@@ -1,6 +1,6 @@
 // App.js
 import React, { useEffect, useRef, useState, useContext } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Modal } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -8,7 +8,8 @@ import { setAudioModeAsync } from 'expo-audio';
 import Constants from 'expo-constants';
 import TabNavigation from './Screens/TabNavigation';
 import { UserProvider, UserContext } from './server/CurrentUser';
-import { AuthModalProvider } from './Screens/AuthModalContext';
+import { AuthModalProvider, useAuthModal } from './Screens/AuthModalContext';
+import CreateNewUser from './Screens/CreateNewUser';
 import AppointmentFollowUpModal from './Screens/AppointmentFollowUpModal';
 import RestaurantFollowUpModal from './Screens/RestaurantFollowUpModal';
 
@@ -128,6 +129,19 @@ function NotificationHandler() {
   );
 }
 
+// ── Inner component: lives inside AuthModalProvider so any screen can
+// trigger a real login/signup modal via useAuthModal().show(), instead of
+// that call silently doing nothing because nothing ever rendered based on
+// the context's visible flag.
+function GlobalAuthModal() {
+  const { visible, hide } = useAuthModal();
+  return (
+    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={hide}>
+      <CreateNewUser onLoginSuccess={hide} onCancel={hide} />
+    </Modal>
+  );
+}
+
 export default function App() {
   useEffect(() => {
     const enableAudio = async () => {
@@ -159,6 +173,7 @@ export default function App() {
                   so it can read userId and show the follow-up modal over any screen */}
               <NotificationHandler />
             </NavigationContainer>
+            <GlobalAuthModal />
           </AuthModalProvider>
         </UserProvider>
       </GestureHandlerRootView>

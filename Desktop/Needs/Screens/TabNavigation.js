@@ -114,7 +114,7 @@ const whs = IS_WEB ? {
 
 const WEB_TABS = [
   { name: 'Need',          label: 'Need',       icon: 'chatbubble-ellipses-outline', auth: false },
-  { name: 'Fill Needs',    label: 'Fill Needs', icon: 'list-outline',                auth: false },
+  { name: 'Fill Needs',    label: 'Fill Needs', icon: 'list-outline',                auth: true  },
   { name: 'Notifications', label: 'Activity',   icon: 'swap-horizontal-outline',     auth: true  },
   { name: 'Account',       label: 'Account',    icon: 'person-circle-outline',       auth: true  },
 ];

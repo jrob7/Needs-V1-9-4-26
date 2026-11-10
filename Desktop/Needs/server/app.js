@@ -621,33 +621,45 @@ app.post('/exchangeWebHandoff', async (req, res) => {
 });
 
 // POST /guestSearchBusinesses — login-free search for the web/mobile-web home
-// screen. Proxies to the Flask /ai/findMatches matching that already exists
-// and works unauthenticated, then trims the response down to exactly what a
-// result card needs - a small, stable public shape, same idea as
-// GET /m/:slug/profile wrapping the raw Mongo doc. Nonprofits have no module
-// page (GET /m/:slug only checks Restaurants and Services below), so a
-// nonprofit-classified query returns no cards rather than a dead link.
+// screen. First classifies intent via the same real AI classifier the
+// logged-in flow uses (/ai/nextAction, an LLM prompted on intent/context,
+// not keywords) - NOT /ai/findMatches's own `type: 'auto'`, which falls
+// back to a much weaker fixed keyword list (classify_request in
+// match_routes.py) and misses plenty of ordinary service queries (e.g.
+// "tree trimmer" matches no word in its SERVICE_KEYWORDS list at all).
+// Once intent is resolved, calls /ai/findMatches with that explicit type.
+// Trims the response down to exactly what a result card needs - a small,
+// stable public shape, same idea as GET /m/:slug/profile wrapping the raw
+// Mongo doc. Nonprofits have no module page (GET /m/:slug only checks
+// Restaurants and Services below), so a nonprofit-classified query returns
+// no cards rather than a dead link.
 app.post('/guestSearchBusinesses', guestSearchLimiter, async (req, res) => {
   try {
     const { query, userLat, userLng, userCity } = req.body || {};
     if (!query || !String(query).trim()) return res.status(400).json({ error: 'query required' });
+    const trimmedQuery = String(query).slice(0, 500);
+
+    const actionResp = await fetch(`${FLASK_API}/ai/nextAction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userReply: trimmedQuery }),
+    });
+    if (!actionResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
+    const { action } = await actionResp.json();
+    const type = action === 'FIND_RESTAURANT' ? 'food' : (action === 'FIND_SERVICE' ? 'service' : null);
+    if (!type) return res.json({ type: 'item', matches: [] });
 
     const flaskResp = await fetch(`${FLASK_API}/ai/findMatches`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query: String(query).slice(0, 500), type: 'auto',
+        query: trimmedQuery, type,
         ...(userLat != null && userLng != null ? { userLat, userLng } : {}),
         ...(userCity ? { userCity } : {}),
       }),
     });
     if (!flaskResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
     const data = await flaskResp.json();
-    const type = data.type;
-
-    if (type !== 'food' && type !== 'service') {
-      return res.json({ type, matches: [] });
-    }
 
     const matches = (data.matches || []).filter(m => m.slug).map(m => (
       type === 'food'

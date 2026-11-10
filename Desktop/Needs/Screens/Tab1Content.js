@@ -983,10 +983,35 @@ export default function SearchScreen() {
       // the same login-free matching Flask already exposes - the native
       // app keeps the login wall below unchanged.
       if (IS_WEB) {
+        // The shared awaitingLocationRef resume guard sits later in this
+        // function (after this whole guest block returns), so it would
+        // never be reached from here - mirror it locally, or a guest's
+        // location reply gets treated as a brand new search instead of
+        // being routed to handleLocationInput.
+        if (!overrideText && awaitingLocationRef.current) { await handleLocationInput(); return; }
+
         const guestText = (overrideText || input || '').trim();
         if (!guestText) return;
-        pushUser(guestText, false);
-        setInput('');
+        if (!overrideText) { pushUser(guestText, false); setInput(''); }
+
+        // Same location-clarification flow the logged-in service path
+        // already uses (captureLocation tries GPS silently first, falls
+        // back to asking) - without it, a query with no location anywhere
+        // in it gets matched with no geographic relevance at all. Reuses
+        // the existing awaitingLocationInput/pendingNeedAfterLocation
+        // mechanism; handleLocationInput resumes by calling
+        // sendQuery(originalText) once it has a location, which re-enters
+        // this same branch with overrideText set, skipping this check.
+        if (!locationRef.current) {
+          const gotGPS = await captureLocation();
+          if (!gotGPS) {
+            setPendingNeedAfterLocation({ originalText: guestText });
+            setAwaitingLocationInput(true); awaitingLocationRef.current = true;
+            pushAI("I currently do not have access to your location for this request. Could you please provide a City, Zip code, or Address so I can look in that area?");
+            return;
+          }
+        }
+
         setConversation((prev) => [...prev, { aiThinking: true }]);
         try {
           const resp = await axios.post(`${NODE_API}/guestSearchBusinesses`, {

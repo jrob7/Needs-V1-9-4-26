@@ -26,6 +26,7 @@ import UploadRestaurant              from './UploadRestaurant';
 import UploadService                 from './UploadService';
 import UploadNonprofit               from './UploadNonprofit';
 import MatchResults                  from './MatchResults';
+import GuestSearchResults            from './GuestSearchResults';
 import CreateNewUser                 from './CreateNewUser';
 import SearchChatbot                 from './SearchChatbot';
 import MessagesScreen                from './MessagesScreen';
@@ -64,6 +65,7 @@ const SHARED_SCREENS = [
   { name: 'UploadService',                 component: UploadService },
   { name: 'UploadNonprofit',              component: UploadNonprofit },
   { name: 'MatchResults',                  component: MatchResults },
+  { name: 'GuestSearchResults',            component: GuestSearchResults },
   { name: 'CreateNewUser',                 component: CreateNewUser },
   { name: 'SearchChatbot',                 component: SearchChatbot },
   { name: 'Conversation',                  component: ConversationScreen },

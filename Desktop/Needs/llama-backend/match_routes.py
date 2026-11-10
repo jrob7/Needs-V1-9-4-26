@@ -998,7 +998,7 @@ def find_matches():
                      if len(w) >= 3 and w not in STOPWORDS]
             query_words = list(set(query_words + extra))
 
-        FIELDS = ["_id", "userId", "name", "tagline", "cuisine", "priceRange",
+        FIELDS = ["_id", "userId", "slug", "name", "tagline", "cuisine", "priceRange",
                   "address", "phone", "coverImageUrl", "topDishes", "goodToKnow",
                   "waitMin", "waitMax", "hoursOpen", "menuUrl", "offer", "geoPoint"]
 
@@ -1048,7 +1048,7 @@ def find_matches():
 
     # ── SERVICE ───────────────────────────────────────────────────────────────
     if req_type == "service":
-        FIELDS = ["_id", "userId", "businessName", "providerName", "category",
+        FIELDS = ["_id", "userId", "slug", "businessName", "providerName", "category",
                   "tagline", "description", "serviceArea", "businessAddress",
                   "phone", "website", "rateType", "rateMin", "rateMax",
                   "availability", "responseTime", "licensed",

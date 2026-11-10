@@ -979,6 +979,32 @@ export default function SearchScreen() {
     if (overrideText !== null && typeof overrideText !== 'string') overrideText = null;
     Keyboard.dismiss();
     if (!currentUserId) {
+      // Web/mobile-web only: let a guest search without logging in, using
+      // the same login-free matching Flask already exposes - the native
+      // app keeps the login wall below unchanged.
+      if (IS_WEB) {
+        const guestText = (overrideText || input || '').trim();
+        if (!guestText) return;
+        pushUser(guestText, false);
+        setInput('');
+        setConversation((prev) => [...prev, { aiThinking: true }]);
+        try {
+          const resp = await axios.post(`${NODE_API}/guestSearchBusinesses`, {
+            query: guestText, ...locationParams(),
+          });
+          setConversation((prev) => prev.filter((m) => !m.aiThinking));
+          const matches = resp.data?.matches || [];
+          if (matches.length === 0) {
+            pushAI("I couldn't find a match for that. Try describing it a bit differently.");
+            return;
+          }
+          navigation.navigate('GuestSearchResults', { matches, query: guestText });
+        } catch (e) {
+          setConversation((prev) => prev.filter((m) => !m.aiThinking));
+          pushAI('Could not search right now. Please try again.');
+        }
+        return;
+      }
       setPendingQuery((input || '').trim());
       setAuthModalVisible(true);
       return;

@@ -160,6 +160,26 @@ const trackRequestLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// /guestSearchBusinesses is new, unauthenticated, and proxies to an
+// AI-scoring Flask call - worth limiting per IP so it cannot be used to
+// run up Flask/AI load for free at volume.
+const guestSearchLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'rate_limited', error_description: 'Too many searches. Try again shortly.' },
+});
+
+// draftIds are 128-bit random tokens, same reasoning as trackRequestLimiter -
+// defense in depth against brute force, not the primary protection.
+const moduleDraftLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
 const io = new SocketIOServer(httpServer, {
   cors: {
@@ -596,6 +616,104 @@ app.post('/exchangeWebHandoff', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ /exchangeWebHandoff error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /guestSearchBusinesses — login-free search for the web/mobile-web home
+// screen. Proxies to the Flask /ai/findMatches matching that already exists
+// and works unauthenticated, then trims the response down to exactly what a
+// result card needs - a small, stable public shape, same idea as
+// GET /m/:slug/profile wrapping the raw Mongo doc. Nonprofits have no module
+// page (GET /m/:slug only checks Restaurants and Services below), so a
+// nonprofit-classified query returns no cards rather than a dead link.
+app.post('/guestSearchBusinesses', guestSearchLimiter, async (req, res) => {
+  try {
+    const { query, userLat, userLng, userCity } = req.body || {};
+    if (!query || !String(query).trim()) return res.status(400).json({ error: 'query required' });
+
+    const flaskResp = await fetch(`${FLASK_API}/ai/findMatches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: String(query).slice(0, 500), type: 'auto',
+        ...(userLat != null && userLng != null ? { userLat, userLng } : {}),
+        ...(userCity ? { userCity } : {}),
+      }),
+    });
+    if (!flaskResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
+    const data = await flaskResp.json();
+    const type = data.type;
+
+    if (type !== 'food' && type !== 'service') {
+      return res.json({ type, matches: [] });
+    }
+
+    const matches = (data.matches || []).filter(m => m.slug).map(m => (
+      type === 'food'
+        ? {
+            type, slug: m.slug,
+            name: m.name || '',
+            image: m.coverImageUrl || null,
+            line: m.tagline || (m.cuisine ? `${m.cuisine} restaurant` : ''),
+            area: m.address || '',
+          }
+        : {
+            type, slug: m.slug,
+            name: m.businessName || m.providerName || '',
+            image: (m.portfolioImageUrls || [])[0] || null,
+            line: m.tagline || (m.description || '').slice(0, 120),
+            area: m.serviceArea || m.businessAddress || '',
+          }
+    ));
+
+    res.json({ type, matches });
+  } catch (err) {
+    console.error('❌ /guestSearchBusinesses error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /createModuleDraft — a guest picked a business card on the login-free
+// home search; carries their original request text into that business's
+// module page without putting it in the URL (same reasoning as
+// /createWebHandoff above: not logged, not cached, not kept in browser
+// history). Single-use, short-lived, no auth - the draft text itself isn't
+// sensitive (the guest typed it into a public search box), this just keeps
+// URLs clean and lets the text survive a full page navigation.
+app.post('/createModuleDraft', moduleDraftLimiter, async (req, res) => {
+  try {
+    const { slug, originalQuery } = req.body || {};
+    if (!slug || !originalQuery) return res.status(400).json({ error: 'slug and originalQuery are required' });
+    const draftId = crypto.randomBytes(16).toString('hex');
+    await database.collection('PendingModuleDrafts').insertOne({
+      draftId, slug, originalQuery: String(originalQuery).slice(0, 2000),
+      createdAt: new Date(),
+    });
+    res.json({ draftId });
+  } catch (err) {
+    console.error('❌ /createModuleDraft error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /exchangeModuleDraft/:draftId — the module page calls this once on
+// load with the draftId from its URL; deleted immediately whether valid or
+// not, so a given draft link can only ever be consumed a single time.
+app.get('/exchangeModuleDraft/:draftId', moduleDraftLimiter, async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const pending = await database.collection('PendingModuleDrafts').findOne({ draftId });
+    if (pending) {
+      await database.collection('PendingModuleDrafts').deleteOne({ _id: pending._id });
+    }
+    const isExpired = !pending || (Date.now() - new Date(pending.createdAt).getTime()) > 30 * 60 * 1000;
+    if (!pending || isExpired) {
+      return res.status(404).json({ error: 'This draft has expired or was already used.' });
+    }
+    res.json({ originalQuery: pending.originalQuery });
+  } catch (err) {
+    console.error('❌ /exchangeModuleDraft error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -2430,6 +2548,27 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
   var box   = document.getElementById('chat-box');
   var input = document.getElementById('chat-input');
   var btn   = document.getElementById('chat-send');
+
+  // Carries a request typed on the login-free home search into this page as
+  // an editable draft - never auto-sent, same pattern as the ?handoff= token
+  // CurrentUser.js consumes on the app side, just without an auth token.
+  (function loadDraftIfPresent() {
+    var params = new URLSearchParams(window.location.search);
+    var draftId = params.get('draft');
+    if (!draftId) return;
+    params.delete('draft');
+    var cleanUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+    window.history.replaceState({}, '', cleanUrl);
+    fetch('/exchangeModuleDraft/' + encodeURIComponent(draftId))
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(res) {
+        if (res.ok && res.data.originalQuery) {
+          input.value = res.data.originalQuery;
+          input.focus();
+        }
+      })
+      .catch(function(err) { merr('draft exchange failed', err); });
+  })();
 
   function scrollBottom() { box.scrollTop = box.scrollHeight; }
 

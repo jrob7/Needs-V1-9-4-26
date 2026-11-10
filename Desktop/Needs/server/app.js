@@ -23,6 +23,18 @@ const port = process.env.PORT || 3000;
 // 🔥 REQUIRED FOR IMAGE HYDRATION
 const NODE_API = process.env.NODE_API || "http://localhost:3000";
 const FLASK_API = process.env.FLASK_API || "https://llama-go-production.up.railway.app";
+
+// Stored images are either a full URL, a GridFS ObjectId, or a plain
+// uploaded filename - every place that renders one needs to resolve it to
+// an actual URL first, or it renders as a broken image. Shared so this
+// doesn't drift out of sync across the places that need it (same rules as
+// Screens/MatchResults.js's client-side resolveImage).
+const resolveImageUrl = (raw) => {
+  if (!raw) return null;
+  if (raw.startsWith('http')) return raw;
+  if (/^[0-9a-f]{24}$/i.test(raw)) return `${NODE_API}/images/${raw}`;
+  return `${NODE_API}/uploads/${raw}`;
+};
 const fundraisersCol = () => client.db('Need').collection('Fundraisers');
 const path = require('path');
 const crypto = require('crypto');
@@ -661,30 +673,19 @@ app.post('/guestSearchBusinesses', guestSearchLimiter, async (req, res) => {
     if (!flaskResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
     const data = await flaskResp.json();
 
-    // Stored images are either a full URL, a GridFS ObjectId, or a plain
-    // uploaded filename - resolve to one ready-to-use URL here so callers
-    // of this public endpoint never need to know the difference (same
-    // resolution rules as Screens/MatchResults.js's resolveImage).
-    const resolveImage = (raw) => {
-      if (!raw) return null;
-      if (raw.startsWith('http')) return raw;
-      if (/^[0-9a-f]{24}$/i.test(raw)) return `${NODE_API}/images/${raw}`;
-      return `${NODE_API}/uploads/${raw}`;
-    };
-
     const matches = (data.matches || []).filter(m => m.slug).map(m => (
       type === 'food'
         ? {
             type, slug: m.slug,
             name: m.name || '',
-            image: resolveImage(m.coverImageUrl),
+            image: resolveImageUrl(m.coverImageUrl),
             line: m.tagline || (m.cuisine ? `${m.cuisine} restaurant` : ''),
             area: m.address || '',
           }
         : {
             type, slug: m.slug,
             name: m.businessName || m.providerName || '',
-            image: resolveImage((m.portfolioImageUrls || [])[0]),
+            image: resolveImageUrl((m.portfolioImageUrls || [])[0]),
             line: m.tagline || (m.description || '').slice(0, 120),
             area: m.serviceArea || m.businessAddress || '',
           }
@@ -2588,10 +2589,25 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         if (res.ok && res.data.originalQuery) {
           input.value = res.data.originalQuery;
           input.focus();
+          showBackToSearchBar();
         }
       })
       .catch(function(err) { merr('draft exchange failed', err); });
   })();
+
+  // Only shown when this page was actually reached via a draft handoff from
+  // the guest search results - a direct visitor (Google, a shared link, an
+  // AI agent) has no search tab to return to. This page opened in its own
+  // new tab with no browser history of its own, so "back" means closing
+  // this tab, not history.back() - the original results tab is still open
+  // behind it.
+  function showBackToSearchBar() {
+    var bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;align-items:center;gap:8px;padding:12px 16px;background:#EFF6FF;border-bottom:1px solid #BFDBFE;cursor:pointer;font-size:.88rem;font-weight:700;color:#2563EB;';
+    bar.innerHTML = '&#8592; Back to search results';
+    bar.addEventListener('click', function() { window.close(); });
+    document.body.insertBefore(bar, document.body.firstChild);
+  }
 
   function scrollBottom() { box.scrollTop = box.scrollHeight; }
 
@@ -3195,7 +3211,7 @@ app.get('/m/:slug', async (req, res) => {
   const desc         = doc.description || tagline;
   const licensed     = doc.licensed ? '✓ Licensed & Insured' : '';
   const rating       = doc.rating || '4.8';
-  const photos       = (doc.portfolioImageUrls || []).slice(0, 10);
+  const photos       = (doc.portfolioImageUrls || []).slice(0, 10).map(resolveImageUrl).filter(Boolean);
   const topServices  = doc.topServices || [];
 
   // Pricing shown anywhere on this page (or in its structured data) is what

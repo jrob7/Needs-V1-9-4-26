@@ -661,19 +661,30 @@ app.post('/guestSearchBusinesses', guestSearchLimiter, async (req, res) => {
     if (!flaskResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
     const data = await flaskResp.json();
 
+    // Stored images are either a full URL, a GridFS ObjectId, or a plain
+    // uploaded filename - resolve to one ready-to-use URL here so callers
+    // of this public endpoint never need to know the difference (same
+    // resolution rules as Screens/MatchResults.js's resolveImage).
+    const resolveImage = (raw) => {
+      if (!raw) return null;
+      if (raw.startsWith('http')) return raw;
+      if (/^[0-9a-f]{24}$/i.test(raw)) return `${NODE_API}/images/${raw}`;
+      return `${NODE_API}/uploads/${raw}`;
+    };
+
     const matches = (data.matches || []).filter(m => m.slug).map(m => (
       type === 'food'
         ? {
             type, slug: m.slug,
             name: m.name || '',
-            image: m.coverImageUrl || null,
+            image: resolveImage(m.coverImageUrl),
             line: m.tagline || (m.cuisine ? `${m.cuisine} restaurant` : ''),
             area: m.address || '',
           }
         : {
             type, slug: m.slug,
             name: m.businessName || m.providerName || '',
-            image: (m.portfolioImageUrls || [])[0] || null,
+            image: resolveImage((m.portfolioImageUrls || [])[0]),
             line: m.tagline || (m.description || '').slice(0, 120),
             area: m.serviceArea || m.businessAddress || '',
           }

@@ -165,9 +165,9 @@ const st = StyleSheet.create({
 
   webInput: {
     fontSize: 15, fontWeight: '700', color: '#2563EB',
-    backgroundColor: '#EFF6FF', border: '1.5px solid #BFDBFE',
-    borderRadius: 10, padding: '10px 14px', cursor: 'pointer',
-    outline: 'none', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    backgroundColor: '#EFF6FF', borderWidth: 1.5, borderStyle: 'solid', borderColor: '#BFDBFE',
+    borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14, cursor: 'pointer',
+    outlineWidth: 0, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     WebkitAppearance: 'none', colorScheme: 'light',
   },
   pickerBtn: {

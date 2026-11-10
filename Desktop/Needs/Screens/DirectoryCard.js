@@ -37,7 +37,7 @@ export default function DirectoryCard({ item, onPress }) {
         )}
         <View style={st.viewRow}>
           <Text style={st.viewText}>View business</Text>
-          <Ionicons name="arrow-forward" size={IS_WEB ? 17 : 14} color="#2563EB" />
+          <Ionicons name="arrow-forward" size={IS_WEB ? 22 : 18} color="#2563EB" />
         </View>
       </View>
     </TouchableOpacity>
@@ -59,5 +59,5 @@ const st = StyleSheet.create({
   areaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: IS_WEB ? 12 : 9 },
   area: { fontSize: IS_WEB ? 15 : 12, color: '#6B7280' },
   viewRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  viewText: { fontSize: IS_WEB ? 15 : 13, fontWeight: '700', color: '#2563EB' },
+  viewText: { fontSize: IS_WEB ? 20 : 16, fontWeight: '700', color: '#2563EB' },
 });

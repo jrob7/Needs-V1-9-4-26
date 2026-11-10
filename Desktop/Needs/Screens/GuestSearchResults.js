@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import axios from 'axios';
 import { NODE_API } from '../config';
-import { IS_WEB, webContainer } from '../webLayout';
+import { IS_WEB, webContainer, WEB_HEADER_HEIGHT } from '../webLayout';
 import DirectoryCard from './DirectoryCard';
 
 export default function GuestSearchResults() {
@@ -81,7 +81,7 @@ const st = StyleSheet.create({
   content: { flex: 1, width: '100%', alignSelf: 'center' },
   header: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: IS_WEB ? 16 : 10, paddingBottom: 12,
+    paddingHorizontal: 16, paddingTop: IS_WEB ? WEB_HEADER_HEIGHT + 16 : 10, paddingBottom: 12,
   },
   backBtn: { padding: 4 },
   title: { fontSize: IS_WEB ? 20 : 17, fontWeight: '800', color: '#0F172A' },

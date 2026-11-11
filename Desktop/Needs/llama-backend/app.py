@@ -292,14 +292,15 @@ def module_chat():
     if not message:
         return jsonify({"error": "message is required"}), 400
 
-    # Classify intent first — a quote request skips straight to the existing
-    # quote flow rather than attempting to answer from business info. Skipped
-    # entirely when the business does not take quotes (e.g. nonprofits) -
-    # every message is treated as a question, and there is no point paying
-    # for a classification call whose answer would be discarded anyway.
-    if not allow_quotes:
-        intent = "question"
-    else:
+    # Classify intent first. For a business that takes quotes, a quote
+    # request skips straight to the quote flow rather than attempting to
+    # answer from business info. Nonprofits do not take quotes, but need
+    # the same kind of signal for a different reason: a personal request
+    # for help should always reach a real person at the organization, even
+    # when the AI can also answer it informationally from the profile text
+    # (e.g. "can you help me" answered with hours/contact info still needs
+    # the organization notified, not just a chatbot reply that goes nowhere).
+    if allow_quotes:
         intent_prompt = f"""Classify the customer message below as QUOTE or QUESTION.
 QUOTE: they want to hire this business, get pricing for their own specific job, or start the process of getting work done.
 QUESTION: a general informational question (hours, what services are offered, general policies, etc.) that is not asking to be hired or quoted.
@@ -309,6 +310,16 @@ Customer message: "{message}"
 Answer with exactly one word: QUOTE or QUESTION"""
         intent_raw = (generate_response(intent_prompt) or "").strip().upper()
         intent = "quote" if "QUOTE" in intent_raw else "question"
+    else:
+        intent_prompt = f"""Classify the customer message below as HELP_REQUEST or QUESTION.
+HELP_REQUEST: the person is personally asking this organization for help, assistance, resources, or support for their own situation.
+QUESTION: a general informational question about the organization (hours, what they do, policies, who they serve) that is not a personal request for help.
+
+Customer message: "{message}"
+
+Answer with exactly one word: HELP_REQUEST or QUESTION"""
+        intent_raw = (generate_response(intent_prompt) or "").strip().upper()
+        intent = "help_request" if "HELP_REQUEST" in intent_raw or "HELP REQUEST" in intent_raw else "question"
 
     history_text = ""
     for turn in history[-6:]:
@@ -344,6 +355,10 @@ Assistant:"""
             "cannotAnswer": False,
             "intent": "quote",
         })
+
+    if intent == "help_request":
+        reply = "I don't have specific information for your situation, but let me connect you with the organization directly." if cannot_answer else raw
+        return jsonify({"reply": reply, "cannotAnswer": False, "intent": "help_request"})
 
     if cannot_answer:
         raw = "I don't have that information available. Would you like to send your question directly to this business?"

@@ -2946,6 +2946,15 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         showQuoteForm(msg);
         return;
       }
+      // Nonprofit equivalent of the quote branch above: a personal request
+      // for help should always reach the organization, even when the AI
+      // could also answer it informationally - telling someone to call a
+      // number is not the same as the organization knowing they asked.
+      if (!allowQuotes && data.intent === 'help_request') {
+        addBubble(data.reply || "I'd be happy to help connect you.", 'bubble-bot');
+        showCannotAnswerOptions(msg);
+        return;
+      }
       addBubble(data.reply || 'No response received.', 'bubble-bot');
       chatHistory.push({ role: 'user', text: msg });
       chatHistory.push({ role: 'bot', text: data.reply });

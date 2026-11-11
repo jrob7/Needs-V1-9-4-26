@@ -3453,11 +3453,6 @@ app.get('/m/:slug', async (req, res) => {
   const phone     = doc.phone || '';
   const email     = doc.email || '';
   const website   = doc.website || '';
-  const whoHelp   = doc.whoYouHelp || '';
-  const cost      = doc.cost || '';
-  const reqs      = doc.requirements || '';
-  const avail     = doc.availability || '';
-  const languages = doc.languages || '';
   const logo      = resolveImageUrl(doc.logoUrl);
   const helpTypes = doc.helpTypes || [];
 
@@ -3475,21 +3470,10 @@ app.get('/m/:slug', async (req, res) => {
 
   const helpRows = helpTypes.map(h => `<div class="service-row">${h}</div>`).join('');
 
-  const infoRows = [
-    whoHelp ? { label: 'Who They Help', value: whoHelp } : null,
-    cost    ? { label: 'Cost', value: cost } : null,
-    reqs    ? { label: 'Requirements', value: reqs } : null,
-    avail   ? { label: 'Availability', value: avail } : null,
-    languages ? { label: 'Languages', value: languages } : null,
-  ].filter(Boolean).map(r => `
-    <div class="info-row"><span class="info-label">${r.label}</span><span class="info-value">${r.value}</span></div>
-  `).join('');
-
-  const contactActions = [
-    phone   ? { href: `tel:${phone}`, label: 'Call' } : null,
-    email   ? { href: `mailto:${email}`, label: 'Email' } : null,
-    website ? { href: website, label: 'Website' } : null,
-  ].filter(Boolean).map(a => `<a class="btn btn-secondary" href="${a.href}">${a.label}</a>`).join('');
+  // whoHelp/cost/reqs/avail/languages are intentionally not rendered as
+  // their own static section - that is exactly the information the chat
+  // widget already answers conversationally from the same profile data,
+  // so listing it again statically would just be redundant.
 
   return res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -3518,13 +3502,6 @@ app.get('/m/:slug', async (req, res) => {
     .desc { font-size: .92rem; color: #475569; line-height: 1.6; }
     .service-row { width: 50%; padding: 12px 14px; margin-bottom: 8px; border: 1px solid #E2E8F0; border-radius: 10px; font-size: .95rem; font-weight: 600; color: #0F172A; }
     .service-row:last-child { margin-bottom: 0; }
-    .info-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #F1F5F9; }
-    .info-row:last-child { border-bottom: none; }
-    .info-label { font-size: .85rem; color: #64748B; font-weight: 600; }
-    .info-value { font-size: .88rem; color: #0F172A; text-align: right; }
-    .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin: 28px 16px 32px; }
-    .btn { flex: 1; min-width: 100px; padding: 10px; border-radius: 10px; border: none; font-size: .8rem; font-weight: 700; cursor: pointer; text-decoration: none; text-align: center; }
-    .btn-secondary { background: #fff; color: #2563EB; border: 1.5px solid #BFDBFE; }
     .powered { text-align: center; font-size: .75rem; color: #aaa; margin-bottom: 24px; }
     .powered a { color: #aaa; text-decoration: none; }
   </style>
@@ -3539,10 +3516,11 @@ app.get('/m/:slug', async (req, res) => {
     ${area ? `<div class="meta-row">${area}</div>` : ''}
   </div>
 
-  ${desc ? `
+  ${(desc || website) ? `
   <div class="section">
     <h2>About</h2>
-    <div class="desc">${desc}</div>
+    ${desc ? `<div class="desc">${desc}</div>` : ''}
+    ${website ? `<div class="desc" style="margin-top:8px;"><a href="${website.startsWith('http') ? website : 'https://' + website}" target="_blank" rel="noopener" style="color:#2563EB;">${website}</a></div>` : ''}
   </div>` : ''}
 
   ${helpRows ? `
@@ -3554,13 +3532,6 @@ app.get('/m/:slug', async (req, res) => {
   <div class="section">
   ${moduleChatWidget(slug, orgName, 'Ask a question...', doc._id.toString(), false)}
   </div>
-
-  ${infoRows ? `
-  <div class="section">
-    <div style="background:#F8FAFC;border-radius:12px;padding:4px 14px;">${infoRows}</div>
-  </div>` : ''}
-
-  ${contactActions ? `<div class="actions">${contactActions}</div>` : ''}
 
   <p class="powered">Powered by <a href="https://needs-v1-9-4-26-production.up.railway.app">Needs</a></p>
   </div>

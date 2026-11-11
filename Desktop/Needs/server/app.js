@@ -2779,7 +2779,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     var wrap = document.createElement('div');
     wrap.className = 'contact-form';
     wrap.innerHTML =
-      '<p>How would you like to send this?</p>' +
+      '<p>How would you like to send this request?</p>' +
       '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
         '<button class="opt-btn" id="opt-guest" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Send as Guest</button>' +
         '<button class="opt-btn" id="opt-login" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#1a1a1a;color:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Login / Sign Up</button>' +

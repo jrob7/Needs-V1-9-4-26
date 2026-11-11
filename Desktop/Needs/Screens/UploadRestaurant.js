@@ -133,7 +133,7 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
 
   // ── Upload helper ───────────────────────────────────────────
   const uploadImage = async (base64) => {
-    const res  = await fetch(`${BASE_URL}/uploadImage`, {
+    const res  = await fetch(`${NODE_API}/uploadImage`, {
       method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: base64,
     });
     const json = await res.json();
@@ -153,7 +153,7 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
       let createdToken = null;
 
       if (pendingAccount) {
-        const userRes = await fetch(`${BASE_URL}/createUser`, {
+        const userRes = await fetch(`${NODE_API}/createUser`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -218,7 +218,7 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
         } : null,
       };
 
-      const url    = editMode ? `${BASE_URL}/restaurants/${existingDoc._id}` : `${BASE_URL}/createRestaurant`;
+      const url    = editMode ? `${NODE_API}/restaurants/${existingDoc._id}` : `${NODE_API}/createRestaurant`;
       const method = editMode ? 'PUT' : 'POST';
       const resp   = await authFetch(url, {
         method,

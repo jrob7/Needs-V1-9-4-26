@@ -54,7 +54,7 @@ const Chips = ({ options, selected, onSelect }) => (
 );
 
 const uploadImage = async (base64) => {
-  const res = await fetch(`${BASE_URL}/uploadImage`, {
+  const res = await fetch(`${NODE_API}/uploadImage`, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: base64,
@@ -119,7 +119,7 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
       let createdToken = null;
 
       if (pendingAccount) {
-        const userRes = await fetch(`${BASE_URL}/createUser`, {
+        const userRes = await fetch(`${NODE_API}/createUser`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -160,8 +160,8 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
       };
 
       const url = editMode
-        ? `${BASE_URL}/nonprofits/${existingDoc._id}`
-        : `${BASE_URL}/createNonprofit`;
+        ? `${NODE_API}/nonprofits/${existingDoc._id}`
+        : `${NODE_API}/createNonprofit`;
       const method = editMode ? 'PUT' : 'POST';
 
       const res = await authFetch(url, {
@@ -175,7 +175,7 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
       }
 
       if (logoUrl && effectiveUserId) {
-        await authFetch(`${BASE_URL}/updateNeedCoins`, {
+        await authFetch(`${NODE_API}/updateNeedCoins`, {
           method: 'POST',
           body: JSON.stringify({ profilePicture: logoUrl }),
         }).catch(() => {});

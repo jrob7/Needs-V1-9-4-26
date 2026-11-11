@@ -639,7 +639,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
       // not when the earlier account-info step was filled in. Create the
       // account and the listing together, back-to-back.
       if (pendingAccount) {
-        const userRes = await fetch('${NODE_API}/createUser', {
+        const userRes = await fetch(`${NODE_API}/createUser`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -707,7 +707,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
         pricingDetails,
       };
 
-      const url    = editMode ? `${NODE_API}/services/${existingDoc._id}` : '${NODE_API}/createService';
+      const url    = editMode ? `${NODE_API}/services/${existingDoc._id}` : `${NODE_API}/createService`;
       const method = editMode ? 'PUT' : 'POST';
       const resp = await authFetch(url, {
         method,

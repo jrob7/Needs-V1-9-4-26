@@ -3303,19 +3303,13 @@ app.get('/m/:slug', async (req, res) => {
     `<span class="dot${i === 0 ? ' active' : ''}"></span>`
   ).join('');
 
-  // Service names collected per-service for pricing (pricingDetails) are
-  // folded in here too, so a business's priced offerings still show up as
-  // services on the page even though the page itself no longer displays
-  // the Q&A pricing details - just the names, deduped against topServices.
-  const pricingServiceNames = (doc.pricingDetails && Object.keys(doc.pricingDetails).length)
-    ? Object.keys(doc.pricingDetails)
-    : [];
-  const allServiceNames = [...topServices.map(s => s.name || s), ...pricingServiceNames]
-    .filter((name, i, arr) => name && arr.findIndex(n => n.toLowerCase() === name.toLowerCase()) === i);
-
-  const serviceRows = allServiceNames.map(name =>
-    `<div class="service-row">${name}</div>`
-  ).join('');
+  // Top Services should show only the business's actual top picks, not
+  // every pricing sub-category too - pricingDetails names are still used
+  // to ground the AI's answers (see /m/:slug/chat), just not listed here.
+  const serviceRows = topServices.map(s => s.name || s)
+    .filter((name, i, arr) => name && arr.findIndex(n => n.toLowerCase() === name.toLowerCase()) === i)
+    .map(name => `<div class="service-row">${name}</div>`)
+    .join('');
 
   const statBoxes = [
     avail        ? { value: avail, label: 'Availability' } : null,

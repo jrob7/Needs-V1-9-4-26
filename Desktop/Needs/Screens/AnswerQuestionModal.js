@@ -16,20 +16,25 @@ import { authFetch } from '../server/api';
 export default function AnswerQuestionModal({ notification, onClose, onSent }) {
   const [answer, setAnswer] = useState('');
   const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState(
+    notification?.messages?.length ? notification.messages : [{ from: 'guest', text: notification?.question || notification?.body }]
+  );
 
   const handleSend = async () => {
-    if (!answer.trim()) { Alert.alert('Add an answer', 'Please type a response first.'); return; }
+    const text = answer.trim();
+    if (!text) { Alert.alert('Add a reply', 'Please type a response first.'); return; }
     setSending(true);
     try {
       const resp = await authFetch(`${NODE_API}/answerModuleQuestion`, {
         method: 'POST',
-        body: JSON.stringify({ notificationId: notification._id, answer: answer.trim() }),
+        body: JSON.stringify({ notificationId: notification._id, answer: text }),
       });
       if (!resp.ok) throw new Error('Server error');
-      Alert.alert('✅ Sent', 'Your answer has been emailed to the customer.');
+      setMessages(prev => [...prev, { from: 'org', text }]);
+      setAnswer('');
       onSent?.();
     } catch {
-      Alert.alert('Error', "Couldn't send your answer. Please try again.");
+      Alert.alert('Error', "Couldn't send your reply. Please try again.");
     } finally { setSending(false); }
   };
 
@@ -42,20 +47,21 @@ export default function AnswerQuestionModal({ notification, onClose, onSent }) {
             <TouchableOpacity onPress={onClose} style={st.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Ionicons name="close" size={IS_WEB ? 28 : 22} color="#0F172A" />
             </TouchableOpacity>
-            <Text style={st.headerTitle}>Answer Question</Text>
+            <Text style={st.headerTitle}>Question</Text>
             <View style={{ width: IS_WEB ? 40 : 30 }} />
           </View>
 
           <ScrollView contentContainerStyle={st.body} keyboardShouldPersistTaps="handled">
-            <View style={st.questionBox}>
-              <Text style={st.questionLabel}>Question</Text>
-              <Text style={st.questionTxt}>{notification?.question || notification?.body}</Text>
-            </View>
+            {messages.map((m, i) => (
+              <View key={i} style={[st.bubble, m.from === 'org' ? st.bubbleOrg : st.bubbleGuest]}>
+                <Text style={m.from === 'org' ? st.bubbleOrgTxt : st.bubbleGuestTxt}>{m.text}</Text>
+              </View>
+            ))}
 
-            <Text style={st.label}>Your Answer</Text>
+            <Text style={st.label}>Your Reply</Text>
             <TextInput
               style={st.answerInput}
-              placeholder="Type your answer…"
+              placeholder="Type your reply…"
               placeholderTextColor="#94A3B8"
               value={answer}
               onChangeText={setAnswer}
@@ -67,7 +73,7 @@ export default function AnswerQuestionModal({ notification, onClose, onSent }) {
 
           <View style={st.footer}>
             <TouchableOpacity style={[st.sendBtn, sending && { opacity: 0.6 }]} onPress={handleSend} disabled={sending}>
-              <Text style={st.sendBtnTxt}>{sending ? 'Sending…' : 'Send Answer'}</Text>
+              <Text style={st.sendBtnTxt}>{sending ? 'Sending…' : 'Send Reply'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -87,11 +93,13 @@ const st = StyleSheet.create({
   headerTitle: { fontSize: IS_WEB ? 20 : 16, fontWeight: '800', color: '#0F172A' },
 
   body: { padding: 16, paddingBottom: 32 },
-  questionBox: { backgroundColor: '#F5F3FF', borderWidth: 1, borderColor: '#DDD6FE', borderRadius: 12, padding: 14, marginBottom: 20 },
-  questionLabel: { fontSize: 11, fontWeight: '800', color: '#7C3AED', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 },
-  questionTxt: { fontSize: 15, color: '#1E1B4B', lineHeight: 21 },
+  bubble: { maxWidth: '85%', borderRadius: 14, padding: 12, marginBottom: 10 },
+  bubbleGuest: { backgroundColor: '#EFF6FF', alignSelf: 'flex-end' },
+  bubbleOrg: { backgroundColor: '#F1F5F9', alignSelf: 'flex-start' },
+  bubbleGuestTxt: { fontSize: 15, color: '#1E3A8A', lineHeight: 21 },
+  bubbleOrgTxt: { fontSize: 15, color: '#334155', lineHeight: 21 },
 
-  label: { fontSize: IS_WEB ? 14 : 12, fontWeight: '800', color: '#334155', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 },
+  label: { fontSize: IS_WEB ? 14 : 12, fontWeight: '800', color: '#334155', marginBottom: 8, marginTop: 10, textTransform: 'uppercase', letterSpacing: 0.4 },
   answerInput: {
     borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, padding: 12,
     fontSize: 15, color: '#0F172A', minHeight: 120, textAlignVertical: 'top',

@@ -172,6 +172,17 @@ const trackRequestLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Same trackingKey-brute-force reasoning as trackRequestLimiter, but this
+// one guards a write (posting a guest reply into an org's inbox) rather
+// than a read, so it's worth its own limiter even though the shape is
+// identical today.
+const conversationReplyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // /guestSearchBusinesses is new, unauthenticated, and proxies to an
 // AI-scoring Flask call - worth limiting per IP so it cannot be used to
 // run up Flask/AI load for free at volume.
@@ -2283,6 +2294,8 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
         businessId: pending.businessId,
         businessType: pending.businessType,
         trackingKey: pending.trackingKey || null,
+        messages: [{ from: 'guest', text: pending.question, at: new Date() }],
+        needsReply: true,
         read: false,
         answered: false,
         createdAt: new Date(),
@@ -2390,6 +2403,66 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
   } catch (err) {
     console.error('❌ /trackRequest error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /conversation/:trackingKey — the no-login page a guest reaches from
+// the "Reply to {business}" button in their answer email. Deliberately a
+// side-effect-free GET (same reasoning as renderClickToConfirmPage - an
+// email security scanner prefetching this link must not be able to act),
+// so sending a reply is a real form POST below, not anything this handler
+// does. Only ever applies to the Notifications-backed path (Services/
+// Nonprofits with a linked userId) - that's the only place trackingKey
+// lands on a module_question Notification in the first place.
+app.get('/conversation/:trackingKey', trackRequestLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
+    if (!notification) return res.status(404).send(renderConfirmPage(false, 'This conversation link is invalid or has expired.'));
+
+    const businessDoc = notification.businessType === 'nonprofit'
+      ? await database.collection('Nonprofits').findOne({ _id: notification.businessId })
+      : await database.collection('Services').findOne({ _id: notification.businessId });
+    const businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'The business';
+
+    const messages = notification.messages?.length ? notification.messages : [
+      { from: 'guest', text: notification.question, at: notification.createdAt },
+      ...(notification.answered ? [{ from: 'org', text: notification.answer, at: notification.answeredAt }] : []),
+    ];
+
+    res.send(renderConversationPage(businessName, messages, trackingKey));
+  } catch (err) {
+    console.error('❌ GET /conversation error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong loading this conversation. Please try again.'));
+  }
+});
+
+// POST /conversation/:trackingKey/reply — the guest sends another message
+// in the thread, no login required (trackingKey possession is the proof of
+// identity, same reasoning as /trackRequest). Redirects back to the GET
+// page above rather than returning JSON, since this is a plain HTML form
+// submit with no client-side JS.
+app.post('/conversation/:trackingKey/reply', conversationReplyLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const text = String(req.body?.text || '').trim().slice(0, 2000);
+    if (!text) return res.status(400).send(renderConfirmPage(false, 'Please enter a message before sending.'));
+
+    const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
+    if (!notification) return res.status(404).send(renderConfirmPage(false, 'This conversation link is invalid or has expired.'));
+
+    await database.collection('Notifications').updateOne(
+      { _id: notification._id },
+      {
+        $push: { messages: { from: 'guest', text, at: new Date() } },
+        $set: { read: false, needsReply: true },
+      }
+    );
+
+    res.redirect(303, `/conversation/${encodeURIComponent(trackingKey)}`);
+  } catch (err) {
+    console.error('❌ POST /conversation/:trackingKey/reply error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong sending your message. Please try again.'));
   }
 });
 
@@ -2514,11 +2587,22 @@ app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
       : await database.collection('Services').findOne({ _id: notification.businessId });
     const businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'The business';
 
+    const trimmedAnswer = String(answer).slice(0, 2000);
     await database.collection('Notifications').updateOne(
       { _id: notification._id },
-      { $set: { answered: true, answer: String(answer).slice(0, 2000), answeredAt: new Date(), read: true } }
+      {
+        $set: { answered: true, answer: trimmedAnswer, answeredAt: new Date(), read: true, needsReply: false },
+        $push: { messages: { from: 'org', text: trimmedAnswer, at: new Date() } },
+      }
     );
 
+    // The reply button is only included when a trackingKey exists so the
+    // guest can get back into the same thread with no login - older
+    // notifications from before trackingKey was added just get the plain
+    // one-way email they always have.
+    const replyButton = notification.trackingKey
+      ? `<p><a href="${NODE_API}/conversation/${notification.trackingKey}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Reply to ${businessName}</a></p>`
+      : '';
     await sendEmail({
       to: notification.askerEmail,
       subject: `${businessName} answered your question`,
@@ -2526,6 +2610,7 @@ app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
         <p><strong>${businessName}</strong> answered your question on Needs:</p>
         <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;"><em>${notification.question}</em></p>
         <p style="background:#EFF6FF;border-radius:8px;padding:12px 16px;color:#1E3A8A;">${answer}</p>
+        ${replyButton}
       `,
     });
 
@@ -4833,6 +4918,49 @@ function renderClickToConfirmPage(title, bodyHtml, formAction) {
     ${bodyHtml}
     <form method="POST" action="${formAction}">
       <button type="submit">Confirm</button>
+    </form>
+  </div>
+</body>
+</html>`;
+}
+
+// The no-login conversation page a guest reaches from the "Reply to
+// {business}" button in their answer email (see GET/POST
+// /conversation/:trackingKey). No third-party resources of any kind -
+// everything is inlined - so the trackingKey in the URL can't leak via a
+// Referer header to a CDN/analytics/font host; the referrer meta tag below
+// is defense in depth for the same reason. Every message is escaped since,
+// unlike an email body, this renders in a real browser.
+function renderConversationPage(businessName, messages, trackingKey) {
+  const bubbles = messages.map(m => `
+      <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`
+  ).join('');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Conversation with ${escapeHtml(businessName)} — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px 0; }
+    .card { background: #fff; border-radius: 16px; padding: 28px 24px; max-width: 480px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,.08); box-sizing: border-box; }
+    h1 { font-size: 1.1rem; color: #0F172A; margin: 0 0 16px; text-align: center; }
+    .thread { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+    .bubble { max-width: 85%; padding: 10px 14px; border-radius: 14px; font-size: .92rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+    .bubble-guest { background: #EFF6FF; color: #1E3A8A; align-self: flex-end; }
+    .bubble-org { background: #F1F5F9; color: #334155; align-self: flex-start; }
+    textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 12px; font-size: .92rem; font-family: inherit; min-height: 90px; resize: vertical; }
+    button { background: #2563EB; color: #fff; border: none; border-radius: 10px; padding: 13px 28px; font-size: .95rem; font-weight: 700; cursor: pointer; margin-top: 10px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Conversation with ${escapeHtml(businessName)}</h1>
+    <div class="thread">${bubbles}</div>
+    <form method="POST" action="/conversation/${encodeURIComponent(trackingKey)}/reply">
+      <textarea name="text" placeholder="Type your message…" required></textarea>
+      <button type="submit">Send</button>
     </form>
   </div>
 </body>

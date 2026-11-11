@@ -498,12 +498,12 @@ const ModuleQuestionRow = ({ item, onRespond }) => (
         <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
       </View>
       <Text style={styles.rowBody}>{item.question || item.body}</Text>
-      {item.answered ? (
-        <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>✓ Answered</Text>
+      {item.needsReply === false ? (
+        <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>✓ Replied — waiting on customer</Text>
       ) : (
         <View style={styles.leadButtonsRow}>
           <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onRespond(item)}>
-            <Text style={styles.respondBtnText}>Answer</Text>
+            <Text style={styles.respondBtnText}>{item.answered ? 'Reply' : 'Answer'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -1114,8 +1114,7 @@ const NotificationsScreen = () => {
           onClose={() => setAnswerQuestionTarget(null)}
           onSent={() => {
             const id = answerQuestionTarget._id;
-            if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, answered: true, read: true } : n));
-            setAnswerQuestionTarget(null);
+            if (id) setNotifications(prev => prev.map(n => n._id === id ? { ...n, answered: true, read: true, needsReply: false } : n));
           }}
         />
       )}

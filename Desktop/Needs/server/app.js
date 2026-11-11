@@ -2096,7 +2096,7 @@ app.post('/m/:slug/chat', async (req, res) => {
       ctx += `Cost: ${doc.cost || ''}\n`;
       ctx += `Requirements: ${doc.requirements || ''}\n`;
       ctx += `Availability: ${doc.availability || ''}\n`;
-      ctx += `Languages: ${(doc.languages || []).join(', ')}\n`;
+      ctx += `Languages: ${doc.languages || ''}\n`;
       ctx += `Phone: ${doc.phone || ''}\n`;
       ctx += `Email: ${doc.email || ''}\n`;
       ctx += `Website: ${doc.website || ''}\n`;
@@ -3011,7 +3011,7 @@ app.get('/m/:slug/profile', async (req, res) => {
         cost: doc.cost || '',
         requirements: doc.requirements || '',
         availability: doc.availability || '',
-        languages: doc.languages || [],
+        languages: doc.languages || '',
         serviceArea: doc.serviceArea || doc.address || '',
         phone: doc.phone || '',
         email: doc.email || '',
@@ -3053,6 +3053,7 @@ app.get('/m/:slug/profile', async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 app.get('/m/:slug', async (req, res) => {
+  try {
   const { slug } = req.params;
   const db = client.db('Need');
 
@@ -3447,7 +3448,7 @@ app.get('/m/:slug', async (req, res) => {
   const cost      = doc.cost || '';
   const reqs      = doc.requirements || '';
   const avail     = doc.availability || '';
-  const languages = (doc.languages || []).join(', ');
+  const languages = doc.languages || '';
   const logo      = resolveImageUrl(doc.logoUrl);
   const helpTypes = doc.helpTypes || [];
 
@@ -3556,6 +3557,10 @@ app.get('/m/:slug', async (req, res) => {
   </div>
 </body>
 </html>`);
+  } catch (err) {
+    console.error('❌ GET /m/:slug error:', err);
+    res.status(500).send('<h1>Something went wrong loading this page.</h1>');
+  }
 });
 
 app.post('/createRestaurant', requireAuth, async (req, res) => {

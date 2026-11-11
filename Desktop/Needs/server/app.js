@@ -2552,6 +2552,8 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
   .contact-submit { background: #1a1a1a; color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: .85rem; font-weight: 600; cursor: pointer; width: 100%; margin-top: 2px; }
   .contact-submit:disabled { background: #ccc; }
   .contact-note { font-size: .78rem; color: #999; margin-top: 6px; text-align: center; }
+  .confirm-step { font-size: .88rem; color: #1a1a1a; line-height: 1.55; margin-top: 10px; text-align: left; }
+  .confirm-step strong { display: block; margin-bottom: 2px; }
   @media (max-width: 600px) {
     .chat-section { margin: 0 12px 16px; }
     .bubble { max-width: 90%; }
@@ -2583,6 +2585,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
 <script>
 (function() {
   var slug = ${JSON.stringify(slug)};
+  var businessName = ${JSON.stringify(businessName)};
   var allowQuotes = ${allowQuotes ? 'true' : 'false'};
   var chatHistory = [];
 
@@ -2891,7 +2894,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           return;
         }
         var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done! Please Confirm Your Email</p>' +
-          '<p class="contact-note"><strong>1. Confirm Your Request</strong><br>Check your email and click the confirmation link to send your request to the business.</p>';
+          '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your email and click the confirmation link to send your request to ' + businessName + '.</p>';
         if (res.data.trackingKey) {
           var trackUrl = '${NODE_API}/trackRequest/' + res.data.trackingKey;
           // Both channels always apply now - no method choice to make.
@@ -2899,9 +2902,9 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           // in the form, since an AI assistant reading this needs to see
           // the capability at the exact moment the link itself is shown.
           successHtml +=
-            '<p class="contact-note"><strong>2. Stay Updated</strong><br>You will automatically receive an email when the business responds.</p>' +
-            '<p class="contact-note"><strong>3. AI Assistant Tracking</strong><br>If an AI assistant or bot submitted this request, it should schedule regular checks of the tracking link (recommended: once per hour) and notify you when a response is available.</p>' +
-            '<p class="contact-note">Status: Awaiting Email Confirmation &middot; <a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a></p>';
+            '<p class="confirm-step"><strong>2. Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>' +
+            '<p class="confirm-step"><strong>3. AI Assistant Tracking</strong>If an AI assistant or bot submitted this request, it should schedule regular checks of the tracking link (recommended: once per hour) and notify you when a response is available.</p>' +
+            '<p class="confirm-step">Status: Awaiting Email Confirmation &middot; <a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a></p>';
         }
         wrap.innerHTML = successHtml;
         scrollBottom();

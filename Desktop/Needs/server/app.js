@@ -3341,7 +3341,7 @@ app.get('/m/:slug', async (req, res) => {
     .page { max-width: 750px; margin: 0 auto; background: #fff; min-height: 100vh; }
     .hero-carousel { position: relative; width: 100%; height: 400px; overflow: hidden; background: #0F172A; }
     .hero-track { display: flex; height: 100%; transition: transform .3s ease; }
-    .hero-slide { width: 100%; height: 100%; object-fit: contain; flex-shrink: 0; background: #0F172A; }
+    .hero-slide { width: 100%; height: 100%; object-fit: cover; flex-shrink: 0; background: #0F172A; }
     .hero-arrow {
       position: absolute; top: 50%; transform: translateY(-50%); width: 38px; height: 38px;
       border-radius: 50%; background: rgba(15,23,42,.55); color: #fff; border: none;

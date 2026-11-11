@@ -487,30 +487,35 @@ const RescheduleRequestRow = ({ item, onRespond }) => (
   </View>
 );
 
-const ModuleQuestionRow = ({ item, onRespond }) => (
-  <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
-    <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
-      <Ionicons name="chatbubble-outline" size={W ? 26 : 20} color="#7C3AED" />
-    </View>
-    <View style={styles.rowContent}>
-      <View style={styles.rowTop}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{item.title || '💬 New Question'}</Text>
-        <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+const ModuleQuestionRow = ({ item, onRespond }) => {
+  const latest = item.messages?.length ? item.messages[item.messages.length - 1] : null;
+  const isFollowUp = item.needsReply !== false && item.messages?.length > 1 && latest?.from === 'guest';
+  const previewText = latest ? latest.text : (item.question || item.body);
+  return (
+    <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
+      <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
+        <Ionicons name="chatbubble-outline" size={W ? 26 : 20} color="#7C3AED" />
       </View>
-      <Text style={styles.rowBody}>{item.question || item.body}</Text>
-      {item.needsReply === false ? (
-        <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>✓ Replied — waiting on customer</Text>
-      ) : (
-        <View style={styles.leadButtonsRow}>
-          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onRespond(item)}>
-            <Text style={styles.respondBtnText}>{item.answered ? 'Reply' : 'Answer'}</Text>
-          </TouchableOpacity>
+      <View style={styles.rowContent}>
+        <View style={styles.rowTop}>
+          <Text style={styles.rowTitle} numberOfLines={1}>{isFollowUp ? '💬 New Reply' : (item.title || '💬 New Question')}</Text>
+          <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
         </View>
-      )}
+        <Text style={styles.rowBody}>{previewText}</Text>
+        {item.needsReply === false ? (
+          <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>✓ Replied — waiting on customer</Text>
+        ) : (
+          <View style={styles.leadButtonsRow}>
+            <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onRespond(item)}>
+              <Text style={styles.respondBtnText}>{item.answered ? 'Reply' : 'Answer'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+      {!item.read && <View style={styles.unreadDot} />}
     </View>
-    {!item.read && <View style={styles.unreadDot} />}
-  </View>
-);
+  );
+};
 
 const QuoteAcceptedByGuestRow = ({ item, onProposeTime }) => (
   <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start', backgroundColor: '#F0FDF4' }]}>

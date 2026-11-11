@@ -2450,9 +2450,11 @@ app.get('/conversation/:trackingKey', trackRequestLimiter, async (req, res) => {
 
 // POST /conversation/:trackingKey/reply — the guest sends another message
 // in the thread, no login required (trackingKey possession is the proof of
-// identity, same reasoning as /trackRequest). Redirects back to the GET
-// page above rather than returning JSON, since this is a plain HTML form
-// submit with no client-side JS.
+// identity, same reasoning as /trackRequest). Ends on a plain "message
+// sent" confirmation (same renderConfirmPage pattern every other guest
+// flow in this file uses) rather than looping back into the thread page -
+// the thread stays reachable again later via the same email link, but
+// sending isn't meant to leave the compose box sitting open.
 app.post('/conversation/:trackingKey/reply', conversationReplyLimiter, async (req, res) => {
   try {
     const { trackingKey } = req.params;
@@ -2470,7 +2472,12 @@ app.post('/conversation/:trackingKey/reply', conversationReplyLimiter, async (re
       }
     );
 
-    res.redirect(303, `/conversation/${encodeURIComponent(trackingKey)}`);
+    const businessDoc = notification.businessType === 'nonprofit'
+      ? await database.collection('Nonprofits').findOne({ _id: notification.businessId })
+      : await database.collection('Services').findOne({ _id: notification.businessId });
+    const businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the organization';
+
+    res.send(renderConfirmPage(true, `Your message has been sent to ${escapeHtml(businessName)}. They'll respond by email when they reply.`));
   } catch (err) {
     console.error('❌ POST /conversation/:trackingKey/reply error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong sending your message. Please try again.'));

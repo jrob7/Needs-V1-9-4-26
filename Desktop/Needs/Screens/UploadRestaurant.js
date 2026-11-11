@@ -11,6 +11,7 @@ import AuthStorage from '../server/authStorage';
 import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
 import { NODE_API } from '../config';
+import SaveConfirmationModal from './SaveConfirmationModal';
 
 const resolveImg = (raw) => {
   if (!raw) return null;
@@ -43,6 +44,7 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
   const [address, setAddress]       = useState(existingDoc?.address || '');
   const [zipcode, setZipcode]       = useState(existingDoc?.zipcode || '');
   const [phone, setPhone]           = useState(existingDoc?.phone || '');
+  const [savedModal, setSavedModal] = useState(null);
 
   // ── Hours & Wait ────────────────────────────────────────────
   const [hoursOpen, setHoursOpen] = useState(existingDoc?.hoursOpen || '');
@@ -228,20 +230,11 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
       if (!resp.ok) throw new Error('Server error');
 
       if (editMode) {
-        Alert.alert('✅ Profile updated!', `${name} has been saved.`);
-        if (onSubmitSuccess) onSubmitSuccess(effectiveUserId, createdToken);
-        else navigation?.goBack();
+        setSavedModal({ title: '✅ Profile Updated!', message: `${name} has been saved.`, effectiveUserId, createdToken, isEdit: true });
         return;
       }
 
-      Alert.alert('✅ Restaurant uploaded!', `${name} is now live.`);
-      if (onSubmitSuccess) { onSubmitSuccess(effectiveUserId, createdToken); return; }
-      setName(''); setTagline(''); setCuisine(''); setPriceRange('');
-      setAddress(''); setZipcode(''); setPhone('');
-      setWaitMin(''); setWaitMax(''); setHoursOpen('');
-      setCoverImage(null); setMenuImage(null);
-      setDishes(blankDishes);
-      setTips(['', '', '']);
+      setSavedModal({ title: '✅ Restaurant Uploaded!', message: `${name} is now live.`, effectiveUserId, createdToken, isEdit: false });
     } catch (err) {
       console.error(err);
       Alert.alert('Upload failed', err.message || 'Something went wrong.');
@@ -250,7 +243,21 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
 
   const handleBack = onBack || (navigation ? () => navigation.goBack() : null);
 
+  const closeSavedModal = () => {
+    const info = savedModal;
+    setSavedModal(null);
+    if (onSubmitSuccess) { onSubmitSuccess(info.effectiveUserId, info.createdToken); return; }
+    if (info.isEdit) { navigation?.goBack(); return; }
+    setName(''); setTagline(''); setCuisine(''); setPriceRange('');
+    setAddress(''); setZipcode(''); setPhone('');
+    setWaitMin(''); setWaitMax(''); setHoursOpen('');
+    setCoverImage(null); setMenuImage(null);
+    setDishes(blankDishes);
+    setTips(['', '', '']);
+  };
+
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       {!!handleBack && (
         <TouchableOpacity
@@ -498,6 +505,13 @@ export default function UploadRestaurant({ route, navigation, onSubmitSuccess, o
 
       <View style={{ height: 40 }} />
     </ScrollView>
+    <SaveConfirmationModal
+      visible={!!savedModal}
+      title={savedModal?.title}
+      message={savedModal?.message}
+      onClose={closeSavedModal}
+    />
+    </>
   );
 }
 

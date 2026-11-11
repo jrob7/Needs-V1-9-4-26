@@ -13,6 +13,7 @@ import { authFetch } from '../server/api';
 
 import { NODE_API } from '../config';
 import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
+import SaveConfirmationModal from './SaveConfirmationModal';
 const resolveImg = (raw) => {
   if (!raw) return null;
   if (raw.startsWith('http')) return raw;
@@ -89,6 +90,8 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
   const [logoImage, setLogoImage]       = useState(
     existingDoc?.logoUrl ? { uri: resolveImg(existingDoc.logoUrl), raw: existingDoc.logoUrl } : null
   );
+  const [savedModal, setSavedModal] = useState(false);
+  const [savedArgs, setSavedArgs]   = useState(null);
 
   const updateHelp = (idx, val) => {
     const updated = [...helpTypes];
@@ -181,9 +184,8 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
         }).catch(() => {});
       }
 
-      if (onSubmitSuccess) { onSubmitSuccess(effectiveUserId, createdToken); return; }
-      Alert.alert('✅ Profile saved!', `${orgName} is now live.`);
-      navigation?.goBack();
+      setSavedArgs({ effectiveUserId, createdToken });
+      setSavedModal(true);
     } catch (e) {
       console.error('UploadNonprofit error:', e);
       Alert.alert('Error', 'Something went wrong. Please try again.');
@@ -191,6 +193,7 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
   };
 
   return (
+    <>
     <View style={{ flex: 1, backgroundColor: '#fff', paddingTop: insets.top }}>
       {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
       {/* Header */}
@@ -329,6 +332,20 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
       </View>
       </ScrollView>
     </View>
+    <SaveConfirmationModal
+      visible={savedModal}
+      title="Profile Saved!"
+      message={`${orgName} is now live.`}
+      onClose={() => {
+        setSavedModal(false);
+        if (onSubmitSuccess && savedArgs) {
+          onSubmitSuccess(savedArgs.effectiveUserId, savedArgs.createdToken);
+          return;
+        }
+        navigation?.goBack();
+      }}
+    />
+    </>
   );
 }
 

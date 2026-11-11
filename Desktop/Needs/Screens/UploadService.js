@@ -12,6 +12,7 @@ import { UserContext } from '../server/CurrentUser';
 import { authFetch } from '../server/api';
 import { NODE_API } from '../config';
 import { IS_WEB, WEB_HEADER_HEIGHT } from '../webLayout';
+import SaveConfirmationModal from './SaveConfirmationModal';
 
 export const SERVICE_CATEGORY_GROUPS = [
   { group: 'Home Services',         items: ['Plumber', 'Electrician', 'HVAC', 'Handyman', 'House Cleaning', 'Landscaping', 'Lawn Care', 'Painter', 'Carpentry', 'Moving', 'Junk Removal', 'Pest Control', 'Carpet & Upholstery Cleaning', 'Pressure Washing', 'Window Cleaning', 'Pool Service', 'Appliance Repair', 'Garage Door Service', 'Locksmith'] },
@@ -536,6 +537,7 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
   const existingDoc = route?.params?.existingDoc || null;
 
   // ── Basic Info ──────────────────────────────────────────────
+  const [savedModal, setSavedModal]       = useState(null);
   const [businessName, setBusinessName]   = useState(existingDoc?.businessName || '');
   const [providerName, setProviderName]   = useState(existingDoc?.providerName || ''); // "John's Plumbing" vs "John Smith"
   const [category, setCategory]           = useState(initialCategory || existingDoc?.category || '');
@@ -719,23 +721,11 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
       // portfolio photo if one isn't already set — see setProfilePictureIfMissing.
 
       if (editMode) {
-        Alert.alert('✅ Profile updated!', `${businessName} has been saved.`);
-        if (onSubmitSuccess) onSubmitSuccess(effectiveUserId, createdToken);
-        else navigation?.goBack();
+        setSavedModal({ title: '✅ Profile Updated!', message: `${businessName} has been saved.`, effectiveUserId, createdToken, isEdit: true });
         return;
       }
 
-      Alert.alert('✅ Service uploaded!', `${businessName} is now live.`);
-      if (onSubmitSuccess) { onSubmitSuccess(effectiveUserId, createdToken); return; }
-      // Reset (create flow only)
-      setBusinessName(''); setProviderName(''); setCategory(''); setTagline('');
-      setDescription(''); setServiceArea(''); setBusinessAddress(''); setZipcode('');
-      setPhone(''); setWebsite('');
-      setAvailability('');
-      setResponseTime(''); setPortfolioImages([]); setLicensed(null);
-      setLicenseNumber(''); setInsured(null); setBonded(null); setCertifications('');
-      setServices([{ name: '' }, { name: '' }, { name: '' }]);
-      setPricingDetails({});
+      setSavedModal({ title: '✅ Service Uploaded!', message: `${businessName} is now live.`, effectiveUserId, createdToken, isEdit: false });
     } catch (err) {
       console.error(err);
       Alert.alert('Upload failed', err.message || 'Something went wrong.');
@@ -744,7 +734,23 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
 
   const handleBack = onBack || (navigation ? () => navigation.goBack() : null);
 
+  const closeSavedModal = () => {
+    const info = savedModal;
+    setSavedModal(null);
+    if (onSubmitSuccess) { onSubmitSuccess(info.effectiveUserId, info.createdToken); return; }
+    if (info.isEdit) { navigation?.goBack(); return; }
+    setBusinessName(''); setProviderName(''); setCategory(''); setTagline('');
+    setDescription(''); setServiceArea(''); setBusinessAddress(''); setZipcode('');
+    setPhone(''); setWebsite('');
+    setAvailability('');
+    setResponseTime(''); setPortfolioImages([]); setLicensed(null);
+    setLicenseNumber(''); setInsured(null); setBonded(null); setCertifications('');
+    setServices([{ name: '' }, { name: '' }, { name: '' }]);
+    setPricingDetails({});
+  };
+
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       {IS_WEB && <View style={{ height: WEB_HEADER_HEIGHT }} />}
       {!!handleBack && (
@@ -942,6 +948,13 @@ export default function UploadService({ route, navigation, onSubmitSuccess, onBa
 
       <View style={{ height: 40 }} />
     </ScrollView>
+    <SaveConfirmationModal
+      visible={!!savedModal}
+      title={savedModal?.title}
+      message={savedModal?.message}
+      onClose={closeSavedModal}
+    />
+    </>
   );
 }
 

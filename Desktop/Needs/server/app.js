@@ -2265,13 +2265,15 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
       userId = result.insertedId;
     }
 
-    const service = pending.businessType === 'service'
+    const businessDoc = pending.businessType === 'service'
       ? await database.collection('Services').findOne({ _id: pending.businessId })
+      : pending.businessType === 'nonprofit'
+      ? await database.collection('Nonprofits').findOne({ _id: pending.businessId })
       : null;
 
-    if (service?.userId) {
+    if (businessDoc?.userId) {
       await database.collection('Notifications').insertOne({
-        userId: service.userId,
+        userId: businessDoc.userId,
         fromUserId: userId,
         type: 'module_question',
         title: '💬 New Question',
@@ -2279,6 +2281,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
         question: pending.question,
         askerEmail: pending.email,
         businessId: pending.businessId,
+        businessType: pending.businessType,
         trackingKey: pending.trackingKey || null,
         read: false,
         answered: false,
@@ -2412,7 +2415,7 @@ app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => 
       : (doc.businessName || doc.providerName);
     const trimmedQuestion = String(question).slice(0, 1000);
 
-    if (type === 'service' && doc.userId) {
+    if ((type === 'service' || type === 'nonprofit') && doc.userId) {
       await db.collection('Notifications').insertOne({
         userId: doc.userId,
         fromUserId: new ObjectId(req.userId),
@@ -2421,6 +2424,7 @@ app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => 
         body: trimmedQuestion,
         question: trimmedQuestion,
         businessId: doc._id,
+        businessType: type,
         read: false,
         answered: false,
         createdAt: new Date(),
@@ -2450,15 +2454,20 @@ app.get('/m/:slug/myRequests', requireAuthAnyScope, async (req, res) => {
   try {
     const { slug } = req.params;
     const db = client.db('Need');
-    const service = await db.collection('Services').findOne({ slug });
-    if (!service) return res.status(404).json({ error: 'Module not found' });
+    let business = await db.collection('Services').findOne({ slug });
+    let businessType = 'service';
+    if (!business) { business = await db.collection('Nonprofits').findOne({ slug }); businessType = 'nonprofit'; }
+    if (!business) return res.status(404).json({ error: 'Module not found' });
 
-    const quotes = await db.collection('ServiceQuotes')
-      .find({ userId: new ObjectId(req.userId), serviceId: service._id })
-      .sort({ createdAt: -1 }).limit(5).toArray();
+    // Only services ever have quotes - nonprofits do not take them at all.
+    const quotes = businessType === 'service'
+      ? await db.collection('ServiceQuotes')
+          .find({ userId: new ObjectId(req.userId), serviceId: business._id })
+          .sort({ createdAt: -1 }).limit(5).toArray()
+      : [];
 
     const questions = await db.collection('Notifications')
-      .find({ fromUserId: new ObjectId(req.userId), businessId: service._id, type: 'module_question' })
+      .find({ fromUserId: new ObjectId(req.userId), businessId: business._id, type: 'module_question' })
       .sort({ createdAt: -1 }).limit(5).toArray();
 
     res.json({
@@ -2495,8 +2504,15 @@ app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
     if (!notification) return res.status(404).json({ error: 'Notification not found' });
     if (notification.userId.toString() !== req.userId) return res.status(403).json({ error: 'Not authorized' });
 
-    const service = await database.collection('Services').findOne({ _id: notification.businessId });
-    const businessName = service?.businessName || service?.providerName || 'The business';
+    // businessType was only added to new Notifications going forward -
+    // every notification that existed before this field was added is a
+    // service (the only type that ever got an in-app Notification until
+    // nonprofits were added too), so defaulting to Services keeps those
+    // working exactly as before.
+    const businessDoc = notification.businessType === 'nonprofit'
+      ? await database.collection('Nonprofits').findOne({ _id: notification.businessId })
+      : await database.collection('Services').findOne({ _id: notification.businessId });
+    const businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'The business';
 
     await database.collection('Notifications').updateOne(
       { _id: notification._id },

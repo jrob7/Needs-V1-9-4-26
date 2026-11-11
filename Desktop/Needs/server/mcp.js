@@ -137,11 +137,14 @@ function buildServer({ client, NODE_API, userId }) {
     inputSchema: {
       slug: z.string().describe('The business slug'),
       description: z.string().describe('A description of what the visitor needs, in their own words'),
+      name: userId
+        ? z.string().optional().describe('Not needed - the request is sent as the authenticated user')
+        : z.string().describe("The visitor's first name, so the business can address them by name"),
       email: userId
         ? z.string().email().optional().describe('Not needed - the request is sent as the authenticated user')
         : z.string().email().describe("The visitor's email address - they must confirm via a link sent there before this is sent to the business"),
     },
-  }, async ({ slug, description, email }) => {
+  }, async ({ slug, description, name, email }) => {
     const db = client.db('Need');
     const service = await db.collection('Services').findOne({ slug }, { projection: { _id: 1 } });
     if (!service) return errorText('Business not found (or is a restaurant, which does not take quote requests)');
@@ -161,10 +164,11 @@ function buildServer({ client, NODE_API, userId }) {
     }
 
     if (!email) return errorText('email is required when not authenticated.');
+    if (!name) return errorText('name is required when not authenticated.');
     const resp = await fetch(`${NODE_API}/requestQuote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ businessId: service._id.toString(), description, email }),
+      body: JSON.stringify({ businessId: service._id.toString(), description, email, firstName: name }),
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
@@ -182,11 +186,14 @@ function buildServer({ client, NODE_API, userId }) {
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),
+      name: userId
+        ? z.string().optional().describe('Not needed - the question is sent as the authenticated user')
+        : z.string().describe("The visitor's first name, so the business can address them by name"),
       email: userId
         ? z.string().email().optional().describe('Not needed - the question is sent as the authenticated user')
         : z.string().email().describe("The visitor's email address"),
     },
-  }, async ({ slug, question, email }) => {
+  }, async ({ slug, question, name, email }) => {
     if (userId) {
       const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/authedAskBusiness`, {
         method: 'POST',
@@ -202,10 +209,11 @@ function buildServer({ client, NODE_API, userId }) {
     }
 
     if (!email) return errorText('email is required when not authenticated.');
+    if (!name) return errorText('name is required when not authenticated.');
     const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/askBusiness`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, email }),
+      body: JSON.stringify({ question, email, firstName: name }),
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the question');

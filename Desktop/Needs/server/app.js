@@ -2192,10 +2192,13 @@ app.post('/m/:slug/chat', async (req, res) => {
 app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
     const { slug } = req.params;
-    const { question, email } = req.body || {};
+    const { question, email, firstName } = req.body || {};
     if (!question) return res.status(400).json({ error: 'question required' });
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ error: 'A valid email is required' });
+    }
+    if (!firstName || !String(firstName).trim()) {
+      return res.status(400).json({ error: 'A first name is required' });
     }
 
     const db = client.db('Need');
@@ -2216,7 +2219,9 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
     const trackingKey = crypto.randomBytes(16).toString('hex');
     await db.collection('PendingModuleQuestions').insertOne({
       slug, businessId: doc._id, businessType: type, businessName,
-      question: String(question).slice(0, 1000), email, token, trackingKey,
+      question: String(question).slice(0, 1000), email,
+      firstName: String(firstName).trim().slice(0, 80),
+      token, trackingKey,
       createdAt: new Date(), confirmedAt: null,
     });
 
@@ -2278,7 +2283,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
     } else {
       const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
       const result = await database.collection('Users').insertOne({
-        firstName: null, lastName: null, organization: null, email: pending.email,
+        firstName: pending.firstName || null, lastName: null, organization: null, email: pending.email,
         password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
         accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
         cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
@@ -2302,6 +2307,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
         body: pending.question,
         question: pending.question,
         askerEmail: pending.email,
+        askerName: pending.firstName || null,
         businessId: pending.businessId,
         businessType: pending.businessType,
         trackingKey: pending.trackingKey || null,
@@ -2507,6 +2513,7 @@ app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => 
     const trimmedQuestion = String(question).slice(0, 1000);
 
     if ((type === 'service' || type === 'nonprofit') && doc.userId) {
+      const asker = await db.collection('Users').findOne({ _id: new ObjectId(req.userId) }, { projection: { firstName: 1 } });
       await db.collection('Notifications').insertOne({
         userId: doc.userId,
         fromUserId: new ObjectId(req.userId),
@@ -2514,6 +2521,7 @@ app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => 
         title: '💬 New Question',
         body: trimmedQuestion,
         question: trimmedQuestion,
+        askerName: asker?.firstName || null,
         businessId: doc._id,
         businessType: type,
         read: false,
@@ -2907,6 +2915,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         '<button class="opt-btn" id="opt-login" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#1a1a1a;color:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Login / Sign Up</button>' +
       '</div>' +
       '<div id="guest-form" style="display:none;">' +
+        '<input class="contact-field" id="cf-first-name" type="text" placeholder="First name">' +
         '<input class="contact-field" id="cf-email" type="email" placeholder="Email address">' +
         '<button class="contact-submit" id="cf-submit">Send</button>' +
         '<p class="contact-note">We will email you a confirmation link before anything is sent.</p>' +
@@ -2994,12 +3003,14 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     });
 
     document.getElementById('cf-submit').addEventListener('click', function() {
+      var firstName = document.getElementById('cf-first-name').value.trim();
       var email = document.getElementById('cf-email').value.trim();
+      if (!firstName) { alert('Please enter your first name.'); return; }
       if (!email) { alert('Please enter your email.'); return; }
       this.disabled = true;
       this.textContent = 'Sending…';
-      var body = Object.assign({ email: email }, bodyExtra);
-      mlog('POST ' + endpoint + ' (guest)', { email: email });
+      var body = Object.assign({ firstName: firstName, email: email }, bodyExtra);
+      mlog('POST ' + endpoint + ' (guest)', { firstName: firstName, email: email });
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4985,12 +4996,12 @@ function renderConversationPage(businessName, messages, trackingKey) {
 </html>`;
 }
 
-// POST /requestQuote — body: { businessId, description, email }
+// POST /requestQuote — body: { businessId, description, email, firstName }
 app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
-    const { businessId, description, email } = req.body || {};
-    if (!businessId || !description || !email) {
-      return res.status(400).json({ error: 'businessId, description, and email are required' });
+    const { businessId, description, email, firstName } = req.body || {};
+    if (!businessId || !description || !email || !firstName) {
+      return res.status(400).json({ error: 'businessId, description, email, and firstName are required' });
     }
     if (!ObjectId.isValid(businessId)) return res.status(400).json({ error: 'Invalid businessId' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
@@ -5009,6 +5020,7 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
       serviceId: new ObjectId(businessId),
       description: String(description).slice(0, 2000),
       email,
+      firstName: String(firstName).trim().slice(0, 80),
       token,
       trackingKey,
       createdAt: new Date(),
@@ -5094,7 +5106,7 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
       const randomPassword = crypto.randomBytes(16).toString('hex');
       const hashedPassword = await bcrypt.hash(randomPassword, 12);
       const result = await database.collection('Users').insertOne({
-        firstName: null, lastName: null, organization: null, email: pending.email,
+        firstName: pending.firstName || null, lastName: null, organization: null, email: pending.email,
         password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
         accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
         cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
@@ -5411,12 +5423,14 @@ app.post('/triggerServiceMatching', async (req, res) => {
       // double opt-in flow, no app login) so business-side screens know not
       // to assume in-app messaging/scheduling is possible for this lead.
       let isGuestLead = false;
+      let requesterName = null;
       if (ObjectId.isValid(String(userId))) {
         const requesterDoc = await database.collection('Users').findOne(
           { _id: new ObjectId(String(userId)) },
-          { projection: { createdViaAgent: 1 } }
+          { projection: { createdViaAgent: 1, firstName: 1 } }
         );
         isGuestLead = !!requesterDoc?.createdViaAgent;
+        requesterName = requesterDoc?.firstName || null;
       }
 
       // 1. Mark finding_matches
@@ -5498,6 +5512,7 @@ app.post('/triggerServiceMatching', async (req, res) => {
               needText: query,
               status: 'pending_business',
               isGuestLead,
+              requesterName,
               createdAt: new Date(),
             };
             const inserted = await database.collection('ServiceQuotes').insertOne(quoteDoc);
@@ -5519,6 +5534,7 @@ app.post('/triggerServiceMatching', async (req, res) => {
                 subService: qData.subService || null,
                 businessName: serviceDoc.businessName,
                 isGuestLead,
+                requesterName,
                 read: false,
                 createdAt: new Date(),
               });
@@ -5534,6 +5550,7 @@ app.post('/triggerServiceMatching', async (req, res) => {
                 body: `"${(query || '').slice(0, 80)}"`,
                 needId: needObjId,
                 needText: query,
+                requesterName,
                 read: false,
                 createdAt: new Date(),
               });

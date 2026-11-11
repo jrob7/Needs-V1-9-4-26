@@ -124,6 +124,7 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
   const cfg = NOTIF_ICONS.lead;
   const pic = item.fromPic ? resolveImg(item.fromPic) : null;
   const infoRequested = !!item.infoRequested;
+  const title = (item.title || 'New service request') + (item.requesterName ? ` from ${item.requesterName}` : '');
   return (
     <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
       {pic
@@ -138,7 +139,7 @@ const LeadNotifRow = ({ item, onRespond, onRequestMoreInfo, requestingInfo }) =>
       }
       <View style={styles.rowContent}>
         <View style={styles.rowTop}>
-          <Text style={styles.rowTitle} numberOfLines={1}>{item.title || 'New service request'}</Text>
+          <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
           <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
         </View>
         <Text style={styles.rowBody}>{item.body}</Text>
@@ -232,6 +233,7 @@ const QuoteRequestRow = ({ item, onRespond, onAsk, requestingInfo }) => {
   const cfg = NOTIF_ICONS.quote_request;
   const hasEstimate = item.estimateMin != null && item.estimateMax != null;
   const askDone = item.infoRequested;
+  const title = `⚡ New Quote Request${item.requesterName ? ` from ${item.requesterName}` : ''}`;
 
   return (
     <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
@@ -240,7 +242,7 @@ const QuoteRequestRow = ({ item, onRespond, onAsk, requestingInfo }) => {
       </View>
       <View style={styles.rowContent}>
         <View style={styles.rowTop}>
-          <Text style={styles.rowTitle} numberOfLines={1}>{item.title || '⚡ New Quote Request'}</Text>
+          <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
           <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
         </View>
         <Text style={styles.rowBody}>{item.body}</Text>
@@ -491,7 +493,10 @@ const ModuleQuestionRow = ({ item, onRespond }) => {
   const latest = item.messages?.length ? item.messages[item.messages.length - 1] : null;
   const needsReply = item.needsReply !== false;
   const isFollowUp = needsReply && item.messages?.length > 1 && latest?.from === 'guest';
-  const title = needsReply ? (isFollowUp ? '💬 New Reply' : (item.title || '💬 New Question')) : '✓ You Replied';
+  const name = item.askerName || null;
+  const title = needsReply
+    ? (isFollowUp ? `💬 New Reply${name ? ` from ${name}` : ''}` : (item.title || '💬 New Question') + (name ? ` from ${name}` : ''))
+    : '✓ You Replied';
   const previewText = latest ? latest.text : (item.question || item.body);
   const previewPrefix = latest?.from === 'org' ? 'You: ' : '';
   return (
@@ -506,11 +511,11 @@ const ModuleQuestionRow = ({ item, onRespond }) => {
         </View>
         <Text style={styles.rowBody}>{previewPrefix}{previewText}</Text>
         {!needsReply ? (
-          <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>Waiting on customer</Text>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>Waiting on {name || 'customer'}</Text>
         ) : (
           <>
             {isFollowUp && (
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#DB2777', marginTop: 6 }}>🔔 New message received</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#DB2777', marginTop: 6 }}>🔔 New message{name ? ` from ${name}` : ' received'}</Text>
             )}
             <View style={styles.leadButtonsRow}>
               <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onRespond(item)}>

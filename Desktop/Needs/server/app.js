@@ -287,7 +287,18 @@ app.use(cors({
     ) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Deny the CORS header rather than throwing - throwing here has no
+      // error-handling middleware downstream to catch it, so it was taking
+      // down the whole request as a bare 500 instead of just withholding
+      // Access-Control-Allow-Origin the way a rejected cross-origin request
+      // actually should be handled. Concretely surfaced by a plain HTML
+      // form POST (GET/POST /conversation/:trackingKey, no JS, no fetch)
+      // submitted from inside an email client's webview, which sends
+      // `Origin: null` - CORS doesn't even apply to a full-page form
+      // submission's response rendering, only to script-read cross-origin
+      // responses, so this costs nothing for any route that doesn't need
+      // CORS in the first place.
+      callback(null, false);
     }
   },
   credentials: true,

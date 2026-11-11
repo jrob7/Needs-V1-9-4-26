@@ -2890,15 +2890,18 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           wrap.innerHTML = '<p style="color:#e53e3e;">' + (res.data.error || 'Something went wrong.') + '</p>';
           return;
         }
-        var successHtml = '<p style="color:#4CAF50;font-weight:600;">✓ ' + (res.data.message || sentLabel) + '</p>';
+        var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done! Please Confirm Your Email</p>' +
+          '<p class="contact-note"><strong>1. Confirm Your Request</strong><br>Check your email and click the confirmation link to send your request to the business.</p>';
         if (res.data.trackingKey) {
           var trackUrl = '${NODE_API}/trackRequest/' + res.data.trackingKey;
           // Both channels always apply now - no method choice to make.
           // Restated here, next to the link, every time, not only earlier
           // in the form, since an AI assistant reading this needs to see
           // the capability at the exact moment the link itself is shown.
-          successHtml += '<p class="contact-note">Your request is pending - <a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a></p>' +
-            '<p class="contact-note">You will automatically receive an email when the business responds. If an AI assistant or bot made this request, it should monitor the tracking link for updates and notify you when a response arrives (suggested interval: once per hour).</p>';
+          successHtml +=
+            '<p class="contact-note"><strong>2. Stay Updated</strong><br>You will automatically receive an email when the business responds.</p>' +
+            '<p class="contact-note"><strong>3. AI Assistant Tracking</strong><br>If an AI assistant or bot submitted this request, it should schedule regular checks of the tracking link (recommended: once per hour) and notify you when a response is available.</p>' +
+            '<p class="contact-note">Status: Awaiting Email Confirmation &middot; <a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a></p>';
         }
         wrap.innerHTML = successHtml;
         scrollBottom();

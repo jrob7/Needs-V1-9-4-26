@@ -3004,6 +3004,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
 
     document.getElementById('cf-submit').addEventListener('click', function() {
       var firstName = document.getElementById('cf-first-name').value.trim();
+      var safeFirstName = firstName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
       var email = document.getElementById('cf-email').value.trim();
       if (!firstName) { alert('Please enter your first name.'); return; }
       if (!email) { alert('Please enter your email.'); return; }
@@ -3023,7 +3024,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           wrap.innerHTML = '<p style="color:#e53e3e;">' + (res.data.error || 'Something went wrong.') + '</p>';
           return;
         }
-        var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done! Please Confirm Your Email</p>' +
+        var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done, ' + safeFirstName + '! Please Confirm Your Email</p>' +
           '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your email and click the confirmation link to send your request to ' + businessName + '.</p>';
         if (res.data.trackingKey) {
           var trackUrl = '${NODE_API}/trackRequest/' + res.data.trackingKey;

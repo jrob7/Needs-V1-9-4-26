@@ -363,13 +363,26 @@ const styles = StyleSheet.create({
   chipText:       { fontSize: IS_WEB ? 18 : 13, color: '#374151', fontWeight: '600' },
   chipTextActive: { color: '#fff' },
 
-  logoPicker: { alignSelf: 'center', marginBottom: 8 },
-  logoPreview: { width: IS_WEB ? 420 : 130, height: IS_WEB ? 420 : 130, borderRadius: 24, borderWidth: 2, borderColor: '#7C3AED' },
-  logoPlaceholder: {
-    width: IS_WEB ? 420 : 130, height: IS_WEB ? 420 : 130, borderRadius: 24,
-    borderWidth: 2, borderColor: '#D1D5DB', borderStyle: 'dashed',
-    alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB',
-  },
+  // On web this mirrors the live module page's own hero treatment exactly
+  // (server/app.js .logo-wrap: full width, fixed 260px height, dark
+  // background, object-fit contain) so the edit screen is an accurate
+  // preview of what visitors actually see, instead of a square crop that
+  // letterboxes any wide/banner-shaped photo.
+  logoPicker: IS_WEB ? { width: '100%', marginBottom: 8 } : { alignSelf: 'center', marginBottom: 8 },
+  logoPreview: IS_WEB
+    ? { width: '100%', height: 260, borderRadius: 16, borderWidth: 2, borderColor: '#7C3AED', backgroundColor: '#0F172A' }
+    : { width: 130, height: 130, borderRadius: 24, borderWidth: 2, borderColor: '#7C3AED' },
+  logoPlaceholder: IS_WEB
+    ? {
+        width: '100%', height: 260, borderRadius: 16,
+        borderWidth: 2, borderColor: '#D1D5DB', borderStyle: 'dashed',
+        alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB',
+      }
+    : {
+        width: 130, height: 130, borderRadius: 24,
+        borderWidth: 2, borderColor: '#D1D5DB', borderStyle: 'dashed',
+        alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB',
+      },
   logoPlaceholderText: { fontSize: IS_WEB ? 16 : 12, color: '#9CA3AF', marginTop: 6, textAlign: 'center' },
 
   submitBtn: {

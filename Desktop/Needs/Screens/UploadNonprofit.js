@@ -1,5 +1,5 @@
 // Screens/UploadNonprofit.js
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, createElement } from 'react';
 import {
   View, Text, TextInput, StyleSheet, ScrollView,
   Image, Alert, TouchableOpacity,
@@ -210,7 +210,17 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
         <Text style={styles.sectionLabel}>Organization Logo</Text>
         <TouchableOpacity style={styles.logoPicker} onPress={pickLogo}>
           {logoImage ? (
-            <Image source={{ uri: logoImage.uri }} style={styles.logoPreview} resizeMode="contain" />
+            IS_WEB
+              // A fixed-size <Image> with resizeMode="contain" always
+              // letterboxes unless the box happens to match the photo's own
+              // aspect ratio. A plain <img> left to its natural width:100%,
+              // height:auto instead takes on the photo's real shape, same
+              // as the live module page's own .logo-wrap - no gaps, ever.
+              ? createElement('img', {
+                  src: logoImage.uri,
+                  style: { width: '100%', height: 'auto', display: 'block', borderRadius: 16, border: '2px solid #7C3AED' },
+                })
+              : <Image source={{ uri: logoImage.uri }} style={styles.logoPreview} resizeMode="contain" />
           ) : (
             <View style={styles.logoPlaceholder}>
               <Ionicons name="image-outline" size={IS_WEB ? 56 : 36} color="#9CA3AF" />
@@ -363,15 +373,13 @@ const styles = StyleSheet.create({
   chipText:       { fontSize: IS_WEB ? 18 : 13, color: '#374151', fontWeight: '600' },
   chipTextActive: { color: '#fff' },
 
-  // On web this mirrors the live module page's own hero treatment exactly
-  // (server/app.js .logo-wrap: full width, fixed 260px height, dark
-  // background, object-fit contain) so the edit screen is an accurate
-  // preview of what visitors actually see, instead of a square crop that
-  // letterboxes any wide/banner-shaped photo.
+  // On web, once a photo is picked it renders as a plain <img> (see the
+  // JSX) sized by its own natural aspect ratio, same as the live module
+  // page's .logo-wrap - logoPreview below is native-only now. The
+  // placeholder (no photo yet) still needs a fixed box since there is no
+  // image to derive a shape from.
   logoPicker: IS_WEB ? { width: '100%', marginBottom: 8 } : { alignSelf: 'center', marginBottom: 8 },
-  logoPreview: IS_WEB
-    ? { width: '100%', height: 260, borderRadius: 16, borderWidth: 2, borderColor: '#7C3AED', backgroundColor: '#0F172A' }
-    : { width: 130, height: 130, borderRadius: 24, borderWidth: 2, borderColor: '#7C3AED' },
+  logoPreview: { width: 130, height: 130, borderRadius: 24, borderWidth: 2, borderColor: '#7C3AED' },
   logoPlaceholder: IS_WEB
     ? {
         width: '100%', height: 260, borderRadius: 16,

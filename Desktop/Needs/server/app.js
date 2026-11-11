@@ -3496,8 +3496,8 @@ app.get('/m/:slug', async (req, res) => {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; color: #0F172A; }
     .page { max-width: 750px; margin: 0 auto; background: #fff; min-height: 100vh; }
-    .logo-wrap { width: 100%; height: 260px; background: #0F172A; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    .logo-wrap img { width: 100%; height: 100%; object-fit: contain; }
+    .logo-wrap { width: 100%; line-height: 0; }
+    .logo-wrap img { width: 100%; height: auto; display: block; }
     .header { padding: 20px 16px 4px; }
     .badge-row { margin-bottom: 10px; }
     .badge { display: inline-block; background: #DCFCE7; border-radius: 20px; padding: 4px 12px; font-size: .8rem; font-weight: 700; color: #166534; margin-right: 6px; }

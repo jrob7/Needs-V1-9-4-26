@@ -489,8 +489,11 @@ const RescheduleRequestRow = ({ item, onRespond }) => (
 
 const ModuleQuestionRow = ({ item, onRespond }) => {
   const latest = item.messages?.length ? item.messages[item.messages.length - 1] : null;
-  const isFollowUp = item.needsReply !== false && item.messages?.length > 1 && latest?.from === 'guest';
+  const needsReply = item.needsReply !== false;
+  const isFollowUp = needsReply && item.messages?.length > 1 && latest?.from === 'guest';
+  const title = needsReply ? (isFollowUp ? '💬 New Reply' : (item.title || '💬 New Question')) : '✓ You Replied';
   const previewText = latest ? latest.text : (item.question || item.body);
+  const previewPrefix = latest?.from === 'org' ? 'You: ' : '';
   return (
     <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
       <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
@@ -498,18 +501,23 @@ const ModuleQuestionRow = ({ item, onRespond }) => {
       </View>
       <View style={styles.rowContent}>
         <View style={styles.rowTop}>
-          <Text style={styles.rowTitle} numberOfLines={1}>{isFollowUp ? '💬 New Reply' : (item.title || '💬 New Question')}</Text>
+          <Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
           <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
         </View>
-        <Text style={styles.rowBody}>{previewText}</Text>
-        {item.needsReply === false ? (
-          <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>✓ Replied — waiting on customer</Text>
+        <Text style={styles.rowBody}>{previewPrefix}{previewText}</Text>
+        {!needsReply ? (
+          <Text style={{ fontSize: 12, fontWeight: '700', color: '#15803D', marginTop: 6 }}>Waiting on customer</Text>
         ) : (
-          <View style={styles.leadButtonsRow}>
-            <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onRespond(item)}>
-              <Text style={styles.respondBtnText}>{item.answered ? 'Reply' : 'Answer'}</Text>
-            </TouchableOpacity>
-          </View>
+          <>
+            {isFollowUp && (
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#DB2777', marginTop: 6 }}>🔔 New message received</Text>
+            )}
+            <View style={styles.leadButtonsRow}>
+              <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#7C3AED' }]} onPress={() => onRespond(item)}>
+                <Text style={styles.respondBtnText}>{item.answered ? 'Reply' : 'Answer'}</Text>
+              </TouchableOpacity>
+            </View>
+          </>
         )}
       </View>
       {!item.read && <View style={styles.unreadDot} />}

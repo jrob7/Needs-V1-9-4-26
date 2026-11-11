@@ -327,48 +327,49 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
   },
   backBtn: { marginRight: 10, padding: 4 },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: '#111' },
+  headerTitle: { fontSize: IS_WEB ? 22 : 18, fontWeight: '800', color: '#111' },
 
-  body: { paddingHorizontal: 20, paddingTop: 20 },
+  body: { paddingHorizontal: IS_WEB ? 32 : 20, paddingTop: 20, ...(IS_WEB ? { maxWidth: 720, width: '100%', alignSelf: 'center' } : {}) },
 
   sectionLabel: {
-    fontSize: 13, fontWeight: '700', color: '#7C3AED',
+    fontSize: IS_WEB ? 15 : 13, fontWeight: '700', color: '#7C3AED',
     letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 20, marginBottom: 8,
   },
-  fieldLabel: { fontSize: 14, fontWeight: '700', color: '#374151', marginTop: 18, marginBottom: 6 },
-  fieldHint:  { fontSize: 12, color: '#6B7280', marginBottom: 8, marginTop: -4 },
+  fieldLabel: { fontSize: IS_WEB ? 17 : 14, fontWeight: '700', color: '#374151', marginTop: 18, marginBottom: 6 },
+  fieldHint:  { fontSize: IS_WEB ? 14 : 12, color: '#6B7280', marginBottom: 8, marginTop: -4 },
 
   fieldWrap: { marginTop: 14 },
   input: {
     borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 15, color: '#111', backgroundColor: '#FAFAFA',
+    paddingHorizontal: 14, paddingVertical: IS_WEB ? 14 : 12,
+    fontSize: IS_WEB ? 17 : 15, color: '#111', backgroundColor: '#FAFAFA',
     marginBottom: 4,
   },
   inputMulti: { minHeight: 80, textAlignVertical: 'top' },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
   chip: {
-    paddingHorizontal: 14, paddingVertical: 8,
+    paddingHorizontal: IS_WEB ? 20 : 14, paddingVertical: IS_WEB ? 10 : 8,
     borderRadius: 20, borderWidth: 1.5, borderColor: '#D1D5DB',
     backgroundColor: '#F9FAFB',
   },
   chipActive:     { backgroundColor: '#7C3AED', borderColor: '#7C3AED' },
-  chipText:       { fontSize: 13, color: '#374151', fontWeight: '600' },
+  chipText:       { fontSize: IS_WEB ? 16 : 13, color: '#374151', fontWeight: '600' },
   chipTextActive: { color: '#fff' },
 
   logoPicker: { alignSelf: 'center', marginBottom: 8 },
-  logoPreview: { width: 130, height: 130, borderRadius: 16, borderWidth: 2, borderColor: '#7C3AED' },
+  logoPreview: { width: IS_WEB ? 170 : 130, height: IS_WEB ? 170 : 130, borderRadius: 16, borderWidth: 2, borderColor: '#7C3AED' },
   logoPlaceholder: {
-    width: 130, height: 130, borderRadius: 16,
+    width: IS_WEB ? 170 : 130, height: IS_WEB ? 170 : 130, borderRadius: 16,
     borderWidth: 2, borderColor: '#D1D5DB', borderStyle: 'dashed',
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB',
   },
-  logoPlaceholderText: { fontSize: 12, color: '#9CA3AF', marginTop: 6, textAlign: 'center' },
+  logoPlaceholderText: { fontSize: IS_WEB ? 14 : 12, color: '#9CA3AF', marginTop: 6, textAlign: 'center' },
 
   submitBtn: {
     backgroundColor: '#7C3AED', borderRadius: 14,
-    paddingVertical: 16, alignItems: 'center', marginTop: 30,
+    paddingVertical: IS_WEB ? 18 : 16, alignItems: 'center', marginTop: 30,
+    ...(IS_WEB ? { maxWidth: 320, width: '100%', alignSelf: 'center' } : {}),
   },
   submitText: { color: '#fff', fontSize: 17, fontWeight: '800' },
 });

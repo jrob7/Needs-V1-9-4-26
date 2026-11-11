@@ -40,6 +40,7 @@ const NOTIF_ICONS = {
   match:         { name: 'git-network',          color: '#8B5CF6', bg: '#F5F3FF' },
   lead:          { name: 'briefcase',            color: '#2563EB', bg: '#EFF6FF' },
   quote_request: { name: 'document-text-outline', color: '#0EA5E9', bg: '#F0F9FF' },
+  org_request:   { name: 'mail',                 color: '#DB2777', bg: '#FDF2F8' },
   activity:      { name: 'flash',                color: '#F59E0B', bg: '#FFFBEB' },
   update:        { name: 'megaphone',            color: '#10B981', bg: '#ECFDF5' },
   transaction:   { name: 'cash',                color: '#10B981', bg: '#ECFDF5' },
@@ -788,6 +789,14 @@ const NotificationsScreen = () => {
           openMatchModal:  String(item.needId), // signals Tab2 to open the modal for this need
         },
       });
+    } else if (item.type === 'org_request' && item.needId) {
+      // Same destination as match, but no matches modal - an org request
+      // was already sent directly to this one organization, there is no
+      // list of candidate matches to show.
+      navigation.navigate('Fill Needs', {
+        screen: 'NeedInquiryView',
+        params: { scrollToNeedId: String(item.needId) },
+      });
     }
   };
 
@@ -848,6 +857,7 @@ const NotificationsScreen = () => {
     if (activeTab === 'Messages') return n.type === 'message';
     if (activeTab === 'Matches')  return n.type === 'match' || n.type === 'lead' || n.type === 'quote_request'
       || n.type === 'connection_request' || n.type === 'connection_accepted'
+      || n.type === 'module_question' || n.type === 'org_request'
       || BUSINESS_QUOTE_TYPES.includes(n.type);
     return true;
   });
@@ -855,7 +865,7 @@ const NotificationsScreen = () => {
   const CONNECTION_TYPES = ['connection_request', 'connection_accepted'];
   const unreadCount    = notifications.filter(n => !n.read).length;
   const messagesCount  = notifications.filter(n => n.type === 'message' && !n.read).length;
-  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request' || CONNECTION_TYPES.includes(n.type) || BUSINESS_QUOTE_TYPES.includes(n.type)) && !n.read).length;
+  const matchesCount   = notifications.filter(n => (n.type === 'match' || n.type === 'lead' || n.type === 'quote_request' || n.type === 'module_question' || n.type === 'org_request' || CONNECTION_TYPES.includes(n.type) || BUSINESS_QUOTE_TYPES.includes(n.type)) && !n.read).length;
   const schedulerCount = appointments.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length;
   // label is just the display text - the Matches key itself stays as-is
   // everywhere else in this file (activeTab checks, fetch triggers, data

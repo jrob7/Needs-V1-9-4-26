@@ -213,7 +213,7 @@ export default function UploadNonprofit({ route, navigation, onSubmitSuccess, on
             <Image source={{ uri: logoImage.uri }} style={styles.logoPreview} resizeMode="contain" />
           ) : (
             <View style={styles.logoPlaceholder}>
-              <Ionicons name="image-outline" size={36} color="#9CA3AF" />
+              <Ionicons name="image-outline" size={IS_WEB ? 56 : 36} color="#9CA3AF" />
               <Text style={styles.logoPlaceholderText}>Tap to upload logo</Text>
             </View>
           )}
@@ -364,9 +364,9 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#fff' },
 
   logoPicker: { alignSelf: 'center', marginBottom: 8 },
-  logoPreview: { width: IS_WEB ? 260 : 130, height: IS_WEB ? 260 : 130, borderRadius: 20, borderWidth: 2, borderColor: '#7C3AED' },
+  logoPreview: { width: IS_WEB ? 420 : 130, height: IS_WEB ? 420 : 130, borderRadius: 24, borderWidth: 2, borderColor: '#7C3AED' },
   logoPlaceholder: {
-    width: IS_WEB ? 260 : 130, height: IS_WEB ? 260 : 130, borderRadius: 20,
+    width: IS_WEB ? 420 : 130, height: IS_WEB ? 420 : 130, borderRadius: 24,
     borderWidth: 2, borderColor: '#D1D5DB', borderStyle: 'dashed',
     alignItems: 'center', justifyContent: 'center', backgroundColor: '#F9FAFB',
   },

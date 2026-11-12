@@ -104,10 +104,10 @@ if (!JWT_SECRET || !REFRESH_SECRET) {
 const ACCESS_TOKEN_TTL  = '30m';
 const REFRESH_TOKEN_TTL = '7d';
 
-function signAccessToken(userId)  { return jwt.sign({ userId }, JWT_SECRET,     { expiresIn: ACCESS_TOKEN_TTL }); }
-function signRefreshToken(userId) { return jwt.sign({ userId }, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }); }
-function signTokens(userId) {
-  return { token: signAccessToken(userId), refreshToken: signRefreshToken(userId) };
+function signAccessToken(userId, tokenVersion)  { return jwt.sign({ userId, tokenVersion }, JWT_SECRET,     { expiresIn: ACCESS_TOKEN_TTL }); }
+function signRefreshToken(userId, tokenVersion) { return jwt.sign({ userId, tokenVersion }, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }); }
+function signTokens(userId, tokenVersion = 0) {
+  return { token: signAccessToken(userId, tokenVersion), refreshToken: signRefreshToken(userId, tokenVersion) };
 }
 
 // Tokens minted for an OAuth-authorized MCP client carry scope: 'mcp' so
@@ -116,17 +116,32 @@ function signTokens(userId) {
 // calls. A token with no scope claim at all (every token issued before this
 // existed, and everything /login/createUser/web-handoff still issue today)
 // is treated as full access, unchanged from before this existed.
-function signMcpTokens(userId) {
+function signMcpTokens(userId, tokenVersion = 0) {
   return {
-    token: jwt.sign({ userId, scope: 'mcp' }, JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL }),
-    refreshToken: jwt.sign({ userId, scope: 'mcp' }, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }),
+    token: jwt.sign({ userId, tokenVersion, scope: 'mcp' }, JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL }),
+    refreshToken: jwt.sign({ userId, tokenVersion, scope: 'mcp' }, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }),
   };
+}
+
+// A token's tokenVersion claim is only ever trustworthy at the moment it was
+// signed - this re-checks it against whatever the user's row says right now,
+// so /account/revokeAllSessions (bumping that row) takes effect on this
+// token's very next use instead of waiting for it to expire naturally.
+// Called directly off `client` rather than the `database` closure variable,
+// since requireAuth/requireAuthAnyScope are defined before client.connect()
+// resolves - same MongoClient, just not routed through that inner constant.
+async function tokenVersionMatches(userId, tokenVersion) {
+  if (!ObjectId.isValid(userId)) return false;
+  const user = await client.db('Need').collection('Users').findOne(
+    { _id: new ObjectId(userId) }, { projection: { tokenVersion: 1 } }
+  );
+  return !!user && (user.tokenVersion || 0) === (tokenVersion || 0);
 }
 
 // Used by every route except the small set an MCP client is meant to reach -
 // rejects an mcp-scoped token outright, same as no token at all. A token
 // with no scope claim (every non-OAuth login path) is unaffected.
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentication required' });
@@ -135,6 +150,9 @@ const requireAuth = (req, res, next) => {
     const payload = jwt.verify(header.split(' ')[1], JWT_SECRET);
     if (payload.scope === 'mcp') {
       return res.status(403).json({ error: 'This token is scoped for MCP use only and cannot access this endpoint' });
+    }
+    if (!(await tokenVersionMatches(payload.userId, payload.tokenVersion))) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
     req.userId = payload.userId;
     next();
@@ -148,13 +166,16 @@ const requireAuth = (req, res, next) => {
 // requireAuth, this accepts an mcp-scoped token in addition to a regular
 // full-access one - the module page's own login modal calls these same two
 // endpoints with a plain /login token, so both must keep working here.
-const requireAuthAnyScope = (req, res, next) => {
+const requireAuthAnyScope = async (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentication required' });
   }
   try {
     const payload = jwt.verify(header.split(' ')[1], JWT_SECRET);
+    if (!(await tokenVersionMatches(payload.userId, payload.tokenVersion))) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
     req.userId = payload.userId;
     next();
   } catch {
@@ -603,7 +624,7 @@ app.post('/login', async (req, res) => {
         return res.status(401).json({ error: 'Invalid password' });
       }
 
-      const { token, refreshToken } = signTokens(user._id.toString());
+      const { token, refreshToken } = signTokens(user._id.toString(), user.tokenVersion || 0);
 
       return res.status(200).json({
         message: 'Login successful',
@@ -663,7 +684,7 @@ app.post('/exchangeWebHandoff', async (req, res) => {
     const user = await database.collection('Users').findOne({ _id: pending.userId });
     if (!user) return res.status(404).json({ error: 'Account not found' });
 
-    const { token: accessToken, refreshToken } = signTokens(pending.userId.toString());
+    const { token: accessToken, refreshToken } = signTokens(pending.userId.toString(), user.tokenVersion || 0);
     res.json({
       token: accessToken,
       refreshToken,
@@ -814,10 +835,32 @@ app.post('/refreshToken', async (req, res) => {
   if (!refreshToken) return res.status(400).json({ error: 'refreshToken required' });
   try {
     const payload = jwt.verify(refreshToken, REFRESH_SECRET);
-    const token = signAccessToken(payload.userId);
+    if (!(await tokenVersionMatches(payload.userId, payload.tokenVersion))) {
+      return res.status(401).json({ error: 'Invalid or expired refresh token' });
+    }
+    const token = signAccessToken(payload.userId, payload.tokenVersion);
     return res.json({ token });
   } catch {
     return res.status(401).json({ error: 'Invalid or expired refresh token' });
+  }
+});
+
+// POST /account/revokeAllSessions — bumps tokenVersion, which invalidates
+// every access/refresh token issued to this account so far (every other
+// device's app session, and any OAuth-authorized MCP/AI client's tokens)
+// on their very next use - the real "sign out everywhere" action, distinct
+// from the existing Sign Out button which only ever clears local storage
+// on the one device it's tapped on.
+app.post('/account/revokeAllSessions', requireAuth, async (req, res) => {
+  try {
+    await database.collection('Users').updateOne(
+      { _id: new ObjectId(req.userId) },
+      { $inc: { tokenVersion: 1 } }
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ /account/revokeAllSessions error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

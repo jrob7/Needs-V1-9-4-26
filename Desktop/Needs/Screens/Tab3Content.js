@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useContext, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  Alert, Image, Animated, Share, Clipboard, Linking,
+  Alert, Image, Animated, Share, Clipboard, Linking, Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -132,6 +132,7 @@ const AccountTabContent = () => {
   const [pendingConnCount, setPendingConnCount] = useState(0);
   const [calendarConnected, setCalendarConnected] = useState(false);
   const [calendarLoading, setCalendarLoading]     = useState(false);
+  const [signOutModalVisible, setSignOutModalVisible] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const isBusiness = ctx.accountType === 'business';
   const isService  = isBusiness && ctx.businessType === 'service';
@@ -260,20 +261,34 @@ const AccountTabContent = () => {
     }, [globalUserId, ctx.accountType, ctx.businessType, fetchPendingCount])
   );
 
-  const handleLogout = async () => {
-    const doLogout = async () => {
-      await AsyncStorage.multiRemove(['userId', 'authToken', 'accountType', 'businessType']);
-      setUserId(null);
-      navigation.navigate('Need');
-    };
+  const signOutThisDevice = async () => {
+    await AsyncStorage.multiRemove(['userId', 'authToken', 'accountType', 'businessType']);
+    setUserId(null);
+    navigation.navigate('Need');
+  };
+
+  // Invalidates every token issued to this account so far (every other
+  // device's session, and any OAuth-authorized MCP/AI client's tokens) -
+  // the real revoke, as opposed to signOutThisDevice which only ever
+  // forgets the token on the device it's tapped on. Must fire the request
+  // before clearing local storage, since it needs this device's
+  // still-valid token to authenticate the call.
+  const signOutAllDevices = async () => {
+    try {
+      await authFetch(`${NODE_API}/account/revokeAllSessions`, { method: 'POST' });
+    } catch {}
+    await signOutThisDevice();
+  };
+
+  const handleLogout = () => {
     if (IS_WEB) {
-      if (!window.confirm('Are you sure you want to sign out?')) return;
-      await doLogout();
+      setSignOutModalVisible(true);
       return;
     }
-    Alert.alert('Sign out', 'Are you sure?', [
+    Alert.alert('Sign Out', 'Choose an option:', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: doLogout },
+      { text: 'Sign Out of This Device', onPress: signOutThisDevice },
+      { text: 'Sign Out of All Devices', style: 'destructive', onPress: signOutAllDevices },
     ]);
   };
 
@@ -576,6 +591,31 @@ const AccountTabContent = () => {
         onClose={() => setVisitModal(false)}
         restaurantDoc={businessDoc}
       />
+      {IS_WEB && (
+        <Modal visible={signOutModalVisible} transparent animationType="fade" onRequestClose={() => setSignOutModalVisible(false)}>
+          <View style={styles.signOutOverlay}>
+            <View style={styles.signOutCard}>
+              <Text style={styles.signOutTitle}>Sign Out</Text>
+              <Text style={styles.signOutSubtitle}>Choose an option:</Text>
+              <TouchableOpacity
+                style={styles.signOutOption}
+                onPress={() => { setSignOutModalVisible(false); signOutThisDevice(); }}
+              >
+                <Text style={styles.signOutOptionText}>Sign Out of This Device</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.signOutOption}
+                onPress={() => { setSignOutModalVisible(false); signOutAllDevices(); }}
+              >
+                <Text style={[styles.signOutOptionText, styles.signOutOptionDestructive]}>Sign Out of All Devices</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.signOutCancel} onPress={() => setSignOutModalVisible(false)}>
+                <Text style={styles.signOutCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
       </View>
     </Animated.ScrollView>
   );
@@ -863,6 +903,18 @@ const styles = StyleSheet.create({
   signedOutSub:    { fontSize: IS_WEB ? 18 : 14, color: '#64748B', marginTop: IS_WEB ? 10 : 8, marginBottom: IS_WEB ? 36 : 28, textAlign: 'center' },
   signInBtn:       { backgroundColor: '#2563EB', paddingHorizontal: IS_WEB ? 42 : 32, paddingVertical: IS_WEB ? 20 : 15, borderRadius: IS_WEB ? 18 : 14 },
   signInBtnText:   { color: '#fff', fontSize: IS_WEB ? 20 : 15, fontWeight: '800', letterSpacing: -0.2 },
+
+  // Sign out (web) - native uses Alert.alert instead, which already
+  // supports a 3-button layout natively.
+  signOutOverlay:  { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'center', alignItems: 'center' },
+  signOutCard:     { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: 360, maxWidth: '90%' },
+  signOutTitle:    { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  signOutSubtitle: { fontSize: 14, color: '#64748B', marginBottom: 18 },
+  signOutOption:   { paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  signOutOptionText: { fontSize: 15, fontWeight: '600', color: '#0F172A', textAlign: 'center' },
+  signOutOptionDestructive: { color: '#DC2626' },
+  signOutCancel:   { paddingVertical: 14, marginTop: 4 },
+  signOutCancelText: { fontSize: 15, fontWeight: '600', color: '#64748B', textAlign: 'center' },
 });
 
 export default AccountTabContent;

@@ -26,6 +26,7 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const { ObjectId } = require('mongodb');
 const { escapeHtml } = require('./htmlEscape');
 
 const AUTH_CODE_TTL_MS = 60 * 1000; // single-use, exchanged almost immediately
@@ -97,7 +98,7 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
       <input class="field" type="password" name="password" placeholder="Password" required>
       <button class="submit" type="submit">Log In &amp; Authorize</button>
     </form>
-    <div class="scope-note">This lets ${safeClientName} request quotes and ask businesses questions as you, skipping the usual email confirmation step. You can revoke access by changing your password.</div>
+    <div class="scope-note">This lets ${safeClientName} request quotes and ask businesses questions as you, skipping the usual email confirmation step. You can revoke access anytime from Account Settings &rarr; Sign Out &rarr; Sign Out of All Devices.</div>
   </div>
 </body>
 </html>`;
@@ -252,7 +253,19 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
         if (!refresh_token) return res.status(400).json({ error: 'invalid_request' });
         try {
           const payload = jwt.verify(refresh_token, process.env.REFRESH_SECRET);
-          const { token, refreshToken } = signTokens(payload.userId);
+          // Never trust the tokenVersion embedded in the token being
+          // refreshed - look up what it is right now, so a revoke
+          // (Sign Out of All Devices) takes effect on this refresh instead
+          // of silently minting another valid pair for an already-revoked
+          // session.
+          if (!ObjectId.isValid(payload.userId)) return res.status(400).json({ error: 'invalid_grant' });
+          const user = await database.collection('Users').findOne(
+            { _id: new ObjectId(payload.userId) }, { projection: { tokenVersion: 1 } }
+          );
+          if (!user || (user.tokenVersion || 0) !== (payload.tokenVersion || 0)) {
+            return res.status(400).json({ error: 'invalid_grant' });
+          }
+          const { token, refreshToken } = signTokens(payload.userId, user.tokenVersion || 0);
           return res.json({ access_token: token, refresh_token: refreshToken, token_type: 'Bearer', expires_in: 1800 });
         } catch {
           return res.status(400).json({ error: 'invalid_grant' });
@@ -288,7 +301,10 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
         return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
       }
 
-      const { token, refreshToken } = signTokens(authCode.userId.toString());
+      const user = await database.collection('Users').findOne(
+        { _id: authCode.userId }, { projection: { tokenVersion: 1 } }
+      );
+      const { token, refreshToken } = signTokens(authCode.userId.toString(), user?.tokenVersion || 0);
       res.json({ access_token: token, refresh_token: refreshToken, token_type: 'Bearer', expires_in: 1800 });
     } catch (err) {
       console.error('❌ /oauth/token error:', err);

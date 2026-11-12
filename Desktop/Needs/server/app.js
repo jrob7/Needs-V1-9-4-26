@@ -704,20 +704,28 @@ app.post('/guestSearchBusinesses', guestSearchLimiter, async (req, res) => {
     });
     if (!actionResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
     const { action } = await actionResp.json();
-    const type = action === 'FIND_RESTAURANT' ? 'food' : (action === 'FIND_SERVICE' ? 'service' : null);
-    if (!type) return res.json({ type: 'item', matches: [] });
+    // FIND_RESTAURANT is unambiguous, but FIND_SERVICE just means "this is
+    // some kind of business/provider search" - nextAction's LLM classifier
+    // has no nonprofit category at all, so forcing type:'service' here would
+    // permanently exclude Nonprofits (and misroute a housing/food-assistance
+    // query into a collection that doesn't have it). findMatches' own
+    // type:"auto" path already has a keyword-weighted classifier that
+    // distinguishes nonprofit/service/food/item - let it make the real call.
+    const requestedType = action === 'FIND_RESTAURANT' ? 'food' : (action === 'FIND_SERVICE' ? 'auto' : null);
+    if (!requestedType) return res.json({ type: 'item', matches: [] });
 
     const flaskResp = await fetch(`${FLASK_API}/ai/findMatches`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        query: trimmedQuery, type,
+        query: trimmedQuery, type: requestedType,
         ...(userLat != null && userLng != null ? { userLat, userLng } : {}),
         ...(userCity ? { userCity } : {}),
       }),
     });
     if (!flaskResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
     const data = await flaskResp.json();
+    const type = data.type || requestedType;
 
     const matches = (data.matches || []).filter(m => m.slug).map(m => (
       type === 'food'
@@ -727,6 +735,14 @@ app.post('/guestSearchBusinesses', guestSearchLimiter, async (req, res) => {
             image: resolveImageUrl(m.coverImageUrl),
             line: m.tagline || (m.cuisine ? `${m.cuisine} restaurant` : ''),
             area: m.address || '',
+          }
+        : type === 'nonprofit'
+        ? {
+            type, slug: m.slug,
+            name: m.orgName || '',
+            image: resolveImageUrl(m.logoUrl),
+            line: m.orgType || (m.description || '').slice(0, 120),
+            area: m.serviceArea || m.address || '',
           }
         : {
             type, slug: m.slug,

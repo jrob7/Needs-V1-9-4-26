@@ -82,12 +82,15 @@ function buildServer({ client, NODE_API, userId }) {
     const rx = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     const max = limit || 10;
 
-    const [services, restaurants] = await Promise.all([
+    const [services, restaurants, nonprofits] = await Promise.all([
       db.collection('Services').find({
         $or: [{ businessName: rx }, { providerName: rx }, { category: rx }, { description: rx }],
       }).limit(max).toArray(),
       db.collection('Restaurants').find({
         $or: [{ name: rx }, { cuisine: rx }, { description: rx }],
+      }).limit(max).toArray(),
+      db.collection('Nonprofits').find({
+        $or: [{ orgName: rx }, { orgType: rx }, { description: rx }],
       }).limit(max).toArray(),
     ]);
 
@@ -99,6 +102,10 @@ function buildServer({ client, NODE_API, userId }) {
       ...restaurants.map(r => ({
         slug: r.slug, type: 'restaurant', name: r.name || '',
         category: r.cuisine || '', area: r.address || '',
+      })),
+      ...nonprofits.map(n => ({
+        slug: n.slug, type: 'nonprofit', name: n.orgName || '',
+        category: n.orgType || '', area: n.serviceArea || n.address || '',
       })),
     ].slice(0, max);
 

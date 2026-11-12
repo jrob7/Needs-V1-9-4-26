@@ -304,7 +304,8 @@ NONPROFIT_KEYWORDS = [
     "temporary housing","transitional housing","emergency housing","affordable housing",
     "housing assistance","rent assistance","eviction","homelessness","homeless",
     "rehab","rehabilitation","addiction treatment","recovery program",
-    "food bank","food assistance","food pantry","meal program","pantry",
+    "food bank","food assistance","food pantry","food pantries","meal program",
+    "pantry","free meals","free meal",
     "church","ministry","congregation","religious service",
     "nonprofit","charity","ngo","community organization",
     "community resource","community services","social services","welfare",
@@ -1084,7 +1085,7 @@ def find_matches():
 
     # ── NONPROFIT ─────────────────────────────────────────────────────────────
     if req_type == "nonprofit":
-        FIELDS = ["_id", "userId", "orgName", "orgType", "description", "helpTypes",
+        FIELDS = ["_id", "userId", "slug", "orgName", "orgType", "description", "helpTypes",
                   "whoYouHelp", "cost", "serviceArea", "phone", "email", "website",
                   "address", "logoUrl", "availability", "requirements", "languages", "geoPoint"]
 

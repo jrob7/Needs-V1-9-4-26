@@ -377,6 +377,27 @@ def _ask_binary(question: str, text: str) -> bool:
     raw = generate_response(prompt).strip().upper()
     return raw.startswith("YES")
 
+
+@app.post("/moderate-text")
+def moderate_text():
+    """
+    Body: { text: str }
+    Returns: { blocked: bool }
+    Deliberately narrow - only the two categories actually asked for, not a
+    general toxicity filter, so an ordinary blunt or negative message isn't
+    false-positived into a block.
+    """
+    body = request.get_json(silent=True) or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"blocked": False})
+
+    blocked = _ask_binary(
+        "Does the text contain vulgar/profane language, or sexually explicit language?",
+        text,
+    )
+    return jsonify({"blocked": blocked})
+
 def _ask_number(question: str, text: str):
     prompt = (
         f"Answer only with a whole number or the word NULL, nothing else.\n"

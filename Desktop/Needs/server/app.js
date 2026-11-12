@@ -66,7 +66,31 @@ async function sendEmail({ to, subject, html, replyTo }) {
   return result;
 }
 
+// Checks guest/requester-authored text for vulgar or sexually explicit
+// language before it reaches a business through a public module page.
+// Fails open: if the AI call itself errors or times out, the submission
+// goes through unmoderated rather than blocking a legitimate guest over an
+// unrelated AI hiccup - the same tradeoff every other AI-dependent call in
+// this file already makes (see getServicePricingQuestion, module-chat).
+async function moderateText(text) {
+  if (!text || !String(text).trim()) return { blocked: false };
+  try {
+    const res = await fetch(`${FLASK_API}/moderate-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: String(text).slice(0, 4000) }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error(`Flask ${res.status}`);
+    const data = await res.json();
+    return { blocked: !!data.blocked };
+  } catch (err) {
+    console.warn('⚠️ moderateText check failed, failing open:', err?.message);
+    return { blocked: false };
+  }
+}
 
+const MODERATION_BLOCKED_MESSAGE = "Your message couldn't be sent because it contains language that isn't allowed on Needs. Please revise it and try again.";
 
 
 
@@ -2201,6 +2225,12 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
       return res.status(400).json({ error: 'A first name is required' });
     }
 
+    const moderation = await moderateText(`Name: ${firstName}\nMessage: ${question}`);
+    if (moderation.blocked) {
+      console.warn('⚠️ /m/:slug/askBusiness blocked by moderation, slug:', slug);
+      return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
+    }
+
     const db = client.db('Need');
     let doc = await db.collection('Restaurants').findOne({ slug });
     let type = 'restaurant';
@@ -2470,6 +2500,12 @@ app.post('/conversation/:trackingKey/reply', conversationReplyLimiter, async (re
     const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
     if (!notification) return res.status(404).send(renderConfirmPage(false, 'This conversation link is invalid or has expired.'));
 
+    const moderation = await moderateText(text);
+    if (moderation.blocked) {
+      console.warn('⚠️ /conversation/:trackingKey/reply blocked by moderation, trackingKey:', trackingKey);
+      return res.status(400).send(renderConfirmPage(false, MODERATION_BLOCKED_MESSAGE));
+    }
+
     await database.collection('Notifications').updateOne(
       { _id: notification._id },
       {
@@ -2499,6 +2535,12 @@ app.post('/m/:slug/authedAskBusiness', requireAuthAnyScope, async (req, res) => 
     const { slug } = req.params;
     const { question } = req.body || {};
     if (!question) return res.status(400).json({ error: 'question required' });
+
+    const moderation = await moderateText(question);
+    if (moderation.blocked) {
+      console.warn('⚠️ /m/:slug/authedAskBusiness blocked by moderation, slug:', slug);
+      return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
+    }
 
     const db = client.db('Need');
     let doc = await db.collection('Restaurants').findOne({ slug });
@@ -5007,6 +5049,12 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
     if (!ObjectId.isValid(businessId)) return res.status(400).json({ error: 'Invalid businessId' });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
 
+    const moderation = await moderateText(`Name: ${firstName}\nMessage: ${description}`);
+    if (moderation.blocked) {
+      console.warn('⚠️ /requestQuote blocked by moderation, businessId:', businessId);
+      return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
+    }
+
     const service = await database.collection('Services').findOne({ _id: new ObjectId(businessId) });
     if (!service) return res.status(404).json({ error: 'Business not found' });
 
@@ -5160,6 +5208,12 @@ app.post('/authedRequestQuote', requireAuthAnyScope, async (req, res) => {
       return res.status(400).json({ error: 'businessId and description are required' });
     }
     if (!ObjectId.isValid(businessId)) return res.status(400).json({ error: 'Invalid businessId' });
+
+    const moderation = await moderateText(description);
+    if (moderation.blocked) {
+      console.warn('⚠️ /authedRequestQuote blocked by moderation, businessId:', businessId);
+      return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
+    }
 
     const service = await database.collection('Services').findOne({ _id: new ObjectId(businessId) });
     if (!service) return res.status(404).json({ error: 'Business not found' });

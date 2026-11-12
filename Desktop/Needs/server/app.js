@@ -704,15 +704,19 @@ app.post('/guestSearchBusinesses', guestSearchLimiter, async (req, res) => {
     });
     if (!actionResp.ok) return res.status(502).json({ error: 'Search is temporarily unavailable' });
     const { action } = await actionResp.json();
-    // FIND_RESTAURANT is unambiguous, but FIND_SERVICE just means "this is
-    // some kind of business/provider search" - nextAction's LLM classifier
-    // has no nonprofit category at all, so forcing type:'service' here would
-    // permanently exclude Nonprofits (and misroute a housing/food-assistance
-    // query into a collection that doesn't have it). findMatches' own
-    // type:"auto" path already has a keyword-weighted classifier that
-    // distinguishes nonprofit/service/food/item - let it make the real call.
-    const requestedType = action === 'FIND_RESTAURANT' ? 'food' : (action === 'FIND_SERVICE' ? 'auto' : null);
-    if (!requestedType) return res.json({ type: 'item', matches: [] });
+    // nextAction's LLM classifier is an unreliable pre-sort for anything
+    // ambiguous - a terse phrase like "Food assistance" can non-
+    // deterministically land on FIND_SERVICE or the NEW_REQUEST catch-all
+    // across identical calls, and it has no nonprofit category at all
+    // either way. Rather than trust it to perfectly bucket every phrasing,
+    // only short-circuit the 3 actions that are genuinely a different
+    // feature (not a business search at all) - everything else, including
+    // NEW_REQUEST, gets a real chance via findMatches' own type:"auto"
+    // path, which is deterministic, keyword-based, and already knows
+    // nonprofit/service/food/item apart.
+    const NOT_A_BUSINESS_SEARCH = new Set(['VIEW_NEED', 'VIEW_UPLOADED', 'FUNDRAISER']);
+    if (NOT_A_BUSINESS_SEARCH.has(action)) return res.json({ type: 'item', matches: [] });
+    const requestedType = action === 'FIND_RESTAURANT' ? 'food' : 'auto';
 
     const flaskResp = await fetch(`${FLASK_API}/ai/findMatches`, {
       method: 'POST',

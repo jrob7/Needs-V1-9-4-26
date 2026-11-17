@@ -228,6 +228,23 @@ const conversationReplyLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Guards the AI-authorization bootstrap (creating an attempt, and guessing
+// the six-digit code against one) - same brute-force-defense reasoning as
+// trackRequestLimiter, but tighter on the code-guessing endpoint since a
+// six-digit code has a much smaller space than a 128-bit trackingKey.
+const aiAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+const aiCodeGuessLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // /guestSearchBusinesses is new, unauthenticated, and proxies to an
 // AI-scoring Flask call - worth limiting per IP so it cannot be used to
 // run up Flask/AI load for free at volume.
@@ -2586,6 +2603,617 @@ app.post('/conversation/:trackingKey/reply', conversationReplyLimiter, async (re
   } catch (err) {
     console.error('❌ POST /conversation/:trackingKey/reply error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong sending your message. Please try again.'));
+  }
+});
+
+// ─── Guest AI authorization ─────────────────────────────────────────────────
+// Lets a guest (no Needs account) authorize an external AI assistant to read
+// and, within limits, act on one already-confirmed request - without OAuth,
+// since a guest has no account to OAuth into. The request itself is just the
+// existing confirmed PendingModuleQuestions/PendingQuoteRequests record,
+// identified by its existing trackingKey; nothing new is created for "the
+// request" itself.
+//
+// Three pieces, matching the authorization design: (1) the trackingKey alone
+// never grants an AI anything - it's a request identifier, not a credential;
+// (2) a 10-minute attempt (attemptId + six-digit code shown to the customer
+// by the AI + a private secret only the AI retains) exists purely to let the
+// customer approve *this specific AI, right now* without the AI needing an
+// account; (3) once approved, a DB-backed session token (not a JWT - no
+// legacy stateless-token behavior to work around here, so a lookup on every
+// use gives free, zero-staleness revocation) grants scoped, time-limited
+// access to that one request only.
+//
+// Consequential actions (sharing contact info, accepting a quote, confirming
+// an appointment time) are never performed directly by a session write -
+// they go through AIPendingActions and a fresh, specific customer
+// confirmation showing Needs' own stored data, never text the AI supplied.
+// Ordinary reads and messages need no such confirmation once a session is
+// approved.
+
+// Resolves a trackingKey into the generic shape both question- and
+// quote-type requests share, mirroring the exact lookup chain
+// /trackRequest already uses - reused here instead of duplicated so this
+// and /trackRequest can never silently disagree about what a trackingKey
+// currently points to.
+async function resolveAiRequestByTrackingKey(trackingKey) {
+  const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey });
+  if (pendingQuote && !pendingQuote.confirmedAt) return { requestType: 'quote', confirmed: false };
+  const pendingQuestion = await database.collection('PendingModuleQuestions').findOne({ trackingKey });
+  if (pendingQuestion && !pendingQuestion.confirmedAt) return { requestType: 'question', confirmed: false };
+
+  const need = await database.collection('NeedRequests').findOne({ trackingKey });
+  if (need) {
+    const quotes = await database.collection('ServiceQuotes').find({ needId: need._id }).toArray();
+    return { requestType: 'quote', confirmed: true, need, quotes };
+  }
+  const notif = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
+  if (notif) return { requestType: 'question', confirmed: true, notification: notif };
+
+  return null;
+}
+
+const AI_SESSION_DURATIONS = {
+  '24h': 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+};
+
+// Stateful by design (see header comment above) - looks the token up fresh
+// on every call, so a revoke (POST /ai/sessions/:sessionId/revoke) takes
+// effect on this session's very next use, not whenever a cached claim
+// happens to expire.
+const requireAiSession = async (req, res, next) => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ status: 'authorization_required' });
+  }
+  const session = await database.collection('AIAuthSessions').findOne({ sessionToken: header.slice(7) });
+  if (!session || session.revoked || session.expiresAt < new Date()) {
+    return res.status(401).json({ status: 'authorization_required' });
+  }
+  if (session.trackingKey !== req.params.trackingKey) {
+    return res.status(403).json({ error: 'This session is not authorized for this request' });
+  }
+  await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { lastUsedAt: new Date() } });
+  req.aiSession = session;
+  next();
+};
+
+function renderAiAuthorizePage(businessName, requestSummary, formAction, error) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize AI Access — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px 0; }
+    .card { background: #fff; border-radius: 16px; padding: 32px 28px; max-width: 440px; width: 100%; box-sizing: border-box; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .icon { font-size: 2.2rem; margin-bottom: 10px; text-align: center; }
+    h1 { font-size: 1.2rem; color: #0F172A; margin: 0 0 8px; text-align: center; }
+    p { font-size: .92rem; color: #64748B; line-height: 1.5; }
+    .preview { background: #F1F5F9; border-radius: 10px; padding: 12px 16px; margin: 14px 0; color: #334155; font-size: .88rem; }
+    .error { background: #FEF2F2; color: #B91C1C; border-radius: 8px; padding: 10px 14px; font-size: .85rem; margin-bottom: 14px; }
+    label { display: block; font-size: .78rem; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .4px; margin: 16px 0 6px; }
+    input[type=text] { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 12px; font-size: 1.1rem; letter-spacing: 2px; text-align: center; }
+    .duration { display: flex; flex-direction: column; gap: 8px; }
+    .duration label.opt { display: flex; align-items: center; gap: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; font-size: .92rem; color: #0F172A; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; margin: 0; cursor: pointer; }
+    .scope-note { font-size: .78rem; color: #94A3B8; margin-top: 16px; line-height: 1.5; }
+    button { background: #2563EB; color: #fff; border: none; border-radius: 10px; padding: 13px 28px; font-size: .95rem; font-weight: 700; cursor: pointer; margin-top: 16px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🤖</div>
+    <h1>Authorize AI Access</h1>
+    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}
+    <p>An AI assistant is requesting access to:</p>
+    <div class="preview"><strong>${escapeHtml(businessName)}</strong><br>${escapeHtml(requestSummary)}</div>
+    <form method="POST" action="${formAction}">
+      <label>Confirmation code (shown to you by the AI)</label>
+      <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus>
+      <label>Access duration</label>
+      <div class="duration">
+        <label class="opt"><input type="radio" name="duration" value="24h" checked> 24 hours — most quotes and questions take at least this long to get a response</label>
+        <label class="opt"><input type="radio" name="duration" value="30d"> 30 days — for an ongoing job you expect to take longer</label>
+      </div>
+      <button type="submit">Authorize AI Access</button>
+    </form>
+    <p class="scope-note">This AI will be able to read responses and hold ordinary conversation on this one request only. It cannot finalize an appointment, accept a quote, or share your contact info without asking you to confirm separately, and you can revoke this at any time.</p>
+  </div>
+</body>
+</html>`;
+}
+
+function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAction, extraFieldsHtml) {
+  const titles = {
+    share_contact: 'Share Your Contact Info?',
+    accept_quote: 'Accept This Quote?',
+    confirm_appointment_time: 'Confirm Appointment Time',
+  };
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(titles[actionType] || 'Confirm')} — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px 0; }
+    .card { background: #fff; border-radius: 16px; padding: 32px 28px; max-width: 440px; width: 100%; box-sizing: border-box; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    h1 { font-size: 1.2rem; color: #0F172A; margin: 0 0 8px; text-align: center; }
+    p { font-size: .92rem; color: #64748B; line-height: 1.5; }
+    .preview { background: #F1F5F9; border-radius: 10px; padding: 12px 16px; margin: 14px 0; color: #334155; font-size: .9rem; }
+    .opt { display: flex; align-items: center; gap: 10px; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font-size: .9rem; color: #0F172A; }
+    .btnrow { display: flex; gap: 10px; margin-top: 16px; }
+    button { border: none; border-radius: 10px; padding: 13px 20px; font-size: .95rem; font-weight: 700; cursor: pointer; flex: 1; }
+    .confirm { background: #2563EB; color: #fff; }
+    .decline { background: #F1F5F9; color: #334155; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>${escapeHtml(titles[actionType] || 'Confirm')}</h1>
+    <p><strong>${escapeHtml(businessName)}</strong></p>
+    <div class="preview">${detailsHtml}</div>
+    <form method="POST" action="${formAction}">
+      ${extraFieldsHtml || ''}
+      <div class="btnrow">
+        <button class="decline" type="submit" name="decision" value="decline">Decline</button>
+        <button class="confirm" type="submit" name="decision" value="confirm">Confirm</button>
+      </div>
+    </form>
+  </div>
+</body>
+</html>`;
+}
+
+// GET /ai/request/:trackingKey — machine-facing status/content for an AI
+// holding a session. No/expired/revoked session reveals nothing beyond the
+// fact that authorization is required, same reasoning /trackRequest already
+// documents for trackingKey itself - except here even the trackingKey isn't
+// enough on its own, a session must be presented.
+app.get('/ai/request/:trackingKey', aiAuthLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const header = req.headers.authorization;
+    const session = header?.startsWith('Bearer ')
+      ? await database.collection('AIAuthSessions').findOne({ sessionToken: header.slice(7) })
+      : null;
+    if (!session || session.revoked || session.expiresAt < new Date() || session.trackingKey !== trackingKey) {
+      return res.json({ status: 'authorization_required' });
+    }
+    await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { lastUsedAt: new Date() } });
+
+    const resolved = await resolveAiRequestByTrackingKey(trackingKey);
+    if (!resolved || !resolved.confirmed) return res.status(404).json({ error: 'Request not found' });
+
+    if (resolved.requestType === 'quote') {
+      return res.json({
+        status: 'ok', type: 'quote',
+        quotes: (resolved.quotes || []).map(q => ({
+          businessName: q.businessName, status: q.status,
+          estimate: q.estimate || null, confirmedPrice: q.confirmedPrice || null,
+          proposedDate: q.proposedDate || null, proposedTime: q.proposedTime || null,
+          proposedOptions: (q.proposedOptions || []).map(o => ({ date: o.date, time: o.time })),
+          qaHistory: q.qaHistory || [],
+        })),
+      });
+    }
+    const notif = resolved.notification;
+    return res.json({
+      status: 'ok', type: 'question',
+      messages: notif.messages?.length ? notif.messages.map(m => ({ from: m.from, text: m.text, at: m.at })) : [{ from: 'guest', text: notif.question, at: notif.createdAt }],
+      needsReply: notif.needsReply !== false,
+    });
+  } catch (err) {
+    console.error('❌ GET /ai/request/:trackingKey error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /ai/request/:trackingKey/authorize — AI-initiated, no auth needed.
+// Creates a 10-minute attempt and emails the approval link to whichever
+// address the original request was confirmed with - never to anything the
+// AI supplies, so only the actual requester can ever approve one.
+app.post('/ai/request/:trackingKey/authorize', aiAuthLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const resolved = await resolveAiRequestByTrackingKey(trackingKey);
+    if (!resolved || !resolved.confirmed) return res.status(404).json({ error: 'Request not found or not yet confirmed' });
+
+    let email, businessName;
+    if (resolved.requestType === 'quote') {
+      email = (await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1 } }))?.email;
+      businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || 'the matched businesses';
+    } else {
+      email = resolved.notification.askerEmail;
+      const businessDoc = resolved.notification.businessType === 'nonprofit'
+        ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
+        : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
+      businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
+    }
+    if (!email) return res.status(404).json({ error: 'No contact email on file for this request' });
+
+    const attemptId = crypto.randomBytes(12).toString('hex');
+    const confirmationCode = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const attemptSecret = crypto.randomBytes(24).toString('hex');
+    await database.collection('AIAuthAttempts').insertOne({
+      attemptId, trackingKey, requestType: resolved.requestType,
+      confirmationCode, attemptSecret, channel: 'email',
+      createdAt: new Date(), expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      used: false, approvedSessionId: null,
+    });
+
+    await sendEmail({
+      to: email,
+      subject: 'An AI assistant is requesting access to your Needs request',
+      html: `
+        <p>An AI assistant is requesting access to review and help with your request to <strong>${escapeHtml(businessName)}</strong>.</p>
+        <p>It should have shown you a six-digit code. Use the link below to enter it and choose how long to allow access.</p>
+        <p><a href="${NODE_API}/ai/authorize/${attemptId}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review AI Access Request</a></p>
+        <p style="color:#94A3B8;font-size:.85rem;">If you did not request this, you can safely ignore this email - it expires in 10 minutes either way.</p>
+      `,
+    });
+
+    res.json({ attemptId, confirmationCode, attemptSecret, expiresIn: 600 });
+  } catch (err) {
+    console.error('❌ /ai/request/:trackingKey/authorize error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /ai/authorize/:attemptId — side-effect-free preview + form, same
+// reasoning as renderClickToConfirmPage: an email scanner prefetching this
+// must not be able to approve anything on the recipient's behalf.
+app.get('/ai/authorize/:attemptId', aiAuthLimiter, async (req, res) => {
+  try {
+    const attempt = await database.collection('AIAuthAttempts').findOne({ attemptId: req.params.attemptId });
+    if (!attempt) return res.status(404).send(renderConfirmPage(false, 'This authorization link is invalid or has expired.'));
+    if (attempt.used || attempt.expiresAt < new Date()) {
+      return res.send(renderConfirmPage(attempt.used, attempt.used ? 'This authorization was already completed.' : 'This authorization request expired. Ask the AI to try again.'));
+    }
+    const resolved = await resolveAiRequestByTrackingKey(attempt.trackingKey);
+    let businessName = 'your request', summary = '';
+    if (resolved?.requestType === 'quote') {
+      businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || businessName;
+      summary = 'Read your quote responses and help you accept a quote or confirm an appointment, with your separate confirmation for each.';
+    } else if (resolved?.requestType === 'question') {
+      const businessDoc = resolved.notification.businessType === 'nonprofit'
+        ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
+        : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
+      businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || businessName;
+      summary = 'Read responses and hold ordinary conversation on your behalf.';
+    }
+    res.send(renderAiAuthorizePage(businessName, summary, `/ai/authorize/${req.params.attemptId}`, null));
+  } catch (err) {
+    console.error('❌ GET /ai/authorize error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+app.post('/ai/authorize/:attemptId', aiCodeGuessLimiter, async (req, res) => {
+  try {
+    const attempt = await database.collection('AIAuthAttempts').findOne({ attemptId: req.params.attemptId });
+    if (!attempt) return res.status(404).send(renderConfirmPage(false, 'This authorization link is invalid or has expired.'));
+    if (attempt.used || attempt.expiresAt < new Date()) {
+      return res.send(renderConfirmPage(attempt.used, attempt.used ? 'This authorization was already completed.' : 'This authorization request expired. Ask the AI to try again.'));
+    }
+    const code = String(req.body?.code || '').trim();
+    const duration = AI_SESSION_DURATIONS[req.body?.duration] ? req.body.duration : '24h';
+    if (code !== attempt.confirmationCode) {
+      return res.send(renderAiAuthorizePage('your request', '', `/ai/authorize/${req.params.attemptId}`, 'That code didn’t match. Please check the code shown by the AI and try again.'));
+    }
+
+    const resolved = await resolveAiRequestByTrackingKey(attempt.trackingKey);
+    const businessId = resolved?.requestType === 'question' ? resolved.notification.businessId : null;
+    const businessType = resolved?.requestType === 'question' ? resolved.notification.businessType : null;
+
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    const sessionResult = await database.collection('AIAuthSessions').insertOne({
+      trackingKey: attempt.trackingKey, requestType: attempt.requestType,
+      businessId, businessType, sessionToken, duration,
+      expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]),
+      revoked: false, createdAt: new Date(), lastUsedAt: null,
+    });
+    await database.collection('AIAuthAttempts').updateOne(
+      { _id: attempt._id },
+      { $set: { used: true, approvedSessionId: sessionResult.insertedId } }
+    );
+
+    res.send(renderConfirmPage(true, `AI access approved for ${duration === '30d' ? '30 days' : '24 hours'}. You can revoke this anytime from the status page for this request.`));
+  } catch (err) {
+    console.error('❌ POST /ai/authorize error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+// POST /ai/sessions/:attemptId/claim — the AI redeems its approved attempt
+// using the secret only it ever held. The code proved the human approved
+// *an* attempt; the secret proves this AI is the one that made *this*
+// attempt - same two-piece reasoning as the design this implements.
+app.post('/ai/sessions/:attemptId/claim', aiAuthLimiter, async (req, res) => {
+  try {
+    const attempt = await database.collection('AIAuthAttempts').findOne({ attemptId: req.params.attemptId });
+    if (!attempt || attempt.attemptSecret !== String(req.body?.attemptSecret || '')) {
+      return res.status(404).json({ error: 'Invalid attempt or secret' });
+    }
+    if (!attempt.used || !attempt.approvedSessionId) {
+      return res.json({ status: 'pending_approval' });
+    }
+    const session = await database.collection('AIAuthSessions').findOne({ _id: attempt.approvedSessionId });
+    if (!session || session.revoked) return res.status(410).json({ error: 'This session has been revoked' });
+    res.json({ sessionToken: session.sessionToken, expiresAt: session.expiresAt, requestType: session.requestType });
+  } catch (err) {
+    console.error('❌ /ai/sessions/:attemptId/claim error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /ai/request/:trackingKey/message — ordinary conversation, question
+// requests only. Reuses the exact mutation /conversation/:trackingKey/reply
+// already performs, just reached through a session instead of bare
+// trackingKey possession.
+app.post('/ai/request/:trackingKey/message', requireAiSession, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    if (req.aiSession.requestType !== 'question') {
+      return res.status(400).json({ error: 'Ordinary messaging is only available for question-type requests in this version.' });
+    }
+    const text = String(req.body?.text || '').trim().slice(0, 2000);
+    if (!text) return res.status(400).json({ error: 'text is required' });
+
+    const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
+    if (!notification) return res.status(404).json({ error: 'Request not found' });
+
+    const moderation = await moderateText(text);
+    if (moderation.blocked) {
+      console.warn('⚠️ /ai/request/:trackingKey/message blocked by moderation, trackingKey:', trackingKey);
+      return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
+    }
+
+    await database.collection('Notifications').updateOne(
+      { _id: notification._id },
+      { $push: { messages: { from: 'guest', text, at: new Date() } }, $set: { read: false, needsReply: true } }
+    );
+    res.json({ status: 'sent' });
+  } catch (err) {
+    console.error('❌ /ai/request/:trackingKey/message error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /ai/request/:trackingKey/actions/:actionType — the AI attempts a
+// consequential action; nothing is performed yet. A pending action is
+// created and the customer is sent a fresh confirmation built from Needs'
+// own stored data (the actual price, the actual proposed times) - never
+// from data the AI supplied, so a manipulated AI can propose anything, but
+// the customer only ever sees and confirms what Needs itself has on file.
+app.post('/ai/request/:trackingKey/actions/:actionType', requireAiSession, async (req, res) => {
+  try {
+    const { trackingKey, actionType } = req.params;
+    if (!['share_contact', 'accept_quote', 'confirm_appointment_time'].includes(actionType)) {
+      return res.status(400).json({ error: 'Unknown actionType' });
+    }
+    const resolved = await resolveAiRequestByTrackingKey(trackingKey);
+    if (!resolved || !resolved.confirmed) return res.status(404).json({ error: 'Request not found' });
+
+    let targetQuote = null;
+    if (resolved.requestType === 'quote' && (resolved.quotes || []).length > 0) {
+      // Resolved for all three action types when this is a quote request -
+      // share_contact needs to know which business to notify too, not just
+      // accept_quote/confirm_appointment_time.
+      const quotes = resolved.quotes || [];
+      const wanted = String(req.body?.businessName || '').trim().toLowerCase();
+      targetQuote = quotes.length === 1 ? quotes[0] : quotes.find(q => (q.businessName || '').toLowerCase() === wanted);
+      if (!targetQuote) {
+        return res.status(400).json({ error: 'businessName is required to identify which quote, since more than one business matched this request', businesses: quotes.map(q => q.businessName) });
+      }
+    }
+    if (actionType === 'accept_quote' || actionType === 'confirm_appointment_time') {
+      if (resolved.requestType !== 'quote') return res.status(400).json({ error: `${actionType} only applies to quote requests` });
+      if (actionType === 'accept_quote' && !['business_confirmed', 'business_edited'].includes(targetQuote.status)) {
+        return res.status(409).json({ error: `This quote cannot be accepted in its current state (${targetQuote.status}).` });
+      }
+      if (actionType === 'confirm_appointment_time' && targetQuote.status !== 'awaiting_guest_time_confirmation') {
+        return res.status(409).json({ error: `No proposed times are awaiting confirmation for this quote (status: ${targetQuote.status}).` });
+      }
+    }
+
+    const confirmToken = crypto.randomBytes(16).toString('hex');
+    const pendingAction = {
+      pendingActionId: crypto.randomBytes(12).toString('hex'),
+      sessionId: req.aiSession._id, trackingKey, actionType,
+      quoteId: targetQuote?._id || null,
+      proposedData: req.body?.data || {},
+      status: 'pending', confirmToken,
+      createdAt: new Date(), expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    };
+    await database.collection('AIPendingActions').insertOne(pendingAction);
+
+    let email, businessName;
+    if (resolved.requestType === 'quote') {
+      email = (await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1 } }))?.email;
+      businessName = targetQuote?.businessName || 'the business';
+    } else {
+      email = resolved.notification.askerEmail;
+      const businessDoc = resolved.notification.businessType === 'nonprofit'
+        ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
+        : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
+      businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
+    }
+
+    const confirmLabels = {
+      share_contact: 'Share Your Contact Info',
+      accept_quote: `Accept the Quote${targetQuote?.confirmedPrice ? ` ($${targetQuote.confirmedPrice})` : ''}`,
+      confirm_appointment_time: 'Confirm an Appointment Time',
+    };
+    if (email) {
+      await sendEmail({
+        to: email,
+        subject: `Confirm: ${confirmLabels[actionType]} — ${businessName}`,
+        html: `
+          <p>Your AI assistant is asking to <strong>${escapeHtml(confirmLabels[actionType])}</strong> with <strong>${escapeHtml(businessName)}</strong>.</p>
+          <p>Nothing happens until you confirm directly with Needs.</p>
+          <p><a href="${NODE_API}/ai/confirmAction/${confirmToken}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review and Confirm</a></p>
+        `,
+      });
+    }
+
+    res.json({
+      status: 'pending_customer_confirmation',
+      pendingActionId: pendingAction.pendingActionId,
+      message: 'Ask the customer to check their email to confirm before this is finalized.',
+    });
+  } catch (err) {
+    console.error('❌ /ai/request/:trackingKey/actions error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET/POST /ai/confirmAction/:confirmToken — the human-facing confirmation.
+// Whatever the customer picks here (which proposed time, confirm vs
+// decline) is authoritative; the AI's own proposedData is only ever a
+// suggestion for which action to render, never trusted as the actual terms.
+app.get('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
+  try {
+    const action = await database.collection('AIPendingActions').findOne({ confirmToken: req.params.confirmToken });
+    if (!action) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has expired.'));
+    if (action.status !== 'pending' || action.expiresAt < new Date()) {
+      return res.send(renderConfirmPage(action.status === 'confirmed', action.status === 'pending' ? 'This confirmation link has expired.' : `This request was already ${action.status}.`));
+    }
+
+    const resolved = await resolveAiRequestByTrackingKey(action.trackingKey);
+    let businessName = 'the business', detailsHtml = '', extraFieldsHtml = '';
+    const quote = action.quoteId ? (resolved?.quotes || []).find(q => String(q._id) === String(action.quoteId)) : null;
+    if (!quote && resolved?.requestType === 'question') {
+      const businessDoc = resolved.notification.businessType === 'nonprofit'
+        ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
+        : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
+      businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || businessName;
+    }
+
+    if (action.actionType === 'share_contact') {
+      businessName = quote?.businessName || businessName;
+      detailsHtml = `${escapeHtml(businessName)} is requesting your contact information to proceed.`;
+    } else if (action.actionType === 'accept_quote') {
+      businessName = quote?.businessName || businessName;
+      detailsHtml = `Accept the quote${quote?.confirmedPrice ? ` of <strong>$${escapeHtml(String(quote.confirmedPrice))}</strong>` : ''} from ${escapeHtml(businessName)}?`;
+    } else if (action.actionType === 'confirm_appointment_time') {
+      businessName = quote?.businessName || businessName;
+      const options = quote?.proposedOptions || [];
+      detailsHtml = `${escapeHtml(businessName)} proposed:`;
+      extraFieldsHtml = options.map((o, i) => `
+        <label class="opt"><input type="radio" name="optionToken" value="${escapeHtml(o.token)}" ${i === 0 ? 'checked' : ''}> ${escapeHtml(o.date)} at ${escapeHtml(o.time)}</label>`
+      ).join('');
+    }
+
+    res.send(renderAiConfirmActionPage(businessName, action.actionType, detailsHtml, `/ai/confirmAction/${req.params.confirmToken}`, extraFieldsHtml));
+  } catch (err) {
+    console.error('❌ GET /ai/confirmAction error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+app.post('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
+  try {
+    const action = await database.collection('AIPendingActions').findOne({ confirmToken: req.params.confirmToken });
+    if (!action) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has expired.'));
+    if (action.status !== 'pending' || action.expiresAt < new Date()) {
+      return res.send(renderConfirmPage(action.status === 'confirmed', action.status === 'pending' ? 'This confirmation link has expired.' : `This request was already ${action.status}.`));
+    }
+
+    const decision = req.body?.decision === 'confirm' ? 'confirmed' : 'declined';
+    await database.collection('AIPendingActions').updateOne({ _id: action._id }, { $set: { status: decision } });
+    if (decision === 'declined') {
+      return res.send(renderConfirmPage(true, 'Declined. Nothing was changed.'));
+    }
+
+    const resolved = await resolveAiRequestByTrackingKey(action.trackingKey);
+    const quote = action.quoteId ? (resolved?.quotes || []).find(q => String(q._id) === String(action.quoteId)) : null;
+
+    if (action.actionType === 'share_contact') {
+      if (resolved?.requestType === 'quote') {
+        const requester = resolved?.need?.userId
+          ? await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1, phoneNumber: 1 } })
+          : null;
+        if (quote?.serviceUserId) {
+          await database.collection('Notifications').insertOne({
+            userId: quote.serviceUserId, type: 'contact_info_shared',
+            title: '📇 Customer Shared Contact Info',
+            body: `${requester?.email || 'The customer'}${requester?.phoneNumber ? ` / ${requester.phoneNumber}` : ''}`,
+            needId: quote.needId, quoteId: quote._id, read: false, createdAt: new Date(),
+          });
+        }
+      } else if (resolved?.requestType === 'question') {
+        const notif = resolved.notification;
+        await database.collection('Notifications').updateOne(
+          { _id: notif._id },
+          {
+            $push: { messages: { from: 'guest', text: `Shared contact info: ${notif.askerEmail || 'see email on file'}`, at: new Date() } },
+            $set: { read: false, needsReply: true },
+          }
+        );
+      }
+      return res.send(renderConfirmPage(true, 'Your contact information has been shared.'));
+    }
+
+    if (action.actionType === 'accept_quote') {
+      if (!quote) return res.send(renderConfirmPage(false, 'This quote could not be found.'));
+      const requester = await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1 } });
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: quote._id },
+        { $set: { status: 'guest_accepted', guestAcceptedAt: new Date() } }
+      );
+      if (quote.serviceUserId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.serviceUserId, type: 'quote_accepted_by_guest',
+          title: '🎉 Customer Accepted Your Quote',
+          body: `${requester?.email || 'The customer'} accepted your quote${quote.confirmedPrice ? ` of $${quote.confirmedPrice}` : ''}. Propose a time below, or reach out directly to schedule.`,
+          needId: quote.needId, quoteId: quote._id, guestEmail: requester?.email || null, read: false, createdAt: new Date(),
+        });
+      }
+      return res.send(renderConfirmPage(true, `You accepted the quote from ${escapeHtml(quote.businessName)}. They will reach out to schedule a time.`));
+    }
+
+    if (action.actionType === 'confirm_appointment_time') {
+      if (!quote) return res.send(renderConfirmPage(false, 'This quote could not be found.'));
+      const optionToken = String(req.body?.optionToken || '');
+      const option = findProposedOption(quote, optionToken);
+      if (!option) return res.send(renderConfirmPage(false, 'That time option is no longer available. A different one may have already been chosen.'));
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: quote._id },
+        { $set: { proposedDate: option.date, proposedTime: option.time } }
+      );
+      await finalizeAppointmentConfirmation({ ...quote, proposedDate: option.date, proposedTime: option.time }, quote._id.toString());
+      return res.send(renderConfirmPage(true, `Your appointment with ${escapeHtml(quote.businessName)} is confirmed for ${escapeHtml(option.date)} at ${escapeHtml(option.time)}.`));
+    }
+
+    res.send(renderConfirmPage(false, 'Unknown action.'));
+  } catch (err) {
+    console.error('❌ POST /ai/confirmAction error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+// POST /ai/sessions/:sessionId/revoke — immediate on the session's next use,
+// cannot undo anything already sent or disclosed. No auth beyond the
+// sessionId itself (a 24-char ObjectId plus a 128-bit trackingKey match),
+// same bearer-capability reasoning already used throughout this file - the
+// customer is the only one ever given this id, via the approval-confirmation
+// page and every subsequent activity email.
+app.post('/ai/sessions/:sessionId/revoke', aiAuthLimiter, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    if (!ObjectId.isValid(sessionId)) return res.status(404).send(renderConfirmPage(false, 'Invalid session.'));
+    const result = await database.collection('AIAuthSessions').updateOne(
+      { _id: new ObjectId(sessionId) },
+      { $set: { revoked: true } }
+    );
+    if (result.matchedCount === 0) return res.status(404).send(renderConfirmPage(false, 'Session not found.'));
+    res.send(renderConfirmPage(true, 'AI access has been revoked. It can no longer read or act on this request.'));
+  } catch (err) {
+    console.error('❌ /ai/sessions/:sessionId/revoke error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
 

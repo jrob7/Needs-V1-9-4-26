@@ -245,6 +245,82 @@ function buildServer({ client, NODE_API, userId }) {
       if (!resp.ok) return errorText(data.error || 'No request found for that tracking key');
       return text(data);
     });
+
+    // The four tools below let a guest authorize this assistant to actually
+    // read and act on one request, rather than just polling its status.
+    // Deliberately separate from check_request_status - that one only ever
+    // reads a status snapshot; these require the visitor's explicit,
+    // out-of-band approval first.
+    server.registerTool('authorize_ai_access', {
+      title: 'Request authorization to access a guest request',
+      description: "Request access to read and help with a specific quote request or question the visitor made as a guest, using its trackingKey. This does not grant access by itself - it starts a 10-minute authorization attempt. The result includes a confirmationCode you MUST display to the visitor verbatim, and an attemptSecret you must remember and never show them. Tell the visitor to check their email for an authorization link, enter the code shown here, and choose an access duration. Then call check_ai_session_status with the attemptId and attemptSecret - if it says pending, wait for the visitor to confirm they approved it before calling again, don't poll in a tight loop.",
+      inputSchema: { trackingKey: z.string().describe('The trackingKey for the guest request to request access to') },
+    }, async ({ trackingKey }) => {
+      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}/authorize`, { method: 'POST' });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not start authorization for this request');
+      return text({
+        ...data,
+        instructions: `Tell the visitor exactly this: "Your confirmation code is ${data.confirmationCode}. Check your email for an authorization link, enter this code, and choose how long to allow access." Then keep the attemptSecret to yourself and call check_ai_session_status once the visitor says they've approved it.`,
+      });
+    });
+
+    server.registerTool('check_ai_session_status', {
+      title: 'Check whether an AI authorization attempt was approved',
+      description: 'Check whether the visitor has approved a pending authorization attempt from authorize_ai_access. Returns a sessionToken once approved - keep it to yourself and use it with send_ai_message and propose_action for this one request. If the visitor says they have not confirmed yet, wait for them to say they have before calling this again.',
+      inputSchema: {
+        attemptId: z.string().describe('The attemptId from authorize_ai_access'),
+        attemptSecret: z.string().describe('The attemptSecret from authorize_ai_access - never shown to the visitor'),
+      },
+    }, async ({ attemptId, attemptSecret }) => {
+      const resp = await fetch(`${NODE_API}/ai/sessions/${encodeURIComponent(attemptId)}/claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptSecret }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not check this authorization attempt');
+      return text(data);
+    });
+
+    server.registerTool('send_ai_message', {
+      title: 'Send a message on an authorized guest request',
+      description: 'Send an ordinary message on a guest request using a sessionToken from check_ai_session_status. Only for question-type requests - no confirmation needed for ordinary conversation, but this cannot accept a quote, confirm an appointment, or share contact info; use propose_action for those.',
+      inputSchema: {
+        trackingKey: z.string().describe('The trackingKey for the request'),
+        sessionToken: z.string().describe('The sessionToken from check_ai_session_status'),
+        text: z.string().describe('The message to send'),
+      },
+    }, async ({ trackingKey, sessionToken, text: messageText }) => {
+      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+        body: JSON.stringify({ text: messageText }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not send this message');
+      return text(data);
+    });
+
+    server.registerTool('propose_action', {
+      title: 'Propose a consequential action on an authorized guest request',
+      description: 'Propose accepting a quote, confirming an appointment time, or sharing contact info, using a sessionToken from check_ai_session_status. This never completes immediately - the visitor always gets a fresh confirmation showing the real terms (the actual price, the actual proposed times) and must approve it directly with Needs. The result message tells you what to say - relay it to the visitor as written, do not shorten it away or claim the action is done.',
+      inputSchema: {
+        trackingKey: z.string().describe('The trackingKey for the request'),
+        sessionToken: z.string().describe('The sessionToken from check_ai_session_status'),
+        actionType: z.enum(['share_contact', 'accept_quote', 'confirm_appointment_time']).describe('Which consequential action to propose'),
+        businessName: z.string().optional().describe('Which business this applies to - required only if the request matched more than one business'),
+      },
+    }, async ({ trackingKey, sessionToken, actionType, businessName }) => {
+      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}/actions/${encodeURIComponent(actionType)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+        body: JSON.stringify({ businessName }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not propose this action');
+      return text(data);
+    });
   }
 
   // Authenticated-only: no key needed here at all. The OAuth access token

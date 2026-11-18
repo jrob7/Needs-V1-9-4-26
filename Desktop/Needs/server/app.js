@@ -2490,6 +2490,13 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
     // never the content itself. An AI wanting the actual content needs a
     // real access code (see /ai/sessions/claim), which only ever reaches
     // the requester by email.
+    // AI_INSTRUCTIONS is deliberately generic, never the actual access
+    // code - that stays email-only. Shown here so the instruction reaches
+    // anyone who hits this link directly (a human reading the raw JSON, or
+    // any AI that calls this endpoint instead of going through the
+    // check_request_status tool's own wrapping of the same text).
+    const AI_INSTRUCTIONS = "To let an AI assistant read the details or act on this, give it the access code from your confirmation email and say: 'Call claim_ai_access with this code.'";
+
     const need = await database.collection('NeedRequests').findOne({ trackingKey });
     if (need) {
       const quotes = await database.collection('ServiceQuotes').find({ needId: need._id }).toArray();
@@ -2497,7 +2504,7 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
       return res.json({
         type: 'quote',
         status: ready ? 'ready' : 'not_ready',
-        ...(ready ? {} : { reminder: REMINDER }),
+        ...(ready ? { aiInstructions: AI_INSTRUCTIONS } : { reminder: REMINDER }),
       });
     }
 
@@ -2509,7 +2516,7 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
       return res.json({
         type: 'question',
         status: notif.answered ? 'ready' : 'not_ready',
-        ...(notif.answered ? {} : { reminder: REMINDER }),
+        ...(notif.answered ? { aiInstructions: AI_INSTRUCTIONS } : { reminder: REMINDER }),
       });
     }
     const moduleQuestion = await database.collection('ModuleQuestions').findOne({ trackingKey });

@@ -240,21 +240,13 @@ function buildServer({ client, NODE_API, userId }) {
       description: "Check whether a quote request or question sent as a guest (not signed in) is ready for review, using the trackingKey returned when it was originally submitted. This deliberately returns only a bare ready/not_ready status - no price, no message content, no business details. The visitor's own email already receives the real content directly from the business the moment it exists; this tool exists only so you can tell the visitor whether to go check their email, not to read the content yourself. To actually read or act on the request, you need claim_ai_access with a code the visitor gives you.",
       inputSchema: { trackingKey: z.string().describe('The trackingKey returned by request_quote or ask_business when the request was made') },
     }, async ({ trackingKey }) => {
+      // The "ready" case already carries an aiInstructions field straight
+      // from /trackRequest itself (not injected here) - so the same
+      // guidance reaches anyone who hits that endpoint directly, not just
+      // callers going through this tool. Forwarded as-is, no rewrapping.
       const resp = await fetch(`${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}`);
       const data = await resp.json();
       if (!resp.ok) return errorText(data.error || 'No request found for that tracking key');
-      // Folded into the response content itself rather than left to the
-      // tool description alone - same reliability fix as withMonitoringAsk
-      // below. A model reacting to a bare {"status":"ready"} result won't
-      // reliably re-consult this tool's description for what to do next;
-      // putting the instruction inside the one string it already treats as
-      // load-bearing content is what actually gets it relayed and acted on.
-      if (data.status === 'ready') {
-        return text({
-          ...data,
-          message: 'This request is ready - there is a response waiting. Ask the visitor for the AI access code they received by email when this request was first confirmed (subject line starts "Your AI access code") - do not try to generate or guess one yourself. Once they give it to you, call claim_ai_access with it, then get_request_details to actually see what happened.',
-        });
-      }
       return text(data);
     });
 

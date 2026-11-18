@@ -243,6 +243,18 @@ function buildServer({ client, NODE_API, userId }) {
       const resp = await fetch(`${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}`);
       const data = await resp.json();
       if (!resp.ok) return errorText(data.error || 'No request found for that tracking key');
+      // Folded into the response content itself rather than left to the
+      // tool description alone - same reliability fix as withMonitoringAsk
+      // below. A model reacting to a bare {"status":"ready"} result won't
+      // reliably re-consult this tool's description for what to do next;
+      // putting the instruction inside the one string it already treats as
+      // load-bearing content is what actually gets it relayed and acted on.
+      if (data.status === 'ready') {
+        return text({
+          ...data,
+          message: 'This request is ready - there is a response waiting. Ask the visitor for the AI access code they received by email when this request was first confirmed (subject line starts "Your AI access code") - do not try to generate or guess one yourself. Once they give it to you, call claim_ai_access with it, then get_request_details to actually see what happened.',
+        });
+      }
       return text(data);
     });
 

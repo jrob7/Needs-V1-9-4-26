@@ -271,6 +271,27 @@ function buildServer({ client, NODE_API, userId }) {
       return text(data);
     });
 
+    server.registerTool('get_request_details', {
+      title: 'Read the full details of an authorized guest request',
+      description: 'Read the actual content of a guest request using a sessionToken from claim_ai_access - the quote price and estimate, proposed appointment times, or the full question/answer message thread, depending on the request type. This is the read counterpart to claim_ai_access: check_request_status only ever tells you ready/not_ready with no content, so call this once you have a session to see what actually happened and relay it to the visitor.',
+      inputSchema: {
+        trackingKey: z.string().describe('The trackingKey for the request'),
+        sessionToken: z.string().describe('The sessionToken from claim_ai_access'),
+      },
+    }, async ({ trackingKey, sessionToken }) => {
+      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}`, {
+        headers: { 'Authorization': `Bearer ${sessionToken}` },
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        const message = data.status === 'authorization_required'
+          ? 'This session is no longer valid - ask the visitor for a new access code.'
+          : (data.error || 'Could not read this request');
+        return errorText(message);
+      }
+      return text(data);
+    });
+
     server.registerTool('send_ai_message', {
       title: 'Send a message on an authorized guest request',
       description: 'Send an ordinary message on a guest request using a sessionToken from claim_ai_access. Only for question-type requests - no confirmation needed for ordinary conversation, but this cannot accept a quote, confirm an appointment, or share contact info; use propose_action for those.',

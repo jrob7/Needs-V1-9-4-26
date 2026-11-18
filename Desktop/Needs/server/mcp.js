@@ -237,7 +237,7 @@ function buildServer({ client, NODE_API, userId }) {
   if (!userId) {
     server.registerTool('check_request_status', {
       title: 'Check on a request made as a guest',
-      description: 'Check the status of a quote request or question sent as a guest (not signed in), using the trackingKey returned when it was originally submitted. Works even in a different conversation than the one that made the request, as long as the trackingKey is known.',
+      description: "Check whether a quote request or question sent as a guest (not signed in) is ready for review, using the trackingKey returned when it was originally submitted. This deliberately returns only a bare ready/not_ready status - no price, no message content, no business details. The visitor's own email already receives the real content directly from the business the moment it exists; this tool exists only so you can tell the visitor whether to go check their email, not to read the content yourself. To actually read or act on the request, you need claim_ai_access with a code the visitor gives you.",
       inputSchema: { trackingKey: z.string().describe('The trackingKey returned by request_quote or ask_business when the request was made') },
     }, async ({ trackingKey }) => {
       const resp = await fetch(`${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}`);
@@ -246,49 +246,37 @@ function buildServer({ client, NODE_API, userId }) {
       return text(data);
     });
 
-    // The four tools below let a guest authorize this assistant to actually
-    // read and act on one request, rather than just polling its status.
-    // Deliberately separate from check_request_status - that one only ever
-    // reads a status snapshot; these require the visitor's explicit,
-    // out-of-band approval first.
-    server.registerTool('authorize_ai_access', {
-      title: 'Request authorization to access a guest request',
-      description: "Request access to read and help with a specific quote request or question the visitor made as a guest, using its trackingKey. This does not grant access by itself - it starts a 10-minute authorization attempt. The result includes a confirmationCode you MUST display to the visitor verbatim, and an attemptSecret you must remember and never show them. Tell the visitor to check their email for an authorization link, enter the code shown here, and choose an access duration. Then call check_ai_session_status with the attemptId and attemptSecret - if it says pending, wait for the visitor to confirm they approved it before calling again, don't poll in a tight loop.",
-      inputSchema: { trackingKey: z.string().describe('The trackingKey for the guest request to request access to') },
-    }, async ({ trackingKey }) => {
-      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}/authorize`, { method: 'POST' });
-      const data = await resp.json();
-      if (!resp.ok) return errorText(data.error || 'Could not start authorization for this request');
-      return text({
-        ...data,
-        instructions: `Tell the visitor exactly this: "Your confirmation code is ${data.confirmationCode}. Check your email for an authorization link, enter this code, and choose how long to allow access." Then keep the attemptSecret to yourself and call check_ai_session_status once the visitor says they've approved it.`,
-      });
-    });
-
-    server.registerTool('check_ai_session_status', {
-      title: 'Check whether an AI authorization attempt was approved',
-      description: 'Check whether the visitor has approved a pending authorization attempt from authorize_ai_access. Returns a sessionToken once approved - keep it to yourself and use it with send_ai_message and propose_action for this one request. If the visitor says they have not confirmed yet, wait for them to say they have before calling this again.',
+    // Lets a guest authorize this assistant to actually read and act on one
+    // request, rather than just polling its bare status above. The code
+    // itself is never generated or displayed by this tool, or by any tool -
+    // it only ever reaches the visitor by email, proactively, when their
+    // request is first confirmed (and again if a session ends while the
+    // request is still open). Giving the code to an AI is the entire
+    // consent act; there is no separate approval step left to wait on.
+    server.registerTool('claim_ai_access', {
+      title: 'Claim AI access to a guest request using a code the visitor gives you',
+      description: "Turn an access code the visitor gave you into a working session for one specific request. The code comes from the visitor, who received it by email - never ask this tool to generate or send one, and never display the code back to the visitor since you already have it from them. The code is single-use: once claimed, the same code cannot be claimed again, and the visitor would need a new one (they can get one anytime from the request's status page) to authorize a second session. Keep the returned sessionToken to yourself and use it with send_ai_message and propose_action for this one request only.",
       inputSchema: {
-        attemptId: z.string().describe('The attemptId from authorize_ai_access'),
-        attemptSecret: z.string().describe('The attemptSecret from authorize_ai_access - never shown to the visitor'),
+        code: z.string().describe('The access code the visitor gave you - never one you generated yourself. It already identifies which request it belongs to, so no separate trackingKey is needed here.'),
+        duration: z.enum(['24h', '30d']).optional().describe('How long to hold access - defaults to 24 hours if not specified'),
       },
-    }, async ({ attemptId, attemptSecret }) => {
-      const resp = await fetch(`${NODE_API}/ai/sessions/${encodeURIComponent(attemptId)}/claim`, {
+    }, async ({ code, duration }) => {
+      const resp = await fetch(`${NODE_API}/ai/sessions/claim`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attemptSecret }),
+        body: JSON.stringify({ code, duration }),
       });
       const data = await resp.json();
-      if (!resp.ok) return errorText(data.error || 'Could not check this authorization attempt');
+      if (!resp.ok) return errorText(data.error || 'Could not claim this access code - it may be invalid, already used, or expired.');
       return text(data);
     });
 
     server.registerTool('send_ai_message', {
       title: 'Send a message on an authorized guest request',
-      description: 'Send an ordinary message on a guest request using a sessionToken from check_ai_session_status. Only for question-type requests - no confirmation needed for ordinary conversation, but this cannot accept a quote, confirm an appointment, or share contact info; use propose_action for those.',
+      description: 'Send an ordinary message on a guest request using a sessionToken from claim_ai_access. Only for question-type requests - no confirmation needed for ordinary conversation, but this cannot accept a quote, confirm an appointment, or share contact info; use propose_action for those.',
       inputSchema: {
         trackingKey: z.string().describe('The trackingKey for the request'),
-        sessionToken: z.string().describe('The sessionToken from check_ai_session_status'),
+        sessionToken: z.string().describe('The sessionToken from claim_ai_access'),
         text: z.string().describe('The message to send'),
       },
     }, async ({ trackingKey, sessionToken, text: messageText }) => {
@@ -304,10 +292,10 @@ function buildServer({ client, NODE_API, userId }) {
 
     server.registerTool('propose_action', {
       title: 'Propose a consequential action on an authorized guest request',
-      description: 'Propose accepting a quote, confirming an appointment time, or sharing contact info, using a sessionToken from check_ai_session_status. This never completes immediately - the visitor always gets a fresh confirmation showing the real terms (the actual price, the actual proposed times) and must approve it directly with Needs. The result message tells you what to say - relay it to the visitor as written, do not shorten it away or claim the action is done.',
+      description: 'Propose accepting a quote, confirming an appointment time, or sharing contact info, using a sessionToken from claim_ai_access. This never completes immediately - the visitor always gets a fresh confirmation showing the real terms (the actual price, the actual proposed times) and must approve it directly with Needs. The result message tells you what to say - relay it to the visitor as written, do not shorten it away or claim the action is done.',
       inputSchema: {
         trackingKey: z.string().describe('The trackingKey for the request'),
-        sessionToken: z.string().describe('The sessionToken from check_ai_session_status'),
+        sessionToken: z.string().describe('The sessionToken from claim_ai_access'),
         actionType: z.enum(['share_contact', 'accept_quote', 'confirm_appointment_time']).describe('Which consequential action to propose'),
         businessName: z.string().optional().describe('Which business this applies to - required only if the request matched more than one business'),
       },

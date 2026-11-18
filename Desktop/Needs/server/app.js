@@ -228,19 +228,15 @@ const conversationReplyLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// Guards the AI-authorization bootstrap (creating an attempt, and guessing
-// the six-digit code against one) - same brute-force-defense reasoning as
-// trackRequestLimiter, but tighter on the code-guessing endpoint since a
-// six-digit code has a much smaller space than a 128-bit trackingKey.
+// Guards the AI-authorization surface (claiming a code, requesting a new
+// one) - same brute-force-defense-in-depth reasoning as trackRequestLimiter.
+// Brute-forcing the access code itself isn't the realistic threat here (it's
+// a 192-bit opaque token, same class as trackingKey), so one shared limiter
+// is enough - no separate tight guess-limiter needed the way a short,
+// human-typed code would require.
 const aiAuthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-const aiCodeGuessLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -2442,6 +2438,14 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
       { _id: pending._id }, { $set: { confirmedAt: new Date() } }
     );
 
+    // Best-effort - issueAndEmailAiAccessCode safely no-ops (returns null,
+    // no exception) for a request type it can't resolve yet, e.g. a
+    // restaurant with no in-app reply flow at all, which was never in scope
+    // for the AI-authorization system.
+    if (pending.trackingKey) {
+      await issueAndEmailAiAccessCode(pending.trackingKey).catch(e => console.warn('⚠️ issueAndEmailAiAccessCode failed:', e?.message));
+    }
+
     res.send(renderConfirmPage(true, `Your question has been sent to ${escapeHtml(pending.businessName)}. They will respond soon.`));
   } catch (err) {
     console.error('❌ /confirmModuleQuestion error:', err);
@@ -2477,44 +2481,35 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
       return res.json({ type: 'question', status: 'awaiting_confirmation', message: 'Check your email to confirm this question before it is sent.', reminder: REMINDER });
     }
 
-    // Confirmed quote request - report wherever it currently is in the
-    // matching/quote pipeline.
+    // Confirmed quote or question - deliberately content-free from here on.
+    // The business's actual response (price, answer text, proposed times)
+    // already gets emailed directly and separately the moment it exists
+    // (see /respondToServiceQuote and /answerModuleQuestion) - this endpoint
+    // is public and unauthenticated by design (trackingKey possession is
+    // the only proof required), so it only ever reports ready/not_ready now,
+    // never the content itself. An AI wanting the actual content needs a
+    // real access code (see /ai/sessions/claim), which only ever reaches
+    // the requester by email.
     const need = await database.collection('NeedRequests').findOne({ trackingKey });
     if (need) {
       const quotes = await database.collection('ServiceQuotes').find({ needId: need._id }).toArray();
-      if (quotes.length === 0) {
-        return res.json({
-          type: 'quote',
-          status: need.serviceMatchStatus || 'processing',
-          message: 'Still being matched to businesses.',
-          reminder: REMINDER,
-        });
-      }
+      const ready = quotes.some(q => q.status !== 'pending_business');
       return res.json({
         type: 'quote',
-        status: 'has_responses',
-        quotes: quotes.map(q => ({
-          businessName: q.businessName,
-          status: q.status,
-          confirmedPrice: q.confirmedPrice || null,
-          estimate: q.estimate || null,
-          proposedDate: q.proposedDate || null,
-          proposedTime: q.proposedTime || null,
-        })),
+        status: ready ? 'ready' : 'not_ready',
+        ...(ready ? {} : { reminder: REMINDER }),
       });
     }
 
-    // Confirmed question - service businesses answer through Notifications;
-    // businesses without a linked app user (restaurants, etc.) only have the
-    // plain ModuleQuestions record and no in-app reply flow yet.
+    // Service businesses answer through Notifications; businesses without a
+    // linked app user (restaurants, etc.) only have the plain
+    // ModuleQuestions record and no in-app reply flow yet.
     const notif = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
     if (notif) {
       return res.json({
         type: 'question',
-        status: notif.answered ? 'answered' : 'pending_answer',
-        question: notif.question,
-        answer: notif.answered ? (notif.answer || null) : null,
-        ...(!notif.answered ? { reminder: REMINDER } : {}),
+        status: notif.answered ? 'ready' : 'not_ready',
+        ...(notif.answered ? {} : { reminder: REMINDER }),
       });
     }
     const moduleQuestion = await database.collection('ModuleQuestions').findOne({ trackingKey });
@@ -2614,15 +2609,18 @@ app.post('/conversation/:trackingKey/reply', conversationReplyLimiter, async (re
 // identified by its existing trackingKey; nothing new is created for "the
 // request" itself.
 //
-// Three pieces, matching the authorization design: (1) the trackingKey alone
-// never grants an AI anything - it's a request identifier, not a credential;
-// (2) a 10-minute attempt (attemptId + six-digit code shown to the customer
-// by the AI + a private secret only the AI retains) exists purely to let the
-// customer approve *this specific AI, right now* without the AI needing an
-// account; (3) once approved, a DB-backed session token (not a JWT - no
-// legacy stateless-token behavior to work around here, so a lookup on every
-// use gives free, zero-staleness revocation) grants scoped, time-limited
-// access to that one request only.
+// Two pieces: (1) the trackingKey alone never grants an AI anything - it's
+// a request identifier, not a credential, and the public status check
+// (/trackRequest) built on it is deliberately content-free; (2) a long,
+// single-use access code - emailed only ever to the real requester,
+// proactively at confirmation and again whenever a session ends while the
+// request is still open, never generated on demand by an AI - is what the
+// customer actually hands to whichever AI they choose. Redeeming it
+// (POST /ai/sessions/claim) is a direct API call, not a web approval page,
+// since giving the code to an AI already is the consent act. The resulting
+// session token is DB-backed, not a JWT - a lookup on every use gives free,
+// zero-staleness revocation, and there's no legacy stateless-token
+// behavior here to work around.
 //
 // Consequential actions (sharing contact info, accepting a quote, confirming
 // an appointment time) are never performed directly by a session write -
@@ -2657,73 +2655,92 @@ const AI_SESSION_DURATIONS = {
   '24h': 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
 };
+const AI_ACCESS_CODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+// A request still has something left for an AI to help with. Quotes are
+// "closed" once an appointment is actually locked in; questions have no
+// equivalent terminal state, since a conversation can always continue.
+function isAiRequestOpen(resolved) {
+  if (!resolved) return false;
+  if (resolved.requestType === 'question') return true;
+  return (resolved.quotes || []).some(q => q.status !== 'appointment_confirmed');
+}
+
+// Mints one AIAccessCodes doc and emails it to whoever the request was
+// confirmed by - never to anything a caller supplies, so only the actual
+// requester ever receives one. Used at initial confirmation, on revoke, on
+// lazily-detected natural expiry, and from the manual "new code" page -
+// one shared function so all four stay consistent.
+async function issueAndEmailAiAccessCode(trackingKey, { intro } = {}) {
+  const resolved = await resolveAiRequestByTrackingKey(trackingKey);
+  if (!resolved || !resolved.confirmed) return null;
+
+  let email, businessName;
+  if (resolved.requestType === 'quote') {
+    email = (await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1 } }))?.email;
+    businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || 'the matched businesses';
+  } else {
+    email = resolved.notification.askerEmail;
+    const businessDoc = resolved.notification.businessType === 'nonprofit'
+      ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
+      : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
+    businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
+  }
+  if (!email) return null;
+
+  const code = crypto.randomBytes(24).toString('hex');
+  await database.collection('AIAccessCodes').insertOne({
+    code, trackingKey, requestType: resolved.requestType,
+    used: false, usedAt: null,
+    createdAt: new Date(), expiresAt: new Date(Date.now() + AI_ACCESS_CODE_TTL_MS),
+  });
+
+  await sendEmail({
+    to: email,
+    subject: `Your AI access code for your request to ${businessName}`,
+    html: `
+      <p>${intro || `Want an AI assistant to help track or act on your request to <strong>${escapeHtml(businessName)}</strong>?`}</p>
+      <p>Give it this access code anytime - it works once, for one AI, until you revoke it or it expires:</p>
+      <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;font-family:monospace;font-size:.9rem;word-break:break-all;">${escapeHtml(code)}</p>
+      <p style="color:#94A3B8;font-size:.85rem;">Never paste this anywhere except directly to an AI assistant you trust - whoever has it can act on this one request on your behalf until you revoke it.</p>
+    `,
+  });
+  return code;
+}
 
 // Stateful by design (see header comment above) - looks the token up fresh
 // on every call, so a revoke (POST /ai/sessions/:sessionId/revoke) takes
 // effect on this session's very next use, not whenever a cached claim
-// happens to expire.
+// happens to expire. Also where natural expiry is lazily detected - the
+// next time an expired-but-not-yet-revoked session is actually used, a new
+// access code is emailed (once, guarded by expiryNotified) if the request
+// still has something left to track.
 const requireAiSession = async (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return res.status(401).json({ status: 'authorization_required' });
   }
   const session = await database.collection('AIAuthSessions').findOne({ sessionToken: header.slice(7) });
-  if (!session || session.revoked || session.expiresAt < new Date()) {
+  if (!session || session.trackingKey !== req.params.trackingKey) {
     return res.status(401).json({ status: 'authorization_required' });
   }
-  if (session.trackingKey !== req.params.trackingKey) {
-    return res.status(403).json({ error: 'This session is not authorized for this request' });
+  if (session.revoked) {
+    return res.status(401).json({ status: 'authorization_required' });
+  }
+  if (session.expiresAt < new Date()) {
+    if (!session.expiryNotified) {
+      await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { expiryNotified: true } });
+      const resolved = await resolveAiRequestByTrackingKey(session.trackingKey);
+      if (isAiRequestOpen(resolved)) {
+        await issueAndEmailAiAccessCode(session.trackingKey, { intro: "Your AI's access to this request ended. Still want it to help?" });
+      }
+    }
+    return res.status(401).json({ status: 'authorization_required' });
   }
   await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { lastUsedAt: new Date() } });
   req.aiSession = session;
   next();
 };
-
-function renderAiAuthorizePage(businessName, requestSummary, formAction, error) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Authorize AI Access — Needs</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px 0; }
-    .card { background: #fff; border-radius: 16px; padding: 32px 28px; max-width: 440px; width: 100%; box-sizing: border-box; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-    .icon { font-size: 2.2rem; margin-bottom: 10px; text-align: center; }
-    h1 { font-size: 1.2rem; color: #0F172A; margin: 0 0 8px; text-align: center; }
-    p { font-size: .92rem; color: #64748B; line-height: 1.5; }
-    .preview { background: #F1F5F9; border-radius: 10px; padding: 12px 16px; margin: 14px 0; color: #334155; font-size: .88rem; }
-    .error { background: #FEF2F2; color: #B91C1C; border-radius: 8px; padding: 10px 14px; font-size: .85rem; margin-bottom: 14px; }
-    label { display: block; font-size: .78rem; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .4px; margin: 16px 0 6px; }
-    input[type=text] { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 12px; font-size: 1.1rem; letter-spacing: 2px; text-align: center; }
-    .duration { display: flex; flex-direction: column; gap: 8px; }
-    .duration label.opt { display: flex; align-items: center; gap: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; font-size: .92rem; color: #0F172A; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; margin: 0; cursor: pointer; }
-    .scope-note { font-size: .78rem; color: #94A3B8; margin-top: 16px; line-height: 1.5; }
-    button { background: #2563EB; color: #fff; border: none; border-radius: 10px; padding: 13px 28px; font-size: .95rem; font-weight: 700; cursor: pointer; margin-top: 16px; width: 100%; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="icon">🤖</div>
-    <h1>Authorize AI Access</h1>
-    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ''}
-    <p>An AI assistant is requesting access to:</p>
-    <div class="preview"><strong>${escapeHtml(businessName)}</strong><br>${escapeHtml(requestSummary)}</div>
-    <form method="POST" action="${formAction}">
-      <label>Confirmation code (shown to you by the AI)</label>
-      <input type="text" name="code" maxlength="6" pattern="[0-9]{6}" required autofocus>
-      <label>Access duration</label>
-      <div class="duration">
-        <label class="opt"><input type="radio" name="duration" value="24h" checked> 24 hours — most quotes and questions take at least this long to get a response</label>
-        <label class="opt"><input type="radio" name="duration" value="30d"> 30 days — for an ongoing job you expect to take longer</label>
-      </div>
-      <button type="submit">Authorize AI Access</button>
-    </form>
-    <p class="scope-note">This AI will be able to read responses and hold ordinary conversation on this one request only. It cannot finalize an appointment, accept a quote, or share your contact info without asking you to confirm separately, and you can revoke this at any time.</p>
-  </div>
-</body>
-</html>`;
-}
 
 function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAction, extraFieldsHtml) {
   const titles = {
@@ -2772,18 +2789,9 @@ function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAc
 // fact that authorization is required, same reasoning /trackRequest already
 // documents for trackingKey itself - except here even the trackingKey isn't
 // enough on its own, a session must be presented.
-app.get('/ai/request/:trackingKey', aiAuthLimiter, async (req, res) => {
+app.get('/ai/request/:trackingKey', aiAuthLimiter, requireAiSession, async (req, res) => {
   try {
     const { trackingKey } = req.params;
-    const header = req.headers.authorization;
-    const session = header?.startsWith('Bearer ')
-      ? await database.collection('AIAuthSessions').findOne({ sessionToken: header.slice(7) })
-      : null;
-    if (!session || session.revoked || session.expiresAt < new Date() || session.trackingKey !== trackingKey) {
-      return res.json({ status: 'authorization_required' });
-    }
-    await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { lastUsedAt: new Date() } });
-
     const resolved = await resolveAiRequestByTrackingKey(trackingKey);
     if (!resolved || !resolved.confirmed) return res.status(404).json({ error: 'Request not found' });
 
@@ -2811,141 +2819,69 @@ app.get('/ai/request/:trackingKey', aiAuthLimiter, async (req, res) => {
   }
 });
 
-// POST /ai/request/:trackingKey/authorize — AI-initiated, no auth needed.
-// Creates a 10-minute attempt and emails the approval link to whichever
-// address the original request was confirmed with - never to anything the
-// AI supplies, so only the actual requester can ever approve one.
-app.post('/ai/request/:trackingKey/authorize', aiAuthLimiter, async (req, res) => {
+// POST /ai/sessions/claim — the only way left to turn an access code into a
+// working session. No separate human-approval page: the code itself,
+// delivered only ever by email to the real requester, already is the
+// approval - giving it to an AI is the consent act. Single-use: once
+// claimed, the code is dead, so a chat transcript leaked afterward exposes
+// nothing.
+app.post('/ai/sessions/claim', aiAuthLimiter, async (req, res) => {
   try {
-    const { trackingKey } = req.params;
-    const resolved = await resolveAiRequestByTrackingKey(trackingKey);
-    if (!resolved || !resolved.confirmed) return res.status(404).json({ error: 'Request not found or not yet confirmed' });
-
-    let email, businessName;
-    if (resolved.requestType === 'quote') {
-      email = (await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1 } }))?.email;
-      businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || 'the matched businesses';
-    } else {
-      email = resolved.notification.askerEmail;
-      const businessDoc = resolved.notification.businessType === 'nonprofit'
-        ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
-        : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
-      businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
-    }
-    if (!email) return res.status(404).json({ error: 'No contact email on file for this request' });
-
-    const attemptId = crypto.randomBytes(12).toString('hex');
-    const confirmationCode = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-    const attemptSecret = crypto.randomBytes(24).toString('hex');
-    await database.collection('AIAuthAttempts').insertOne({
-      attemptId, trackingKey, requestType: resolved.requestType,
-      confirmationCode, attemptSecret, channel: 'email',
-      createdAt: new Date(), expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      used: false, approvedSessionId: null,
-    });
-
-    await sendEmail({
-      to: email,
-      subject: 'An AI assistant is requesting access to your Needs request',
-      html: `
-        <p>An AI assistant is requesting access to review and help with your request to <strong>${escapeHtml(businessName)}</strong>.</p>
-        <p>It should have shown you a six-digit code. Use the link below to enter it and choose how long to allow access.</p>
-        <p><a href="${NODE_API}/ai/authorize/${attemptId}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review AI Access Request</a></p>
-        <p style="color:#94A3B8;font-size:.85rem;">If you did not request this, you can safely ignore this email - it expires in 10 minutes either way.</p>
-      `,
-    });
-
-    res.json({ attemptId, confirmationCode, attemptSecret, expiresIn: 600 });
-  } catch (err) {
-    console.error('❌ /ai/request/:trackingKey/authorize error:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-// GET /ai/authorize/:attemptId — side-effect-free preview + form, same
-// reasoning as renderClickToConfirmPage: an email scanner prefetching this
-// must not be able to approve anything on the recipient's behalf.
-app.get('/ai/authorize/:attemptId', aiAuthLimiter, async (req, res) => {
-  try {
-    const attempt = await database.collection('AIAuthAttempts').findOne({ attemptId: req.params.attemptId });
-    if (!attempt) return res.status(404).send(renderConfirmPage(false, 'This authorization link is invalid or has expired.'));
-    if (attempt.used || attempt.expiresAt < new Date()) {
-      return res.send(renderConfirmPage(attempt.used, attempt.used ? 'This authorization was already completed.' : 'This authorization request expired. Ask the AI to try again.'));
-    }
-    const resolved = await resolveAiRequestByTrackingKey(attempt.trackingKey);
-    let businessName = 'your request', summary = '';
-    if (resolved?.requestType === 'quote') {
-      businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || businessName;
-      summary = 'Read your quote responses and help you accept a quote or confirm an appointment, with your separate confirmation for each.';
-    } else if (resolved?.requestType === 'question') {
-      const businessDoc = resolved.notification.businessType === 'nonprofit'
-        ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
-        : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
-      businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || businessName;
-      summary = 'Read responses and hold ordinary conversation on your behalf.';
-    }
-    res.send(renderAiAuthorizePage(businessName, summary, `/ai/authorize/${req.params.attemptId}`, null));
-  } catch (err) {
-    console.error('❌ GET /ai/authorize error:', err);
-    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
-  }
-});
-
-app.post('/ai/authorize/:attemptId', aiCodeGuessLimiter, async (req, res) => {
-  try {
-    const attempt = await database.collection('AIAuthAttempts').findOne({ attemptId: req.params.attemptId });
-    if (!attempt) return res.status(404).send(renderConfirmPage(false, 'This authorization link is invalid or has expired.'));
-    if (attempt.used || attempt.expiresAt < new Date()) {
-      return res.send(renderConfirmPage(attempt.used, attempt.used ? 'This authorization was already completed.' : 'This authorization request expired. Ask the AI to try again.'));
-    }
     const code = String(req.body?.code || '').trim();
+    if (!code) return res.status(400).json({ error: 'code is required' });
     const duration = AI_SESSION_DURATIONS[req.body?.duration] ? req.body.duration : '24h';
-    if (code !== attempt.confirmationCode) {
-      return res.send(renderAiAuthorizePage('your request', '', `/ai/authorize/${req.params.attemptId}`, 'That code didn’t match. Please check the code shown by the AI and try again.'));
-    }
 
-    const resolved = await resolveAiRequestByTrackingKey(attempt.trackingKey);
+    const accessCode = await database.collection('AIAccessCodes').findOne({ code });
+    if (!accessCode || accessCode.used || accessCode.expiresAt < new Date()) {
+      return res.status(404).json({ error: 'This code is invalid, already used, or has expired. Ask the visitor for a new one.' });
+    }
+    await database.collection('AIAccessCodes').updateOne({ _id: accessCode._id }, { $set: { used: true, usedAt: new Date() } });
+
+    const resolved = await resolveAiRequestByTrackingKey(accessCode.trackingKey);
     const businessId = resolved?.requestType === 'question' ? resolved.notification.businessId : null;
     const businessType = resolved?.requestType === 'question' ? resolved.notification.businessType : null;
 
     const sessionToken = crypto.randomBytes(32).toString('hex');
-    const sessionResult = await database.collection('AIAuthSessions').insertOne({
-      trackingKey: attempt.trackingKey, requestType: attempt.requestType,
+    await database.collection('AIAuthSessions').insertOne({
+      trackingKey: accessCode.trackingKey, requestType: accessCode.requestType,
       businessId, businessType, sessionToken, duration,
       expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]),
-      revoked: false, createdAt: new Date(), lastUsedAt: null,
+      revoked: false, expiryNotified: false, createdAt: new Date(), lastUsedAt: null,
     });
-    await database.collection('AIAuthAttempts').updateOne(
-      { _id: attempt._id },
-      { $set: { used: true, approvedSessionId: sessionResult.insertedId } }
-    );
-
-    res.send(renderConfirmPage(true, `AI access approved for ${duration === '30d' ? '30 days' : '24 hours'}. You can revoke this anytime from the status page for this request.`));
+    res.json({ sessionToken, expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]), requestType: accessCode.requestType });
   } catch (err) {
-    console.error('❌ POST /ai/authorize error:', err);
-    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+    console.error('❌ /ai/sessions/claim error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
-// POST /ai/sessions/:attemptId/claim — the AI redeems its approved attempt
-// using the secret only it ever held. The code proved the human approved
-// *an* attempt; the secret proves this AI is the one that made *this*
-// attempt - same two-piece reasoning as the design this implements.
-app.post('/ai/sessions/:attemptId/claim', aiAuthLimiter, async (req, res) => {
+// GET/POST /ai/request/:trackingKey/newCode — lets the visitor get another
+// access code anytime, outside the two automatic triggers (initial
+// confirmation, session end) - e.g. wanting a second AI while the first
+// session is still active. Side-effect-free GET, real mint-and-email only
+// on POST, same discipline as renderClickToConfirmPage.
+app.get('/ai/request/:trackingKey/newCode', aiAuthLimiter, async (req, res) => {
   try {
-    const attempt = await database.collection('AIAuthAttempts').findOne({ attemptId: req.params.attemptId });
-    if (!attempt || attempt.attemptSecret !== String(req.body?.attemptSecret || '')) {
-      return res.status(404).json({ error: 'Invalid attempt or secret' });
-    }
-    if (!attempt.used || !attempt.approvedSessionId) {
-      return res.json({ status: 'pending_approval' });
-    }
-    const session = await database.collection('AIAuthSessions').findOne({ _id: attempt.approvedSessionId });
-    if (!session || session.revoked) return res.status(410).json({ error: 'This session has been revoked' });
-    res.json({ sessionToken: session.sessionToken, expiresAt: session.expiresAt, requestType: session.requestType });
+    const resolved = await resolveAiRequestByTrackingKey(req.params.trackingKey);
+    if (!resolved || !resolved.confirmed) return res.status(404).send(renderConfirmPage(false, 'This request could not be found.'));
+    res.send(renderClickToConfirmPage(
+      'Get a New AI Access Code',
+      `<p>This will email a new access code for this request to the address you confirmed it with. You can give it to any AI assistant you choose.</p>`,
+      `/ai/request/${encodeURIComponent(req.params.trackingKey)}/newCode`
+    ));
   } catch (err) {
-    console.error('❌ /ai/sessions/:attemptId/claim error:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('❌ GET /ai/request/:trackingKey/newCode error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+app.post('/ai/request/:trackingKey/newCode', aiAuthLimiter, async (req, res) => {
+  try {
+    const code = await issueAndEmailAiAccessCode(req.params.trackingKey);
+    if (!code) return res.status(404).send(renderConfirmPage(false, 'This request could not be found, or has no contact email on file.'));
+    res.send(renderConfirmPage(true, 'A new access code has been emailed to you.'));
+  } catch (err) {
+    console.error('❌ POST /ai/request/:trackingKey/newCode error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
 
@@ -3205,11 +3141,15 @@ app.post('/ai/sessions/:sessionId/revoke', aiAuthLimiter, async (req, res) => {
   try {
     const { sessionId } = req.params;
     if (!ObjectId.isValid(sessionId)) return res.status(404).send(renderConfirmPage(false, 'Invalid session.'));
-    const result = await database.collection('AIAuthSessions').updateOne(
-      { _id: new ObjectId(sessionId) },
-      { $set: { revoked: true } }
-    );
-    if (result.matchedCount === 0) return res.status(404).send(renderConfirmPage(false, 'Session not found.'));
+    const session = await database.collection('AIAuthSessions').findOne({ _id: new ObjectId(sessionId) });
+    if (!session) return res.status(404).send(renderConfirmPage(false, 'Session not found.'));
+    await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { revoked: true } });
+
+    const resolved = await resolveAiRequestByTrackingKey(session.trackingKey);
+    if (isAiRequestOpen(resolved)) {
+      await issueAndEmailAiAccessCode(session.trackingKey, { intro: 'AI access has been revoked, as you requested. Want to authorize a different AI?' });
+    }
+
     res.send(renderConfirmPage(true, 'AI access has been revoked. It can no longer read or act on this request.'));
   } catch (err) {
     console.error('❌ /ai/sessions/:sessionId/revoke error:', err);
@@ -5868,6 +5808,10 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
     await database.collection('PendingQuoteRequests').updateOne(
       { _id: pending._id }, { $set: { confirmedAt: new Date() } }
     );
+
+    if (pending.trackingKey) {
+      await issueAndEmailAiAccessCode(pending.trackingKey).catch(e => console.warn('⚠️ issueAndEmailAiAccessCode failed:', e?.message));
+    }
 
     // Reuse the existing matching pipeline exactly as the normal in-app flow does
     fetch(`${NODE_API}/triggerServiceMatching`, {

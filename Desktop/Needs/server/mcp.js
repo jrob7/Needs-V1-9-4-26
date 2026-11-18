@@ -259,7 +259,7 @@ function buildServer({ client, NODE_API, userId }) {
     // consent act; there is no separate approval step left to wait on.
     server.registerTool('claim_ai_access', {
       title: 'Claim AI access to a guest request using a code the visitor gives you',
-      description: "Turn an access code the visitor gave you into a working session for one specific request. The code comes from the visitor, who received it by email - never ask this tool to generate or send one, and never display the code back to the visitor since you already have it from them. The code is single-use: once claimed, the same code cannot be claimed again, and the visitor would need a new one (they can get one anytime from the request's status page) to authorize a second session. Keep the returned sessionToken to yourself and use it with send_ai_message and propose_action for this one request only.",
+      description: "Turn an access code the visitor gave you into a working session for one specific request. The code comes from the visitor, who received it by email - never ask this tool to generate or send one, and never display the code back to the visitor since you already have it from them. The code is single-use: once claimed, the same code cannot be claimed again, and the visitor would need a new one (they can get one anytime from the request's status page) to authorize a second session. This only gets you the session - it does not read anything by itself. Keep the returned sessionToken and call get_request_details next to actually see what happened, then use it with send_ai_message and propose_action for this one request only.",
       inputSchema: {
         code: z.string().describe('The access code the visitor gave you - never one you generated yourself. It already identifies which request it belongs to, so no separate trackingKey is needed here.'),
         duration: z.enum(['24h', '30d']).optional().describe('How long to hold access - defaults to 24 hours if not specified'),
@@ -272,7 +272,11 @@ function buildServer({ client, NODE_API, userId }) {
       });
       const data = await resp.json();
       if (!resp.ok) return errorText(data.error || 'Could not claim this access code - it may be invalid, already used, or expired.');
-      return text(data);
+      // Folded into the content, not left to the description alone - same
+      // reliability reasoning as check_request_status: this is just a
+      // session token, nothing has been read yet, and the model needs that
+      // said plainly here or it may report "I have access now" and stop.
+      return text({ ...data, nextStep: 'Access granted. Nothing has been read yet - call get_request_details now with this trackingKey/sessionToken to see what actually happened before saying anything to the visitor.' });
     });
 
     server.registerTool('get_request_details', {

@@ -2495,7 +2495,7 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
     // anyone who hits this link directly (a human reading the raw JSON, or
     // any AI that calls this endpoint instead of going through the
     // check_request_status tool's own wrapping of the same text).
-    const AI_INSTRUCTIONS = "To let an AI assistant read the details or act on this, give it the access code from your confirmation email and say: 'Call claim_ai_access with this code.'";
+    const AI_INSTRUCTIONS = "To let an AI assistant read the details or act on this, give it the access code from your confirmation email and say: 'Call claim_ai_access with this code, then get_request_details to see what happened.'";
 
     const need = await database.collection('NeedRequests').findOne({ trackingKey });
     if (need) {
@@ -2709,7 +2709,7 @@ async function issueAndEmailAiAccessCode(trackingKey, { intro } = {}) {
   // reasons about arbitrary pasted text, but can control what we tell the
   // human to actually say - so hand them a ready-made message to paste
   // instead of just the bare code, naming the tool directly.
-  const suggestedMessage = `Use your Needs access code to check my request to ${businessName}. Call claim_ai_access with this code: ${code}`;
+  const suggestedMessage = `Use your Needs access code to check my request to ${businessName}. Call claim_ai_access with this code: ${code} - then call get_request_details to see what happened.`;
 
   await sendEmail({
     to: email,
@@ -2864,7 +2864,12 @@ app.post('/ai/sessions/claim', aiAuthLimiter, async (req, res) => {
       expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]),
       revoked: false, expiryNotified: false, createdAt: new Date(), lastUsedAt: null,
     });
-    res.json({ sessionToken, expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]), requestType: accessCode.requestType });
+    // trackingKey included here, not just sessionToken - every other /ai/
+    // endpoint (get_request_details, send_ai_message, propose_action) needs
+    // both together, and the caller may never have learned the trackingKey
+    // any other way if this is a fresh conversation that jumped straight to
+    // claiming a code a human handed it.
+    res.json({ sessionToken, trackingKey: accessCode.trackingKey, expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]), requestType: accessCode.requestType });
   } catch (err) {
     console.error('❌ /ai/sessions/claim error:', err);
     res.status(500).json({ error: 'Internal Server Error' });

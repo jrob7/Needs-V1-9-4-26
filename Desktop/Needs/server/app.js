@@ -2695,14 +2695,23 @@ async function issueAndEmailAiAccessCode(trackingKey, { intro } = {}) {
     createdAt: new Date(), expiresAt: new Date(Date.now() + AI_ACCESS_CODE_TTL_MS),
   });
 
+  // A bare code pasted into an AI chat with no framing doesn't reliably
+  // tell the AI what to do with it, especially in a fresh conversation
+  // that never called check_request_status first and so never got the
+  // matching instruction on that side. Can't control how a third-party AI
+  // reasons about arbitrary pasted text, but can control what we tell the
+  // human to actually say - so hand them a ready-made message to paste
+  // instead of just the bare code, naming the tool directly.
+  const suggestedMessage = `Use your Needs access code to check my request to ${businessName}. Call claim_ai_access with this code: ${code}`;
+
   await sendEmail({
     to: email,
     subject: `Your AI access code for your request to ${businessName}`,
     html: `
       <p>${intro || `Want an AI assistant to help track or act on your request to <strong>${escapeHtml(businessName)}</strong>?`}</p>
-      <p>Give it this access code anytime - it works once, for one AI, until you revoke it or it expires:</p>
-      <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;font-family:monospace;font-size:.9rem;word-break:break-all;">${escapeHtml(code)}</p>
-      <p style="color:#94A3B8;font-size:.85rem;">Never paste this anywhere except directly to an AI assistant you trust - whoever has it can act on this one request on your behalf until you revoke it.</p>
+      <p>Copy this whole message and paste it to your AI assistant - it tells the AI what to do with the code, not just what the code is:</p>
+      <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;font-family:monospace;font-size:.88rem;word-break:break-all;">${escapeHtml(suggestedMessage)}</p>
+      <p style="color:#94A3B8;font-size:.85rem;">The code works once, for one AI, until you revoke it or it expires. Never paste it anywhere except directly to an AI assistant you trust - whoever has it can act on this one request on your behalf until you revoke it.</p>
     `,
   });
   return code;

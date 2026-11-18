@@ -2442,11 +2442,12 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
     // no exception) for a request type it can't resolve yet, e.g. a
     // restaurant with no in-app reply flow at all, which was never in scope
     // for the AI-authorization system.
+    let aiKey = null;
     if (pending.trackingKey) {
-      await issueAndEmailAiAccessCode(pending.trackingKey).catch(e => console.warn('⚠️ issueAndEmailAiAccessCode failed:', e?.message));
+      aiKey = await issueAndEmailAiAccessCode(pending.trackingKey).catch(e => { console.warn('⚠️ issueAndEmailAiAccessCode failed:', e?.message); return null; });
     }
 
-    res.send(renderConfirmPage(true, `Your question has been sent to ${escapeHtml(pending.businessName)}. They will respond soon.`));
+    res.send(renderConfirmPageWithKey(`Your question has been sent to ${escapeHtml(pending.businessName)}. They will respond soon.`, aiKey));
   } catch (err) {
     console.error('❌ /confirmModuleQuestion error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your question. Please try again.'));
@@ -2460,52 +2461,96 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
 // original caller ever receives this key, so possession of it is itself
 // real proof of having made the original request. Works for both quote
 // requests and questions, at whatever stage they are currently at.
+// Renders the always-public, always-content-free tracking page: a status
+// badge and a name/email/key form. No third-party resources (fonts,
+// analytics, CDN assets) anywhere on this page and no-referrer/no-store
+// headers on the response - the trackingKey already sits in this page's own
+// URL, so nothing here should hand it (or anything else) to a third party's
+// logs, and nothing here should be cacheable.
+function renderTrackingPage({ trackingKey, status, errorMessage }) {
+  const ready = status === 'ready';
+  const badge = status === 'sent'
+    ? `<div class="badge badge-neutral">Sent</div>`
+    : `<div class="badge ${ready ? 'badge-ready' : 'badge-not-ready'}">${ready ? 'Ready' : 'Not ready'}</div>`;
+  const body = status === 'sent'
+    ? `<p>This business does not have an in-app reply flow yet - they will respond to your email directly.</p>`
+    : `
+      <p>${ready
+        ? 'A response is ready. Enter your name, email, and the private key from your confirmation email to read it and reply.'
+        : 'No response yet - check back later, or enter your name, email, and private key below to chat about this request once you have one.'}</p>
+      ${errorMessage ? `<p class="error">${escapeHtml(errorMessage)}</p>` : ''}
+      <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/verify">
+        <label>Your name<input type="text" name="name" required maxlength="80"></label>
+        <label>Your email<input type="email" name="email" required maxlength="200"></label>
+        <label>Private key<input type="text" name="key" required maxlength="200" autocomplete="off"></label>
+        <button type="submit">Open Chat</button>
+      </form>
+      <p class="hint"><a href="/ai/request/${encodeURIComponent(trackingKey)}/newCode">Need a new key?</a></p>
+    `;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Track Your Request — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px 0; }
+    .card { background: #fff; border-radius: 16px; padding: 32px 28px; max-width: 420px; width: 100%; box-sizing: border-box; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    h1 { font-size: 1.15rem; color: #0F172A; margin: 0 0 14px; text-align: center; }
+    p { font-size: .92rem; color: #64748B; line-height: 1.5; }
+    .badge { display: block; text-align: center; font-weight: 700; font-size: .9rem; border-radius: 999px; padding: 8px 0; margin-bottom: 16px; }
+    .badge-ready { background: #DCFCE7; color: #166534; }
+    .badge-not-ready { background: #FEE2E2; color: #991B1B; }
+    .badge-neutral { background: #F1F5F9; color: #334155; }
+    .error { color: #B91C1C; background: #FEE2E2; border-radius: 8px; padding: 8px 12px; font-size: .85rem; }
+    label { display: block; font-size: .82rem; color: #334155; font-weight: 600; margin: 12px 0 4px; }
+    input { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 8px; padding: 10px 12px; font-size: .92rem; }
+    button { width: 100%; margin-top: 16px; background: #2563EB; color: #fff; border: none; border-radius: 10px; padding: 13px 20px; font-size: .95rem; font-weight: 700; cursor: pointer; }
+    .hint { text-align: center; margin-top: 12px; font-size: .85rem; }
+    .hint a { color: #2563EB; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Track Your Request</h1>
+    ${badge}
+    ${body}
+  </div>
+</body>
+</html>`;
+}
+
 app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
   try {
     const { trackingKey } = req.params;
     if (!trackingKey) return res.status(400).json({ error: 'trackingKey required' });
-
-    // Both tracking channels (email notification and agent polling) always
-    // apply now - there is no longer a method choice to gate this on.
-    // Repeated on every poll, not just once at submission, since a
-    // one-time note is easy to lose track of across a check that happens
-    // hours later, possibly in an unrelated conversation.
-    const REMINDER = 'No response yet - the next check should happen in about an hour.';
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Cache-Control', 'no-store');
 
     const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey });
     if (pendingQuote && !pendingQuote.confirmedAt) {
-      return res.json({ type: 'quote', status: 'awaiting_confirmation', message: 'Check your email to confirm this request before it is sent.', reminder: REMINDER });
+      return res.json({ type: 'quote', status: 'awaiting_confirmation', message: 'Check your email to confirm this request before it is sent.' });
     }
     const pendingQuestion = await database.collection('PendingModuleQuestions').findOne({ trackingKey });
     if (pendingQuestion && !pendingQuestion.confirmedAt) {
-      return res.json({ type: 'question', status: 'awaiting_confirmation', message: 'Check your email to confirm this question before it is sent.', reminder: REMINDER });
+      return res.json({ type: 'question', status: 'awaiting_confirmation', message: 'Check your email to confirm this question before it is sent.' });
     }
 
     // Confirmed quote or question - deliberately content-free from here on.
     // The business's actual response (price, answer text, proposed times)
     // already gets emailed directly and separately the moment it exists
-    // (see /respondToServiceQuote and /answerModuleQuestion) - this endpoint
+    // (see /respondToServiceQuote and /answerModuleQuestion) - this page
     // is public and unauthenticated by design (trackingKey possession is
-    // the only proof required), so it only ever reports ready/not_ready now,
-    // never the content itself. An AI wanting the actual content needs a
-    // real access code (see /ai/sessions/claim), which only ever reaches
-    // the requester by email.
-    // AI_INSTRUCTIONS is deliberately generic, never the actual access
-    // code - that stays email-only. Shown here so the instruction reaches
-    // anyone who hits this link directly (a human reading the raw JSON, or
-    // any AI that calls this endpoint instead of going through the
-    // check_request_status tool's own wrapping of the same text).
-    const AI_INSTRUCTIONS = "To let an AI assistant read the details or act on this, give it the access code from your confirmation email and say: 'Call claim_ai_access with this code, then get_request_details to see what happened.'";
-
+    // the only proof required to see a bare status), so it only ever shows
+    // ready/not_ready plus a form, never the content itself. Reading the
+    // actual content requires the private key from the confirmation email,
+    // checked on POST /trackRequest/:trackingKey/verify below.
     const need = await database.collection('NeedRequests').findOne({ trackingKey });
     if (need) {
       const quotes = await database.collection('ServiceQuotes').find({ needId: need._id }).toArray();
       const ready = quotes.some(q => q.status !== 'pending_business');
-      return res.json({
-        type: 'quote',
-        status: ready ? 'ready' : 'not_ready',
-        ...(ready ? { aiInstructions: AI_INSTRUCTIONS } : { reminder: REMINDER }),
-      });
+      return res.send(renderTrackingPage({ trackingKey, status: ready ? 'ready' : 'not_ready' }));
     }
 
     // Service businesses answer through Notifications; businesses without a
@@ -2513,25 +2558,86 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
     // ModuleQuestions record and no in-app reply flow yet.
     const notif = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
     if (notif) {
-      return res.json({
-        type: 'question',
-        status: notif.answered ? 'ready' : 'not_ready',
-        ...(notif.answered ? { aiInstructions: AI_INSTRUCTIONS } : { reminder: REMINDER }),
-      });
+      return res.send(renderTrackingPage({ trackingKey, status: notif.answered ? 'ready' : 'not_ready' }));
     }
     const moduleQuestion = await database.collection('ModuleQuestions').findOne({ trackingKey });
     if (moduleQuestion) {
-      return res.json({
-        type: 'question',
-        status: 'sent',
-        message: 'This business does not have an in-app reply flow yet - they will respond to your email directly.',
-      });
+      return res.send(renderTrackingPage({ trackingKey, status: 'sent' }));
     }
 
     return res.status(404).json({ error: 'No request found for this tracking key.' });
   } catch (err) {
     console.error('❌ /trackRequest error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /trackRequest/:trackingKey/verify — the only way into the private
+// chat page. Checks the submitted name + email against what was on file
+// when the key was issued (lightweight defense against a bare leaked key
+// with no context) and that the key itself is still valid, then opens a
+// fresh AIChatSessions doc and redirects there. The key is reusable - this
+// can succeed any number of times within its 24h life, each time starting
+// a brand-new chat session.
+app.post('/trackRequest/:trackingKey/verify', aiAuthLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const name = String(req.body?.name || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const key = String(req.body?.key || '').trim();
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Cache-Control', 'no-store');
+
+    const resolved = await resolveAiRequestByTrackingKey(trackingKey);
+    if (!resolved || !resolved.confirmed) {
+      return res.status(404).send(renderConfirmPage(false, 'This request could not be found.'));
+    }
+    const rerender = (errorMessage) => {
+      const ready = resolved.requestType === 'quote'
+        ? (resolved.quotes || []).some(q => q.status !== 'pending_business')
+        : resolved.notification.answered;
+      return res.send(renderTrackingPage({ trackingKey, status: ready ? 'ready' : 'not_ready', errorMessage }));
+    };
+
+    if (!name || !email || !key) return rerender('Please fill in your name, email, and private key.');
+
+    const accessCode = await database.collection('AIAccessCodes').findOne({ trackingKey, code: key });
+    if (!accessCode || accessCode.revoked) {
+      return rerender('That key is invalid or has been revoked. Request a new one below.');
+    }
+    if (accessCode.expiresAt < new Date()) {
+      if (!accessCode.expiryNotified) {
+        await database.collection('AIAccessCodes').updateOne({ _id: accessCode._id }, { $set: { expiryNotified: true } });
+        if (isAiRequestOpen(resolved)) {
+          await issueAndEmailAiAccessCode(trackingKey, { intro: 'Your previous AI access key expired. Still want an AI to help?' }).catch(() => {});
+        }
+      }
+      return rerender('That key has expired. Check your email for a new one, or request one below.');
+    }
+    if (
+      (accessCode.requesterEmail || '').trim().toLowerCase() !== email ||
+      (accessCode.requesterName || '').trim().toLowerCase() !== name.toLowerCase()
+    ) {
+      return rerender('That name, email, and key do not match. Double-check them and try again.');
+    }
+
+    const businessId = resolved.requestType === 'question' ? resolved.notification.businessId : null;
+    const businessType = resolved.requestType === 'question' ? resolved.notification.businessType : null;
+    const chatToken = crypto.randomBytes(24).toString('hex');
+    await database.collection('AIChatSessions').insertOne({
+      chatToken, trackingKey, requestType: resolved.requestType, businessId, businessType,
+      createdAt: new Date(), lastActivityAt: new Date(),
+    });
+
+    // Fires every time, not just on suspicious reuse - the key being
+    // reusable means this is the compensating control that makes
+    // unexpected reuse visible instead of silent.
+    sendNewChatSessionEmail(resolved, trackingKey).catch(e => console.warn('⚠️ sendNewChatSessionEmail failed:', e?.message));
+
+    res.redirect(303, `/ai/chat/${encodeURIComponent(trackingKey)}/${chatToken}`);
+  } catch (err) {
+    console.error('❌ /trackRequest/:trackingKey/verify error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
 
@@ -2609,32 +2715,43 @@ app.post('/conversation/:trackingKey/reply', conversationReplyLimiter, async (re
 });
 
 // ─── Guest AI authorization ─────────────────────────────────────────────────
-// Lets a guest (no Needs account) authorize an external AI assistant to read
-// and, within limits, act on one already-confirmed request - without OAuth,
-// since a guest has no account to OAuth into. The request itself is just the
-// existing confirmed PendingModuleQuestions/PendingQuoteRequests record,
-// identified by its existing trackingKey; nothing new is created for "the
-// request" itself.
+// Lets a guest (no Needs account) give an external AI assistant (ChatGPT,
+// Claude, anything with browsing) access to one already-confirmed request -
+// entirely through plain web pages, not MCP/an API. A guest has no Needs
+// account and no reason to have connected an MCP server, so a link + a key
+// is the only thing that reliably works with whatever AI they already use.
+// The request itself is just the existing confirmed
+// PendingModuleQuestions/PendingQuoteRequests record, identified by its
+// existing trackingKey; nothing new is created for "the request" itself.
 //
-// Two pieces: (1) the trackingKey alone never grants an AI anything - it's
-// a request identifier, not a credential, and the public status check
-// (/trackRequest) built on it is deliberately content-free; (2) a long,
-// single-use access code - emailed only ever to the real requester,
-// proactively at confirmation and again whenever a session ends while the
-// request is still open, never generated on demand by an AI - is what the
-// customer actually hands to whichever AI they choose. Redeeming it
-// (POST /ai/sessions/claim) is a direct API call, not a web approval page,
-// since giving the code to an AI already is the consent act. The resulting
-// session token is DB-backed, not a JWT - a lookup on every use gives free,
-// zero-staleness revocation, and there's no legacy stateless-token
-// behavior here to work around.
+// Two pieces: (1) the trackingKey alone never grants anything - it's a
+// request identifier, not a credential, and the public status check
+// (/trackRequest) built on it is deliberately content-free, just a status
+// badge and a name/email/key form; (2) a long, reusable private key - emailed
+// only ever to the real requester, proactively at confirmation and again
+// whenever it lapses or is revoked while the request is still open, never
+// generated on demand by an AI - is what the customer hands to whichever AI
+// they choose, along with their own name and email (checked together on
+// entry, lightweight defense against a bare leaked key with no context).
+// The key is good for a fixed 24 hours and can be used more than once in
+// that window - entering it opens a private chat page at a fresh,
+// unguessable URL. That chat page's own session is tracked separately
+// (AIChatSessions) and dies after 5 minutes of inactivity, independent of
+// the key's 24h clock - timing out just means going back to the tracking
+// page and re-entering the same still-valid key for a new chat session.
 //
 // Consequential actions (sharing contact info, accepting a quote, confirming
-// an appointment time) are never performed directly by a session write -
-// they go through AIPendingActions and a fresh, specific customer
-// confirmation showing Needs' own stored data, never text the AI supplied.
-// Ordinary reads and messages need no such confirmation once a session is
-// approved.
+// an appointment time, or both together) are never performed directly from
+// the chat page - they go through AIPendingActions and a fresh, specific
+// customer confirmation showing Needs' own stored data, never text the AI
+// supplied. Ordinary reads and messages need no such confirmation.
+//
+// Because the key is reusable rather than single-use, a leaked chat
+// transcript (shared/exported/screenshotted) can be replayed by whoever has
+// it until the key expires or is revoked. Compensating controls: an email
+// fires every time a new chat session actually starts (so unexpected reuse
+// surfaces immediately), and revocation is always available from the chat
+// page itself.
 
 // Resolves a trackingKey into the generic shape both question- and
 // quote-type requests share, mirroring the exact lookup chain
@@ -2658,11 +2775,15 @@ async function resolveAiRequestByTrackingKey(trackingKey) {
   return null;
 }
 
-const AI_SESSION_DURATIONS = {
-  '24h': 24 * 60 * 60 * 1000,
-  '30d': 30 * 24 * 60 * 60 * 1000,
-};
-const AI_ACCESS_CODE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+// The key is reusable (not single-use) for its whole 24h life - there is no
+// separate session-duration choice anymore, since nothing here is an API
+// session token. A chat page's own 5-minute idle timeout (AIChatSessions,
+// below) is a completely independent clock nested inside this one.
+const AI_ACCESS_KEY_TTL_MS = 24 * 60 * 60 * 1000;
+// A chat page session dies after this long with no request against it,
+// regardless of how much of the key's 24h is left. Re-entering the same
+// (still valid) key on the tracking page is how you come back.
+const AI_CHAT_SESSION_IDLE_MS = 5 * 60 * 1000;
 
 // A request still has something left for an AI to help with. Quotes are
 // "closed" once an appointment is actually locked in; questions have no
@@ -2673,15 +2794,77 @@ function isAiRequestOpen(resolved) {
   return (resolved.quotes || []).some(q => q.status !== 'appointment_confirmed');
 }
 
-// Mints one AIAccessCodes doc and emails it to whoever the request was
-// confirmed by - never to anything a caller supplies, so only the actual
-// requester ever receives one. Used at initial confirmation, on revoke, on
-// lazily-detected natural expiry, and from the manual "new code" page -
-// one shared function so all four stay consistent.
+// Mints one AIAccessCodes doc (the "private key") and emails it to whoever
+// the request was confirmed by - never to anything a caller supplies, so
+// only the actual requester ever receives one. Used at initial confirmation,
+// on revoke, on lazily-detected natural expiry, and from the manual "new
+// key" page - one shared function so all four stay consistent. Returns
+// { code, requesterName, requesterEmail, businessName } (or null) since
+// callers that render a page (confirmation, newCode) need more than the
+// bare key to show it well.
 async function issueAndEmailAiAccessCode(trackingKey, { intro } = {}) {
   const resolved = await resolveAiRequestByTrackingKey(trackingKey);
   if (!resolved || !resolved.confirmed) return null;
 
+  let email, name, businessName;
+  if (resolved.requestType === 'quote') {
+    const user = await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1, firstName: 1 } });
+    email = user?.email;
+    name = user?.firstName || null;
+    businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || 'the matched businesses';
+  } else {
+    email = resolved.notification.askerEmail;
+    name = resolved.notification.askerName || null;
+    const businessDoc = resolved.notification.businessType === 'nonprofit'
+      ? await database.collection('Nonprofits').findOne({ _id: resolved.notification.businessId })
+      : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
+    businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
+  }
+  if (!email) return null;
+
+  const code = crypto.randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + AI_ACCESS_KEY_TTL_MS);
+  // Revoke any still-open prior key for this trackingKey first - only one
+  // live key per request at a time, so a "new key" action (revoke, expiry,
+  // or the manual page) can't leave an old one quietly still usable.
+  await database.collection('AIAccessCodes').updateMany(
+    { trackingKey, revoked: false },
+    { $set: { revoked: true } }
+  );
+  await database.collection('AIAccessCodes').insertOne({
+    code, trackingKey, requestType: resolved.requestType,
+    requesterName: name, requesterEmail: email,
+    revoked: false, createdAt: new Date(), expiresAt,
+  });
+
+  // A bare key pasted into an AI chat with no framing doesn't reliably tell
+  // the AI what to do with it. Can't control how a third-party AI reasons
+  // about arbitrary pasted text, but can control what we tell the human to
+  // actually say - so hand them a ready-made message naming the web flow
+  // directly, not just the key.
+  const trackUrl = `${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}`;
+  const suggestedMessage = `Open ${trackUrl} and enter my name, email, and this private key to read my request to ${businessName} and reply on my behalf: ${code}`;
+
+  await sendEmail({
+    to: email,
+    subject: `Your AI access key for your request to ${businessName}`,
+    html: `
+      <p>${intro || `Want an AI assistant to help track or act on your request to <strong>${escapeHtml(businessName)}</strong>?`}</p>
+      <p>Copy this whole message and paste it to your AI assistant - it tells the AI what to do with the key, not just what the key is:</p>
+      <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;font-family:monospace;font-size:.88rem;word-break:break-all;">${escapeHtml(suggestedMessage)}</p>
+      <p style="color:#94A3B8;font-size:.85rem;">This key works for 24 hours (until ${escapeHtml(expiresAt.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }))}) and can be used more than once in that time - revoke it anytime from the chat page if you're done early. Never share it except directly with an AI assistant you trust - whoever has it, along with your name and email, can act on this one request on your behalf until it expires or you revoke it.</p>
+    `,
+  });
+  return { code, requesterName: name, requesterEmail: email, businessName, expiresAt };
+}
+
+// Fires every time a key is successfully redeemed into a new chat session -
+// the compensating control for the key being reusable rather than
+// single-use, so unexpected reuse (a leaked transcript, a shared key)
+// surfaces to the customer right away instead of running silently for the
+// rest of the key's 24h life. Reuses the same email-recipient lookup
+// issueAndEmailAiAccessCode already does.
+async function sendNewChatSessionEmail(resolved, trackingKey) {
   let email, businessName;
   if (resolved.requestType === 'quote') {
     email = (await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1 } }))?.email;
@@ -2693,68 +2876,40 @@ async function issueAndEmailAiAccessCode(trackingKey, { intro } = {}) {
       : await database.collection('Services').findOne({ _id: resolved.notification.businessId });
     businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
   }
-  if (!email) return null;
-
-  const code = crypto.randomBytes(24).toString('hex');
-  await database.collection('AIAccessCodes').insertOne({
-    code, trackingKey, requestType: resolved.requestType,
-    used: false, usedAt: null,
-    createdAt: new Date(), expiresAt: new Date(Date.now() + AI_ACCESS_CODE_TTL_MS),
-  });
-
-  // A bare code pasted into an AI chat with no framing doesn't reliably
-  // tell the AI what to do with it, especially in a fresh conversation
-  // that never called check_request_status first and so never got the
-  // matching instruction on that side. Can't control how a third-party AI
-  // reasons about arbitrary pasted text, but can control what we tell the
-  // human to actually say - so hand them a ready-made message to paste
-  // instead of just the bare code, naming the tool directly.
-  const suggestedMessage = `Use your Needs access code to check my request to ${businessName}. Call claim_ai_access with this code: ${code} - then call get_request_details to see what happened.`;
-
+  if (!email) return;
   await sendEmail({
     to: email,
-    subject: `Your AI access code for your request to ${businessName}`,
+    subject: `An AI accessed your request to ${businessName}`,
     html: `
-      <p>${intro || `Want an AI assistant to help track or act on your request to <strong>${escapeHtml(businessName)}</strong>?`}</p>
-      <p>Copy this whole message and paste it to your AI assistant - it tells the AI what to do with the code, not just what the code is:</p>
-      <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;font-family:monospace;font-size:.88rem;word-break:break-all;">${escapeHtml(suggestedMessage)}</p>
-      <p style="color:#94A3B8;font-size:.85rem;">The code works once, for one AI, until you revoke it or it expires. Never paste it anywhere except directly to an AI assistant you trust - whoever has it can act on this one request on your behalf until you revoke it.</p>
+      <p>An AI assistant just used your private key to open a chat about your request to <strong>${escapeHtml(businessName)}</strong>.</p>
+      <p style="color:#94A3B8;font-size:.85rem;">Didn't expect this? <a href="${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}/revoke">Revoke the key</a> right away.</p>
     `,
   });
-  return code;
 }
 
-// Stateful by design (see header comment above) - looks the token up fresh
-// on every call, so a revoke (POST /ai/sessions/:sessionId/revoke) takes
-// effect on this session's very next use, not whenever a cached claim
-// happens to expire. Also where natural expiry is lazily detected - the
-// next time an expired-but-not-yet-revoked session is actually used, a new
-// access code is emailed (once, guarded by expiryNotified) if the request
-// still has something left to track.
-const requireAiSession = async (req, res, next) => {
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
-    return res.status(401).json({ status: 'authorization_required' });
+// Looks up an AIChatSessions doc by chatToken and enforces its 5-minute
+// sliding idle timeout, completely independent of the parent key's own 24h
+// clock - also re-checked fresh here on every request, so a revoke takes
+// effect on this chat session's very next action, not whenever the chat
+// session's own idle window happens to expire. No Bearer header - the
+// credential is the chatToken in the URL itself, since this is a browser
+// page, not an API client.
+const requireAiChatSession = async (req, res, next) => {
+  const { trackingKey, chatToken } = req.params;
+  const timeoutPage = (message) => res.status(401).send(renderConfirmPage(false, message));
+
+  const session = await database.collection('AIChatSessions').findOne({ chatToken, trackingKey });
+  if (!session) return timeoutPage('This chat link is invalid. Go back to your tracking link and enter your key again.');
+  if (Date.now() - new Date(session.lastActivityAt).getTime() > AI_CHAT_SESSION_IDLE_MS) {
+    return timeoutPage('This chat session timed out from inactivity. Go back to your tracking link and re-enter your key to start a new one.');
   }
-  const session = await database.collection('AIAuthSessions').findOne({ sessionToken: header.slice(7) });
-  if (!session || session.trackingKey !== req.params.trackingKey) {
-    return res.status(401).json({ status: 'authorization_required' });
+  const accessCode = await database.collection('AIAccessCodes').findOne({ trackingKey, revoked: false, expiresAt: { $gt: new Date() } });
+  if (!accessCode) {
+    return timeoutPage('Access to this request has expired or been revoked. Go back to your tracking link for a new key.');
   }
-  if (session.revoked) {
-    return res.status(401).json({ status: 'authorization_required' });
-  }
-  if (session.expiresAt < new Date()) {
-    if (!session.expiryNotified) {
-      await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { expiryNotified: true } });
-      const resolved = await resolveAiRequestByTrackingKey(session.trackingKey);
-      if (isAiRequestOpen(resolved)) {
-        await issueAndEmailAiAccessCode(session.trackingKey, { intro: "Your AI's access to this request ended. Still want it to help?" });
-      }
-    }
-    return res.status(401).json({ status: 'authorization_required' });
-  }
-  await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { lastUsedAt: new Date() } });
-  req.aiSession = session;
+
+  await database.collection('AIChatSessions').updateOne({ _id: session._id }, { $set: { lastActivityAt: new Date() } });
+  req.aiChatSession = session;
   next();
 };
 
@@ -2763,6 +2918,7 @@ function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAc
     share_contact: 'Share Your Contact Info?',
     accept_quote: 'Accept This Quote?',
     confirm_appointment_time: 'Confirm Appointment Time',
+    accept_quote_and_confirm_appointment: 'Accept Quote & Confirm Appointment',
   };
   return `<!DOCTYPE html>
 <html lang="en">
@@ -2800,94 +2956,140 @@ function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAc
 </html>`;
 }
 
-// GET /ai/request/:trackingKey — machine-facing status/content for an AI
-// holding a session. No/expired/revoked session reveals nothing beyond the
-// fact that authorization is required, same reasoning /trackRequest already
-// documents for trackingKey itself - except here even the trackingKey isn't
-// enough on its own, a session must be presented.
-app.get('/ai/request/:trackingKey', aiAuthLimiter, requireAiSession, async (req, res) => {
-  try {
-    const { trackingKey } = req.params;
-    const resolved = await resolveAiRequestByTrackingKey(trackingKey);
-    if (!resolved || !resolved.confirmed) return res.status(404).json({ error: 'Request not found' });
+// The private chat page itself - quote header(s) + message thread + reply
+// box + action buttons, all server-rendered, no third-party resources (same
+// no-referrer/no-store reasoning as renderTrackingPage, since the chatToken
+// now sits in this page's own URL). pendingNote surfaces right after an
+// action is proposed (redirect-with-query-param, not a database poll).
+function renderAiChatPage({ trackingKey, chatToken, requestType, quotes, messages, pendingNote }) {
+  const actionForm = (actionType, label, businessName) => `
+    <form method="POST" action="/ai/chat/${encodeURIComponent(trackingKey)}/${chatToken}/actions/${actionType}" style="display:inline;">
+      ${businessName ? `<input type="hidden" name="businessName" value="${escapeHtml(businessName)}">` : ''}
+      <button type="submit" class="actionBtn">${label}</button>
+    </form>`;
 
-    if (resolved.requestType === 'quote') {
-      return res.json({
-        status: 'ok', type: 'quote',
-        quotes: (resolved.quotes || []).map(q => ({
-          businessName: q.businessName, status: q.status,
-          estimate: q.estimate || null, confirmedPrice: q.confirmedPrice || null,
-          proposedDate: q.proposedDate || null, proposedTime: q.proposedTime || null,
-          proposedOptions: (q.proposedOptions || []).map(o => ({ date: o.date, time: o.time })),
-          qaHistory: q.qaHistory || [],
-        })),
-      });
-    }
-    const notif = resolved.notification;
-    return res.json({
-      status: 'ok', type: 'question',
-      messages: notif.messages?.length ? notif.messages.map(m => ({ from: m.from, text: m.text, at: m.at })) : [{ from: 'guest', text: notif.question, at: notif.createdAt }],
-      needsReply: notif.needsReply !== false,
-    });
-  } catch (err) {
-    console.error('❌ GET /ai/request/:trackingKey error:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
+  let contentHtml = '';
+  if (requestType === 'quote') {
+    contentHtml = (quotes || []).map(q => {
+      const thread = (q.qaHistory || []).map(m => `
+        <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
+      const hasTime = q.proposedDate && q.proposedTime;
+      let actions = actionForm('share_contact', 'Share Contact Info', q.businessName);
+      if (['business_confirmed', 'business_edited'].includes(q.status)) {
+        actions += hasTime
+          ? actionForm('accept_quote_and_confirm_appointment', `Accept Quote & Confirm ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}`, q.businessName)
+          : actionForm('accept_quote', 'Accept Quote', q.businessName);
+      }
+      if (q.status === 'awaiting_guest_time_confirmation') {
+        actions += actionForm('confirm_appointment_time', 'Confirm an Appointment Time', q.businessName);
+      }
+      return `
+        <div class="quoteCard">
+          <h2>${escapeHtml(q.businessName)}</h2>
+          <p class="meta">${q.confirmedPrice ? `$${escapeHtml(String(q.confirmedPrice))}` : (q.estimate || 'No price yet')}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}</p>
+          ${thread ? `<div class="thread">${thread}</div>` : ''}
+          <div class="actions">${actions}</div>
+        </div>`;
+    }).join('');
+  } else {
+    const businessName = quotes?.businessName || 'the business';
+    const thread = (messages || []).map(m => `
+      <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
+    contentHtml = `
+      <div class="quoteCard">
+        <h2>${escapeHtml(businessName)}</h2>
+        <div class="thread">${thread}</div>
+        <form method="POST" action="/ai/chat/${encodeURIComponent(trackingKey)}/${chatToken}/message">
+          <textarea name="text" placeholder="Type a message…" required></textarea>
+          <button type="submit">Send</button>
+        </form>
+        <div class="actions">${actionForm('share_contact', 'Share Contact Info')}</div>
+      </div>`;
   }
-});
 
-// POST /ai/sessions/claim — the only way left to turn an access code into a
-// working session. No separate human-approval page: the code itself,
-// delivered only ever by email to the real requester, already is the
-// approval - giving it to an AI is the consent act. Single-use: once
-// claimed, the code is dead, so a chat transcript leaked afterward exposes
-// nothing.
-app.post('/ai/sessions/claim', aiAuthLimiter, async (req, res) => {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Your Request — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; padding: 24px 16px; }
+    .wrap { max-width: 480px; margin: 0 auto; }
+    .notice { background: #FEF9C3; color: #854D0E; border-radius: 10px; padding: 10px 14px; font-size: .85rem; margin-bottom: 14px; }
+    .quoteCard { background: #fff; border-radius: 16px; padding: 22px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    h2 { font-size: 1.05rem; color: #0F172A; margin: 0 0 4px; }
+    .meta { font-size: .9rem; color: #334155; margin: 0 0 12px; }
+    .thread { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+    .bubble { max-width: 90%; padding: 9px 13px; border-radius: 12px; font-size: .9rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+    .bubble-guest { background: #EFF6FF; color: #1E3A8A; align-self: flex-end; }
+    .bubble-org { background: #F1F5F9; color: #334155; align-self: flex-start; }
+    textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    button, .actionBtn { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
+    .quoteCard > form > button { width: 100%; padding: 12px; font-size: .92rem; }
+    .footer { text-align: center; font-size: .8rem; color: #94A3B8; margin-top: 8px; }
+    .footer a { color: #2563EB; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    ${pendingNote ? `<div class="notice">${escapeHtml(pendingNote)}</div>` : ''}
+    ${contentHtml}
+    <p class="footer">This chat closes after 5 minutes of inactivity - re-enter your key from <a href="/trackRequest/${encodeURIComponent(trackingKey)}">the tracking page</a> to come back. <a href="/ai/request/${encodeURIComponent(trackingKey)}/revoke">Revoke access</a> if this wasn't you.</p>
+  </div>
+</body>
+</html>`;
+}
+
+async function loadAiChatContent(trackingKey) {
+  const resolved = await resolveAiRequestByTrackingKey(trackingKey);
+  if (!resolved || !resolved.confirmed) return null;
+  if (resolved.requestType === 'quote') {
+    return { requestType: 'quote', quotes: resolved.quotes || [] };
+  }
+  const notif = resolved.notification;
+  const businessDoc = notif.businessType === 'nonprofit'
+    ? await database.collection('Nonprofits').findOne({ _id: notif.businessId })
+    : await database.collection('Services').findOne({ _id: notif.businessId });
+  const businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
+  const messages = notif.messages?.length ? notif.messages : [
+    { from: 'guest', text: notif.question, at: notif.createdAt },
+    ...(notif.answered ? [{ from: 'org', text: notif.answer, at: notif.answeredAt }] : []),
+  ];
+  return { requestType: 'question', messages, quotes: { businessName } };
+}
+
+// GET /ai/chat/:trackingKey/:chatToken — the private chat page itself.
+app.get('/ai/chat/:trackingKey/:chatToken', aiAuthLimiter, requireAiChatSession, async (req, res) => {
   try {
-    const code = String(req.body?.code || '').trim();
-    if (!code) return res.status(400).json({ error: 'code is required' });
-    const duration = AI_SESSION_DURATIONS[req.body?.duration] ? req.body.duration : '24h';
-
-    const accessCode = await database.collection('AIAccessCodes').findOne({ code });
-    if (!accessCode || accessCode.used || accessCode.expiresAt < new Date()) {
-      return res.status(404).json({ error: 'This code is invalid, already used, or has expired. Ask the visitor for a new one.' });
-    }
-    await database.collection('AIAccessCodes').updateOne({ _id: accessCode._id }, { $set: { used: true, usedAt: new Date() } });
-
-    const resolved = await resolveAiRequestByTrackingKey(accessCode.trackingKey);
-    const businessId = resolved?.requestType === 'question' ? resolved.notification.businessId : null;
-    const businessType = resolved?.requestType === 'question' ? resolved.notification.businessType : null;
-
-    const sessionToken = crypto.randomBytes(32).toString('hex');
-    await database.collection('AIAuthSessions').insertOne({
-      trackingKey: accessCode.trackingKey, requestType: accessCode.requestType,
-      businessId, businessType, sessionToken, duration,
-      expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]),
-      revoked: false, expiryNotified: false, createdAt: new Date(), lastUsedAt: null,
-    });
-    // trackingKey included here, not just sessionToken - every other /ai/
-    // endpoint (get_request_details, send_ai_message, propose_action) needs
-    // both together, and the caller may never have learned the trackingKey
-    // any other way if this is a fresh conversation that jumped straight to
-    // claiming a code a human handed it.
-    res.json({ sessionToken, trackingKey: accessCode.trackingKey, expiresAt: new Date(Date.now() + AI_SESSION_DURATIONS[duration]), requestType: accessCode.requestType });
+    const { trackingKey, chatToken } = req.params;
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Cache-Control', 'no-store');
+    const content = await loadAiChatContent(trackingKey);
+    if (!content) return res.status(404).send(renderConfirmPage(false, 'This request could not be found.'));
+    res.send(renderAiChatPage({ trackingKey, chatToken, ...content, pendingNote: req.query.pending ? String(req.query.pending) : null }));
   } catch (err) {
-    console.error('❌ /ai/sessions/claim error:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('❌ GET /ai/chat error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
 
 // GET/POST /ai/request/:trackingKey/newCode — lets the visitor get another
-// access code anytime, outside the two automatic triggers (initial
-// confirmation, session end) - e.g. wanting a second AI while the first
-// session is still active. Side-effect-free GET, real mint-and-email only
-// on POST, same discipline as renderClickToConfirmPage.
+// key anytime, outside the two automatic triggers (initial confirmation,
+// expiry/revoke) - e.g. wanting to hand a second AI its own fresh key.
+// Side-effect-free GET, real mint-and-email only on POST, same discipline
+// as renderClickToConfirmPage. Minting a new key here also retires any
+// prior one for this trackingKey (see issueAndEmailAiAccessCode) - only one
+// live key per request at a time.
 app.get('/ai/request/:trackingKey/newCode', aiAuthLimiter, async (req, res) => {
   try {
     const resolved = await resolveAiRequestByTrackingKey(req.params.trackingKey);
     if (!resolved || !resolved.confirmed) return res.status(404).send(renderConfirmPage(false, 'This request could not be found.'));
     res.send(renderClickToConfirmPage(
-      'Get a New AI Access Code',
-      `<p>This will email a new access code for this request to the address you confirmed it with. You can give it to any AI assistant you choose.</p>`,
+      'Get a New AI Access Key',
+      `<p>This will email a new private key for this request to the address you confirmed it with, and retire any key currently in use. You can give it to any AI assistant you choose.</p>`,
       `/ai/request/${encodeURIComponent(req.params.trackingKey)}/newCode`
     ));
   } catch (err) {
@@ -2897,89 +3099,95 @@ app.get('/ai/request/:trackingKey/newCode', aiAuthLimiter, async (req, res) => {
 });
 app.post('/ai/request/:trackingKey/newCode', aiAuthLimiter, async (req, res) => {
   try {
-    const code = await issueAndEmailAiAccessCode(req.params.trackingKey);
-    if (!code) return res.status(404).send(renderConfirmPage(false, 'This request could not be found, or has no contact email on file.'));
-    res.send(renderConfirmPage(true, 'A new access code has been emailed to you.'));
+    const aiKey = await issueAndEmailAiAccessCode(req.params.trackingKey);
+    if (!aiKey) return res.status(404).send(renderConfirmPage(false, 'This request could not be found, or has no contact email on file.'));
+    res.send(renderConfirmPageWithKey('A new key has been emailed to you.', aiKey));
   } catch (err) {
     console.error('❌ POST /ai/request/:trackingKey/newCode error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
 
-// POST /ai/request/:trackingKey/message — ordinary conversation, question
-// requests only. Reuses the exact mutation /conversation/:trackingKey/reply
-// already performs, just reached through a session instead of bare
-// trackingKey possession.
-app.post('/ai/request/:trackingKey/message', requireAiSession, async (req, res) => {
+// POST /ai/chat/:trackingKey/:chatToken/message — ordinary conversation,
+// question requests only. Reuses the exact mutation
+// /conversation/:trackingKey/reply already performs, just reached through
+// a chat session instead of bare trackingKey possession. Re-renders the
+// chat page with the new message, rather than returning bare JSON - a
+// browsing AI (or a human glancing at the page) reads a page, not an API.
+app.post('/ai/chat/:trackingKey/:chatToken/message', requireAiChatSession, async (req, res) => {
   try {
-    const { trackingKey } = req.params;
-    if (req.aiSession.requestType !== 'question') {
-      return res.status(400).json({ error: 'Ordinary messaging is only available for question-type requests in this version.' });
+    const { trackingKey, chatToken } = req.params;
+    if (req.aiChatSession.requestType !== 'question') {
+      return res.status(400).send(renderConfirmPage(false, 'Ordinary messaging is only available for question-type requests in this version.'));
     }
     const text = String(req.body?.text || '').trim().slice(0, 2000);
-    if (!text) return res.status(400).json({ error: 'text is required' });
+    if (!text) return res.status(400).send(renderConfirmPage(false, 'Please enter a message before sending.'));
 
     const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
-    if (!notification) return res.status(404).json({ error: 'Request not found' });
+    if (!notification) return res.status(404).send(renderConfirmPage(false, 'Request not found.'));
 
     const moderation = await moderateText(text);
     if (moderation.blocked) {
-      console.warn('⚠️ /ai/request/:trackingKey/message blocked by moderation, trackingKey:', trackingKey);
-      return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
+      console.warn('⚠️ /ai/chat/:trackingKey/:chatToken/message blocked by moderation, trackingKey:', trackingKey);
+      return res.status(400).send(renderConfirmPage(false, MODERATION_BLOCKED_MESSAGE));
     }
 
     await database.collection('Notifications').updateOne(
       { _id: notification._id },
       { $push: { messages: { from: 'guest', text, at: new Date() } }, $set: { read: false, needsReply: true } }
     );
-    res.json({ status: 'sent' });
+    res.redirect(303, `/ai/chat/${encodeURIComponent(trackingKey)}/${chatToken}`);
   } catch (err) {
-    console.error('❌ /ai/request/:trackingKey/message error:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('❌ /ai/chat/:trackingKey/:chatToken/message error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
 
-// POST /ai/request/:trackingKey/actions/:actionType — the AI attempts a
-// consequential action; nothing is performed yet. A pending action is
-// created and the customer is sent a fresh confirmation built from Needs'
-// own stored data (the actual price, the actual proposed times) - never
-// from data the AI supplied, so a manipulated AI can propose anything, but
-// the customer only ever sees and confirms what Needs itself has on file.
-app.post('/ai/request/:trackingKey/actions/:actionType', requireAiSession, async (req, res) => {
+// POST /ai/chat/:trackingKey/:chatToken/actions/:actionType — the AI
+// attempts a consequential action; nothing is performed yet. A pending
+// action is created and the customer is sent a fresh confirmation built
+// from Needs' own stored data (the actual price, the actual proposed
+// times) - never from data the AI supplied, so a manipulated AI can
+// propose anything, but the customer only ever sees and confirms what
+// Needs itself has on file. accept_quote_and_confirm_appointment covers
+// the common case where a quote already carries a proposed date/time
+// alongside its price - one pending action, one email, one confirm page,
+// instead of two separate round trips for what's really one decision.
+app.post('/ai/chat/:trackingKey/:chatToken/actions/:actionType', requireAiChatSession, async (req, res) => {
   try {
-    const { trackingKey, actionType } = req.params;
-    if (!['share_contact', 'accept_quote', 'confirm_appointment_time'].includes(actionType)) {
-      return res.status(400).json({ error: 'Unknown actionType' });
+    const { trackingKey, chatToken, actionType } = req.params;
+    if (!['share_contact', 'accept_quote', 'confirm_appointment_time', 'accept_quote_and_confirm_appointment'].includes(actionType)) {
+      return res.status(400).send(renderConfirmPage(false, 'Unknown action.'));
     }
     const resolved = await resolveAiRequestByTrackingKey(trackingKey);
-    if (!resolved || !resolved.confirmed) return res.status(404).json({ error: 'Request not found' });
+    if (!resolved || !resolved.confirmed) return res.status(404).send(renderConfirmPage(false, 'Request not found.'));
 
     let targetQuote = null;
     if (resolved.requestType === 'quote' && (resolved.quotes || []).length > 0) {
-      // Resolved for all three action types when this is a quote request -
-      // share_contact needs to know which business to notify too, not just
-      // accept_quote/confirm_appointment_time.
       const quotes = resolved.quotes || [];
       const wanted = String(req.body?.businessName || '').trim().toLowerCase();
       targetQuote = quotes.length === 1 ? quotes[0] : quotes.find(q => (q.businessName || '').toLowerCase() === wanted);
       if (!targetQuote) {
-        return res.status(400).json({ error: 'businessName is required to identify which quote, since more than one business matched this request', businesses: quotes.map(q => q.businessName) });
+        return res.status(400).send(renderConfirmPage(false, 'Could not tell which business this is for - please try again from the chat page.'));
       }
     }
-    if (actionType === 'accept_quote' || actionType === 'confirm_appointment_time') {
-      if (resolved.requestType !== 'quote') return res.status(400).json({ error: `${actionType} only applies to quote requests` });
-      if (actionType === 'accept_quote' && !['business_confirmed', 'business_edited'].includes(targetQuote.status)) {
-        return res.status(409).json({ error: `This quote cannot be accepted in its current state (${targetQuote.status}).` });
+    if (actionType !== 'share_contact') {
+      if (resolved.requestType !== 'quote') return res.status(400).send(renderConfirmPage(false, `${actionType} only applies to quote requests.`));
+      if ((actionType === 'accept_quote' || actionType === 'accept_quote_and_confirm_appointment') && !['business_confirmed', 'business_edited'].includes(targetQuote.status)) {
+        return res.status(409).send(renderConfirmPage(false, `This quote cannot be accepted in its current state (${targetQuote.status}).`));
+      }
+      if (actionType === 'accept_quote_and_confirm_appointment' && !(targetQuote.proposedDate && targetQuote.proposedTime)) {
+        return res.status(409).send(renderConfirmPage(false, 'This quote has no proposed appointment time yet.'));
       }
       if (actionType === 'confirm_appointment_time' && targetQuote.status !== 'awaiting_guest_time_confirmation') {
-        return res.status(409).json({ error: `No proposed times are awaiting confirmation for this quote (status: ${targetQuote.status}).` });
+        return res.status(409).send(renderConfirmPage(false, `No proposed times are awaiting confirmation for this quote (status: ${targetQuote.status}).`));
       }
     }
 
     const confirmToken = crypto.randomBytes(16).toString('hex');
     const pendingAction = {
       pendingActionId: crypto.randomBytes(12).toString('hex'),
-      sessionId: req.aiSession._id, trackingKey, actionType,
+      trackingKey, actionType,
       quoteId: targetQuote?._id || null,
       proposedData: req.body?.data || {},
       status: 'pending', confirmToken,
@@ -3003,6 +3211,7 @@ app.post('/ai/request/:trackingKey/actions/:actionType', requireAiSession, async
       share_contact: 'Share Your Contact Info',
       accept_quote: `Accept the Quote${targetQuote?.confirmedPrice ? ` ($${targetQuote.confirmedPrice})` : ''}`,
       confirm_appointment_time: 'Confirm an Appointment Time',
+      accept_quote_and_confirm_appointment: `Accept the Quote${targetQuote?.confirmedPrice ? ` ($${targetQuote.confirmedPrice})` : ''} and Confirm ${targetQuote?.proposedDate || ''} at ${targetQuote?.proposedTime || ''}`,
     };
     if (email) {
       await sendEmail({
@@ -3016,14 +3225,10 @@ app.post('/ai/request/:trackingKey/actions/:actionType', requireAiSession, async
       });
     }
 
-    res.json({
-      status: 'pending_customer_confirmation',
-      pendingActionId: pendingAction.pendingActionId,
-      message: 'Ask the customer to check their email to confirm before this is finalized.',
-    });
+    res.redirect(303, `/ai/chat/${encodeURIComponent(trackingKey)}/${chatToken}?pending=${encodeURIComponent('Ask the customer to check their email to confirm before this is finalized.')}`);
   } catch (err) {
-    console.error('❌ /ai/request/:trackingKey/actions error:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('❌ /ai/chat/:trackingKey/:chatToken/actions error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
 
@@ -3062,6 +3267,9 @@ app.get('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
       extraFieldsHtml = options.map((o, i) => `
         <label class="opt"><input type="radio" name="optionToken" value="${escapeHtml(o.token)}" ${i === 0 ? 'checked' : ''}> ${escapeHtml(o.date)} at ${escapeHtml(o.time)}</label>`
       ).join('');
+    } else if (action.actionType === 'accept_quote_and_confirm_appointment') {
+      businessName = quote?.businessName || businessName;
+      detailsHtml = `Accept the quote${quote?.confirmedPrice ? ` of <strong>$${escapeHtml(String(quote.confirmedPrice))}</strong>` : ''} from ${escapeHtml(businessName)} and confirm the appointment for <strong>${escapeHtml(quote?.proposedDate || '')} at ${escapeHtml(quote?.proposedTime || '')}</strong>?`;
     }
 
     res.send(renderAiConfirmActionPage(businessName, action.actionType, detailsHtml, `/ai/confirmAction/${req.params.confirmToken}`, extraFieldsHtml));
@@ -3145,6 +3353,12 @@ app.post('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
       return res.send(renderConfirmPage(true, `Your appointment with ${escapeHtml(quote.businessName)} is confirmed for ${escapeHtml(option.date)} at ${escapeHtml(option.time)}.`));
     }
 
+    if (action.actionType === 'accept_quote_and_confirm_appointment') {
+      if (!quote) return res.send(renderConfirmPage(false, 'This quote could not be found.'));
+      await finalizeAppointmentConfirmation(quote, quote._id.toString());
+      return res.send(renderConfirmPage(true, `You accepted the quote from ${escapeHtml(quote.businessName)} and confirmed the appointment for ${escapeHtml(quote.proposedDate)} at ${escapeHtml(quote.proposedTime)}.`));
+    }
+
     res.send(renderConfirmPage(false, 'Unknown action.'));
   } catch (err) {
     console.error('❌ POST /ai/confirmAction error:', err);
@@ -3152,28 +3366,41 @@ app.post('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
   }
 });
 
-// POST /ai/sessions/:sessionId/revoke — immediate on the session's next use,
-// cannot undo anything already sent or disclosed. No auth beyond the
-// sessionId itself (a 24-char ObjectId plus a 128-bit trackingKey match),
-// same bearer-capability reasoning already used throughout this file - the
-// customer is the only one ever given this id, via the approval-confirmation
-// page and every subsequent activity email.
-app.post('/ai/sessions/:sessionId/revoke', aiAuthLimiter, async (req, res) => {
+// GET/POST /ai/request/:trackingKey/revoke — keyed on the key itself, not a
+// session: revoking kills the current AIAccessCodes doc, which
+// requireAiChatSession already re-checks on every request, so any open
+// chat session dies on its very next action too, not just future
+// /trackRequest verify attempts. Side-effect-free GET (same
+// renderClickToConfirmPage discipline as newCode), real revoke only on
+// POST - this link is reachable from the chat page itself, which a
+// prefetching tool could in principle crawl.
+app.get('/ai/request/:trackingKey/revoke', aiAuthLimiter, async (req, res) => {
   try {
-    const { sessionId } = req.params;
-    if (!ObjectId.isValid(sessionId)) return res.status(404).send(renderConfirmPage(false, 'Invalid session.'));
-    const session = await database.collection('AIAuthSessions').findOne({ _id: new ObjectId(sessionId) });
-    if (!session) return res.status(404).send(renderConfirmPage(false, 'Session not found.'));
-    await database.collection('AIAuthSessions').updateOne({ _id: session._id }, { $set: { revoked: true } });
+    const resolved = await resolveAiRequestByTrackingKey(req.params.trackingKey);
+    if (!resolved || !resolved.confirmed) return res.status(404).send(renderConfirmPage(false, 'This request could not be found.'));
+    res.send(renderClickToConfirmPage(
+      'Revoke AI Access?',
+      `<p>This immediately invalidates the current private key. Any AI using it loses access right away, and - if this request is still open - a fresh key is emailed to you.</p>`,
+      `/ai/request/${encodeURIComponent(req.params.trackingKey)}/revoke`
+    ));
+  } catch (err) {
+    console.error('❌ GET /ai/request/:trackingKey/revoke error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+app.post('/ai/request/:trackingKey/revoke', aiAuthLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    await database.collection('AIAccessCodes').updateMany({ trackingKey, revoked: false }, { $set: { revoked: true } });
 
-    const resolved = await resolveAiRequestByTrackingKey(session.trackingKey);
+    const resolved = await resolveAiRequestByTrackingKey(trackingKey);
     if (isAiRequestOpen(resolved)) {
-      await issueAndEmailAiAccessCode(session.trackingKey, { intro: 'AI access has been revoked, as you requested. Want to authorize a different AI?' });
+      await issueAndEmailAiAccessCode(trackingKey, { intro: 'AI access has been revoked, as you requested. Want to authorize a different AI?' });
     }
 
     res.send(renderConfirmPage(true, 'AI access has been revoked. It can no longer read or act on this request.'));
   } catch (err) {
-    console.error('❌ /ai/sessions/:sessionId/revoke error:', err);
+    console.error('❌ /ai/request/:trackingKey/revoke error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
@@ -5610,6 +5837,54 @@ function renderConfirmPage(success, message) {
 </html>`;
 }
 
+// Same success card as renderConfirmPage, plus - when a private AI-access
+// key was actually issued alongside the main confirmation - a monospace key
+// box with a real, working copy button. Only usable here because this is a
+// live web page (JS runs); the same key shown in the confirmation email
+// stays plain selectable text, since most email clients strip the script a
+// copy button needs.
+function renderConfirmPageWithKey(message, keyInfo) {
+  const keyBlock = keyInfo ? `
+    <p style="margin-top:18px;">Private AI access key (valid until ${escapeHtml(new Date(keyInfo.expiresAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }))}):</p>
+    <div class="keyrow">
+      <code id="aiKey">${escapeHtml(keyInfo.code)}</code>
+      <button type="button" onclick="
+        navigator.clipboard.writeText(document.getElementById('aiKey').textContent).then(() => {
+          this.textContent = 'Copied!';
+          setTimeout(() => { this.textContent = 'Copy'; }, 1500);
+        });
+      ">Copy</button>
+    </div>
+    <p style="font-size:.82rem;color:#94A3B8;">Also emailed to you - give this, along with your name and email, to an AI assistant to let it read or act on this request.</p>
+  ` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Request Confirmed — Needs</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F0F2F5; margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 20px 0; }
+    .card { background: #fff; border-radius: 16px; padding: 36px 28px; max-width: 440px; text-align: center; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .icon { font-size: 2.6rem; margin-bottom: 12px; }
+    h1 { font-size: 1.2rem; color: #0F172A; margin-bottom: 8px; }
+    p { font-size: .95rem; color: #64748B; line-height: 1.5; }
+    .keyrow { display: flex; align-items: center; gap: 8px; background: #F1F5F9; border-radius: 10px; padding: 10px 12px; }
+    .keyrow code { flex: 1; text-align: left; font-size: .8rem; color: #334155; word-break: break-all; }
+    .keyrow button { border: none; background: #2563EB; color: #fff; border-radius: 8px; padding: 8px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✅</div>
+    <h1>Request Confirmed</h1>
+    <p>${message}</p>
+    ${keyBlock}
+  </div>
+</body>
+</html>`;
+}
+
 // Landing page a guest confirmation email link opens to - shows what is
 // about to happen and requires an explicit button click (a real POST) to
 // actually do it. GET itself has no side effect, specifically so that an
@@ -5830,8 +6105,9 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
       { _id: pending._id }, { $set: { confirmedAt: new Date() } }
     );
 
+    let aiKey = null;
     if (pending.trackingKey) {
-      await issueAndEmailAiAccessCode(pending.trackingKey).catch(e => console.warn('⚠️ issueAndEmailAiAccessCode failed:', e?.message));
+      aiKey = await issueAndEmailAiAccessCode(pending.trackingKey).catch(e => { console.warn('⚠️ issueAndEmailAiAccessCode failed:', e?.message); return null; });
     }
 
     // Reuse the existing matching pipeline exactly as the normal in-app flow does
@@ -5846,7 +6122,7 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
     }).catch(e => console.warn('⚠️ triggerServiceMatching call failed:', e?.message));
 
     const businessName = service?.businessName || service?.providerName || 'the business';
-    res.send(renderConfirmPage(true, `Your request has been confirmed and sent to ${escapeHtml(businessName)}. They will reach out soon.`));
+    res.send(renderConfirmPageWithKey(`Your request has been confirmed and sent to ${escapeHtml(businessName)}. They will reach out soon.`, aiKey));
   } catch (err) {
     console.error('❌ /confirmQuoteRequest error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong confirming your request. Please try again.'));

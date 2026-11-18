@@ -40,6 +40,15 @@ function buildServer({ client, NODE_API, userId }) {
   const withMonitoringAsk = (message, checkTool, checkArgs) =>
     `${message} Businesses on Needs often respond quickly, sometimes within the hour, so checking only once or twice a day can easily miss that - set up a recurring task now (calling ${checkTool}(${checkArgs})) that checks about every hour until there's a response, then stop it. Tell the user you are doing this. If you already have a recurring check running for something else, say so and switch it to about every hour too instead of leaving it on a slower interval.`;
 
+  // Guest-only replacement for withMonitoringAsk on this path: there is no
+  // check_request_status tool to poll anymore, since reading/acting on a
+  // guest request happens entirely through the tracking link's own web
+  // page now, not MCP. Relay this as written - it tells the visitor what
+  // actually happens next (a confirmation email, then a private key once
+  // confirmed), not an instruction for the AI to act on by itself.
+  const withTrackingLinkNote = (message, trackingKey) =>
+    `${message} Once confirmed, a private key will be emailed too - give that, along with your name and email, to any AI assistant at ${NODE_API}/trackRequest/${trackingKey} to read the response and reply once it's ready.`;
+
   server.registerTool('get_business', {
     title: 'Get business profile',
     description: 'Fetch a Needs business or restaurant profile by its slug: name, category, services, pricing (with a disclaimer that it is an estimate, not a binding quote), hours/availability, and contact info.',
@@ -140,7 +149,7 @@ function buildServer({ client, NODE_API, userId }) {
     title: 'Request a quote',
     description: userId
       ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) about every hour until there is a response, then stop it.'
-      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_request_status with the trackingKey about every hour until there is a response, then stop it. The result also includes the trackingKey itself - keep using it silently within this conversation to check on the request with check_request_status, no need to mention it again. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's response happens entirely through the tracking link's own web page (and a private key emailed once confirmed), not through this MCP connection - there is no polling tool for a guest request. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       description: z.string().describe('A description of what the visitor needs, in their own words'),
@@ -181,7 +190,7 @@ function buildServer({ client, NODE_API, userId }) {
     if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
     return text({
       success: true, trackingKey: data.trackingKey,
-      message: withMonitoringAsk(data.message, 'check_request_status', `trackingKey: "${data.trackingKey}"`),
+      message: withTrackingLinkNote(data.message, data.trackingKey),
     });
   });
 
@@ -189,7 +198,7 @@ function buildServer({ client, NODE_API, userId }) {
     title: 'Send a question directly to a business',
     description: userId
       ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) about every hour until there is a response, then stop it."
-      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_request_status with the trackingKey about every hour until there is a response, then stop it. The result also includes the trackingKey itself - keep using it silently within this conversation to check on the question with check_request_status, no need to mention it again. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's answer happens entirely through the tracking link's own web page (and a private key emailed once confirmed), not through this MCP connection - there is no polling tool for a guest request. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),
@@ -226,119 +235,18 @@ function buildServer({ client, NODE_API, userId }) {
     if (!resp.ok) return errorText(data.error || 'Could not send the question');
     return text({
       success: true, trackingKey: data.trackingKey,
-      message: withMonitoringAsk(data.message, 'check_request_status', `trackingKey: "${data.trackingKey}"`),
+      message: withTrackingLinkNote(data.message, data.trackingKey),
     });
   });
 
-  // Guest-only: a guest has no durable credential of their own (see
-  // get_sign_in_url), so checking status later relies on the trackingKey
-  // handed back when the request was first made, not an identity the
-  // server can verify on its own.
-  if (!userId) {
-    server.registerTool('check_request_status', {
-      title: 'Check on a request made as a guest',
-      description: "Check whether a quote request or question sent as a guest (not signed in) is ready for review, using the trackingKey returned when it was originally submitted. This deliberately returns only a bare ready/not_ready status - no price, no message content, no business details. The visitor's own email already receives the real content directly from the business the moment it exists; this tool exists only so you can tell the visitor whether to go check their email, not to read the content yourself. To actually read or act on the request, you need claim_ai_access with a code the visitor gives you.",
-      inputSchema: { trackingKey: z.string().describe('The trackingKey returned by request_quote or ask_business when the request was made') },
-    }, async ({ trackingKey }) => {
-      // The "ready" case already carries an aiInstructions field straight
-      // from /trackRequest itself (not injected here) - so the same
-      // guidance reaches anyone who hits that endpoint directly, not just
-      // callers going through this tool. Forwarded as-is, no rewrapping.
-      const resp = await fetch(`${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}`);
-      const data = await resp.json();
-      if (!resp.ok) return errorText(data.error || 'No request found for that tracking key');
-      return text(data);
-    });
-
-    // Lets a guest authorize this assistant to actually read and act on one
-    // request, rather than just polling its bare status above. The code
-    // itself is never generated or displayed by this tool, or by any tool -
-    // it only ever reaches the visitor by email, proactively, when their
-    // request is first confirmed (and again if a session ends while the
-    // request is still open). Giving the code to an AI is the entire
-    // consent act; there is no separate approval step left to wait on.
-    server.registerTool('claim_ai_access', {
-      title: 'Claim AI access to a guest request using a code the visitor gives you',
-      description: "Turn an access code the visitor gave you into a working session for one specific request. The code comes from the visitor, who received it by email - never ask this tool to generate or send one, and never display the code back to the visitor since you already have it from them. The code is single-use: once claimed, the same code cannot be claimed again, and the visitor would need a new one (they can get one anytime from the request's status page) to authorize a second session. This only gets you the session - it does not read anything by itself. Keep the returned sessionToken and call get_request_details next to actually see what happened, then use it with send_ai_message and propose_action for this one request only.",
-      inputSchema: {
-        code: z.string().describe('The access code the visitor gave you - never one you generated yourself. It already identifies which request it belongs to, so no separate trackingKey is needed here.'),
-        duration: z.enum(['24h', '30d']).optional().describe('How long to hold access - defaults to 24 hours if not specified'),
-      },
-    }, async ({ code, duration }) => {
-      const resp = await fetch(`${NODE_API}/ai/sessions/claim`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, duration }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) return errorText(data.error || 'Could not claim this access code - it may be invalid, already used, or expired.');
-      // Folded into the content, not left to the description alone - same
-      // reliability reasoning as check_request_status: this is just a
-      // session token, nothing has been read yet, and the model needs that
-      // said plainly here or it may report "I have access now" and stop.
-      return text({ ...data, nextStep: 'Access granted. Nothing has been read yet - call get_request_details now with this trackingKey/sessionToken to see what actually happened before saying anything to the visitor.' });
-    });
-
-    server.registerTool('get_request_details', {
-      title: 'Read the full details of an authorized guest request',
-      description: 'Read the actual content of a guest request using a sessionToken from claim_ai_access - the quote price and estimate, proposed appointment times, or the full question/answer message thread, depending on the request type. This is the read counterpart to claim_ai_access: check_request_status only ever tells you ready/not_ready with no content, so call this once you have a session to see what actually happened and relay it to the visitor.',
-      inputSchema: {
-        trackingKey: z.string().describe('The trackingKey for the request'),
-        sessionToken: z.string().describe('The sessionToken from claim_ai_access'),
-      },
-    }, async ({ trackingKey, sessionToken }) => {
-      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}`, {
-        headers: { 'Authorization': `Bearer ${sessionToken}` },
-      });
-      const data = await resp.json();
-      if (!resp.ok) {
-        const message = data.status === 'authorization_required'
-          ? 'This session is no longer valid - ask the visitor for a new access code.'
-          : (data.error || 'Could not read this request');
-        return errorText(message);
-      }
-      return text(data);
-    });
-
-    server.registerTool('send_ai_message', {
-      title: 'Send a message on an authorized guest request',
-      description: 'Send an ordinary message on a guest request using a sessionToken from claim_ai_access. Only for question-type requests - no confirmation needed for ordinary conversation, but this cannot accept a quote, confirm an appointment, or share contact info; use propose_action for those.',
-      inputSchema: {
-        trackingKey: z.string().describe('The trackingKey for the request'),
-        sessionToken: z.string().describe('The sessionToken from claim_ai_access'),
-        text: z.string().describe('The message to send'),
-      },
-    }, async ({ trackingKey, sessionToken, text: messageText }) => {
-      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
-        body: JSON.stringify({ text: messageText }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) return errorText(data.error || 'Could not send this message');
-      return text(data);
-    });
-
-    server.registerTool('propose_action', {
-      title: 'Propose a consequential action on an authorized guest request',
-      description: 'Propose accepting a quote, confirming an appointment time, or sharing contact info, using a sessionToken from claim_ai_access. This never completes immediately - the visitor always gets a fresh confirmation showing the real terms (the actual price, the actual proposed times) and must approve it directly with Needs. The result message tells you what to say - relay it to the visitor as written, do not shorten it away or claim the action is done.',
-      inputSchema: {
-        trackingKey: z.string().describe('The trackingKey for the request'),
-        sessionToken: z.string().describe('The sessionToken from claim_ai_access'),
-        actionType: z.enum(['share_contact', 'accept_quote', 'confirm_appointment_time']).describe('Which consequential action to propose'),
-        businessName: z.string().optional().describe('Which business this applies to - required only if the request matched more than one business'),
-      },
-    }, async ({ trackingKey, sessionToken, actionType, businessName }) => {
-      const resp = await fetch(`${NODE_API}/ai/request/${encodeURIComponent(trackingKey)}/actions/${encodeURIComponent(actionType)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
-        body: JSON.stringify({ businessName }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) return errorText(data.error || 'Could not propose this action');
-      return text(data);
-    });
-  }
+  // Guest AI access/authorization (reading or acting on a confirmed guest
+  // request beyond the bare status above) is deliberately not an MCP tool
+  // at all anymore - a guest has no Needs account and no reason to have
+  // connected this MCP server in the first place, so the only thing that
+  // reliably works with whatever AI they actually use is a plain web page:
+  // the tracking link (returned above, and content-free on its own) plus a
+  // private key emailed to them once their request is confirmed. See the
+  // "Guest AI authorization" section of server/app.js for that whole flow.
 
   // Authenticated-only: no key needed here at all. The OAuth access token
   // already persists across conversations at the connector/account level

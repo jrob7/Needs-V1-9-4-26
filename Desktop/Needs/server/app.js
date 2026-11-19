@@ -2492,10 +2492,12 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
   if (chatAccess?.enabled && !chatAccess.expired && content) {
     if (content.requestType === 'quote') {
       chatHtml = (content.quotes || []).map(q => {
-        const thread = (q.qaHistory || []).map(m => `
+        const infoThread = (q.qaHistory || []).map(m => `
+          <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
+        const msgThread = (q.messages || []).map(m => `
           <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
         const hasTime = q.proposedDate && q.proposedTime;
-        let actions = actionForm('share_contact', 'Share Contact Info', q.businessName);
+        let actions = '';
         if (['business_confirmed', 'business_edited'].includes(q.status)) {
           actions += hasTime
             ? actionForm('accept_quote_and_confirm_appointment', `Accept Quote & Confirm ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}`, q.businessName)
@@ -2508,8 +2510,14 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
           <div class="quoteCard">
             <h2>${escapeHtml(q.businessName)}</h2>
             <p class="meta">${q.confirmedPrice ? `$${escapeHtml(String(q.confirmedPrice))}` : (q.estimate || 'No price yet')}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}</p>
-            ${thread ? `<div class="thread">${thread}</div>` : ''}
-            <div class="actions">${actions}</div>
+            ${infoThread ? `<div class="thread">${infoThread}</div>` : ''}
+            ${msgThread ? `<div class="thread">${msgThread}</div>` : ''}
+            <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/message">
+              <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
+              <textarea name="text" placeholder="Ask a question about this quote…" required></textarea>
+              <button type="submit">Send</button>
+            </form>
+            ${actions ? `<div class="actions">${actions}</div>` : ''}
           </div>`;
       }).join('');
     } else {
@@ -2524,7 +2532,6 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             <textarea name="text" placeholder="Type a message…" required></textarea>
             <button type="submit">Send</button>
           </form>
-          <div class="actions">${actionForm('share_contact', 'Share Contact Info')}</div>
         </div>`;
     }
     chatHtml += `<p class="hint"><a href="/trackRequest/${encodeURIComponent(trackingKey)}/disableAiAccess">Disable AI access</a></p>`;
@@ -2904,7 +2911,6 @@ async function sendAiActivityEmail(resolved, trackingKey, kind, detail) {
 
 function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAction, extraFieldsHtml) {
   const titles = {
-    share_contact: 'Share Your Contact Info?',
     accept_quote: 'Accept This Quote?',
     confirm_appointment_time: 'Confirm Appointment Time',
     accept_quote_and_confirm_appointment: 'Accept Quote & Confirm Appointment',
@@ -2945,12 +2951,16 @@ function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAc
 </html>`;
 }
 
-// POST /trackRequest/:trackingKey/message — ordinary conversation, question
-// requests only. Reuses the exact mutation /conversation/:trackingKey/reply
-// already performs, just gated by AIChatAccess instead of trackingKey
-// possession alone (since this is a write, not the public bare-status
-// read). Redirects back to the tracking page itself - there is no separate
-// chat URL to redirect to anymore.
+// POST /trackRequest/:trackingKey/message — ordinary conversation, both
+// request types. For questions, reuses the exact mutation
+// /conversation/:trackingKey/reply already performs. For quotes, pushes
+// into that specific ServiceQuotes doc's own messages[] (new - quotes
+// never had a guest-to-business message channel before) and notifies the
+// business with a plain Notification, the simple version: no in-app reply
+// thread for the business yet, just visibility that a question came in.
+// Gated by AIChatAccess instead of trackingKey possession alone, since
+// this is a write, not the public bare-status read. Redirects back to the
+// tracking page itself - there is no separate chat URL to redirect to.
 app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) => {
   try {
     const { trackingKey } = req.params;
@@ -2959,14 +2969,8 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
     if (!state.chatAccess?.enabled || state.chatAccess.expired) {
       return res.status(401).send(renderConfirmPage(false, 'AI access is not currently enabled for this request.'));
     }
-    if (state.resolved.requestType !== 'question') {
-      return res.status(400).send(renderConfirmPage(false, 'Ordinary messaging is only available for question-type requests in this version.'));
-    }
     const text = String(req.body?.text || '').trim().slice(0, 2000);
     if (!text) return res.status(400).send(renderConfirmPage(false, 'Please enter a message before sending.'));
-
-    const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
-    if (!notification) return res.status(404).send(renderConfirmPage(false, 'Request not found.'));
 
     const moderation = await moderateText(text);
     if (moderation.blocked) {
@@ -2974,11 +2978,35 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
       return res.status(400).send(renderConfirmPage(false, MODERATION_BLOCKED_MESSAGE));
     }
 
-    await database.collection('Notifications').updateOne(
-      { _id: notification._id },
-      { $push: { messages: { from: 'guest', text, at: new Date() } }, $set: { read: false, needsReply: true } }
-    );
-    sendAiActivityEmail(state.resolved, trackingKey, 'write', `Your AI assistant sent this message: "${text}"`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
+    const resolved = state.resolved;
+    if (resolved.requestType === 'quote') {
+      const quotes = resolved.quotes || [];
+      const wanted = String(req.body?.businessName || '').trim().toLowerCase();
+      const targetQuote = quotes.length === 1 ? quotes[0] : quotes.find(q => (q.businessName || '').toLowerCase() === wanted);
+      if (!targetQuote) {
+        return res.status(400).send(renderConfirmPage(false, 'Could not tell which business this is for - please try again from the chat.'));
+      }
+      await database.collection('ServiceQuotes').updateOne(
+        { _id: targetQuote._id },
+        { $push: { messages: { from: 'guest', text, at: new Date() } } }
+      );
+      if (targetQuote.serviceUserId) {
+        await database.collection('Notifications').insertOne({
+          userId: targetQuote.serviceUserId, type: 'quote_message',
+          title: '💬 Question About Your Quote',
+          body: text,
+          needId: targetQuote.needId, quoteId: targetQuote._id, read: false, createdAt: new Date(),
+        });
+      }
+    } else {
+      const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });
+      if (!notification) return res.status(404).send(renderConfirmPage(false, 'Request not found.'));
+      await database.collection('Notifications').updateOne(
+        { _id: notification._id },
+        { $push: { messages: { from: 'guest', text, at: new Date() } }, $set: { read: false, needsReply: true } }
+      );
+    }
+    sendAiActivityEmail(resolved, trackingKey, 'write', `Your AI assistant sent this message: "${text}"`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
     res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}`);
   } catch (err) {
     console.error('❌ /trackRequest/:trackingKey/message error:', err);
@@ -2999,7 +3027,7 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
 app.post('/trackRequest/:trackingKey/actions/:actionType', aiAuthLimiter, async (req, res) => {
   try {
     const { trackingKey, actionType } = req.params;
-    if (!['share_contact', 'accept_quote', 'confirm_appointment_time', 'accept_quote_and_confirm_appointment'].includes(actionType)) {
+    if (!['accept_quote', 'confirm_appointment_time', 'accept_quote_and_confirm_appointment'].includes(actionType)) {
       return res.status(400).send(renderConfirmPage(false, 'Unknown action.'));
     }
     const state = await resolveTrackingPageState(trackingKey);
@@ -3018,17 +3046,17 @@ app.post('/trackRequest/:trackingKey/actions/:actionType', aiAuthLimiter, async 
         return res.status(400).send(renderConfirmPage(false, 'Could not tell which business this is for - please try again from the chat.'));
       }
     }
-    if (actionType !== 'share_contact') {
-      if (resolved.requestType !== 'quote') return res.status(400).send(renderConfirmPage(false, `${actionType} only applies to quote requests.`));
-      if ((actionType === 'accept_quote' || actionType === 'accept_quote_and_confirm_appointment') && !['business_confirmed', 'business_edited'].includes(targetQuote.status)) {
-        return res.status(409).send(renderConfirmPage(false, `This quote cannot be accepted in its current state (${targetQuote.status}).`));
-      }
-      if (actionType === 'accept_quote_and_confirm_appointment' && !(targetQuote.proposedDate && targetQuote.proposedTime)) {
-        return res.status(409).send(renderConfirmPage(false, 'This quote has no proposed appointment time yet.'));
-      }
-      if (actionType === 'confirm_appointment_time' && targetQuote.status !== 'awaiting_guest_time_confirmation') {
-        return res.status(409).send(renderConfirmPage(false, `No proposed times are awaiting confirmation for this quote (status: ${targetQuote.status}).`));
-      }
+    // Every remaining action type is quote-only now that share_contact
+    // (the one that also applied to questions) is gone.
+    if (resolved.requestType !== 'quote') return res.status(400).send(renderConfirmPage(false, `${actionType} only applies to quote requests.`));
+    if ((actionType === 'accept_quote' || actionType === 'accept_quote_and_confirm_appointment') && !['business_confirmed', 'business_edited'].includes(targetQuote.status)) {
+      return res.status(409).send(renderConfirmPage(false, `This quote cannot be accepted in its current state (${targetQuote.status}).`));
+    }
+    if (actionType === 'accept_quote_and_confirm_appointment' && !(targetQuote.proposedDate && targetQuote.proposedTime)) {
+      return res.status(409).send(renderConfirmPage(false, 'This quote has no proposed appointment time yet.'));
+    }
+    if (actionType === 'confirm_appointment_time' && targetQuote.status !== 'awaiting_guest_time_confirmation') {
+      return res.status(409).send(renderConfirmPage(false, `No proposed times are awaiting confirmation for this quote (status: ${targetQuote.status}).`));
     }
 
     const confirmToken = crypto.randomBytes(16).toString('hex');
@@ -3046,7 +3074,6 @@ app.post('/trackRequest/:trackingKey/actions/:actionType', aiAuthLimiter, async 
     const businessName = targetQuote?.businessName || emailBusinessName;
 
     const confirmLabels = {
-      share_contact: 'Share Your Contact Info',
       accept_quote: `Accept the Quote${targetQuote?.confirmedPrice ? ` ($${targetQuote.confirmedPrice})` : ''}`,
       confirm_appointment_time: 'Confirm an Appointment Time',
       accept_quote_and_confirm_appointment: `Accept the Quote${targetQuote?.confirmedPrice ? ` ($${targetQuote.confirmedPrice})` : ''} and Confirm ${targetQuote?.proposedDate || ''} at ${targetQuote?.proposedTime || ''}`,
@@ -3126,10 +3153,7 @@ app.get('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
       businessName = businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || businessName;
     }
 
-    if (action.actionType === 'share_contact') {
-      businessName = quote?.businessName || businessName;
-      detailsHtml = `${escapeHtml(businessName)} is requesting your contact information to proceed.`;
-    } else if (action.actionType === 'accept_quote') {
+    if (action.actionType === 'accept_quote') {
       businessName = quote?.businessName || businessName;
       detailsHtml = `Accept the quote${quote?.confirmedPrice ? ` of <strong>$${escapeHtml(String(quote.confirmedPrice))}</strong>` : ''} from ${escapeHtml(businessName)}?`;
     } else if (action.actionType === 'confirm_appointment_time') {
@@ -3167,32 +3191,6 @@ app.post('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
 
     const resolved = await resolveAiRequestByTrackingKey(action.trackingKey);
     const quote = action.quoteId ? (resolved?.quotes || []).find(q => String(q._id) === String(action.quoteId)) : null;
-
-    if (action.actionType === 'share_contact') {
-      if (resolved?.requestType === 'quote') {
-        const requester = resolved?.need?.userId
-          ? await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1, phoneNumber: 1 } })
-          : null;
-        if (quote?.serviceUserId) {
-          await database.collection('Notifications').insertOne({
-            userId: quote.serviceUserId, type: 'contact_info_shared',
-            title: '📇 Customer Shared Contact Info',
-            body: `${requester?.email || 'The customer'}${requester?.phoneNumber ? ` / ${requester.phoneNumber}` : ''}`,
-            needId: quote.needId, quoteId: quote._id, read: false, createdAt: new Date(),
-          });
-        }
-      } else if (resolved?.requestType === 'question') {
-        const notif = resolved.notification;
-        await database.collection('Notifications').updateOne(
-          { _id: notif._id },
-          {
-            $push: { messages: { from: 'guest', text: `Shared contact info: ${notif.askerEmail || 'see email on file'}`, at: new Date() } },
-            $set: { read: false, needsReply: true },
-          }
-        );
-      }
-      return res.send(renderConfirmPage(true, 'Your contact information has been shared.'));
-    }
 
     if (action.actionType === 'accept_quote') {
       if (!quote) return res.send(renderConfirmPage(false, 'This quote could not be found.'));

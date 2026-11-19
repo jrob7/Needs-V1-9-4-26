@@ -314,11 +314,20 @@ NONPROFIT_KEYWORDS = [
     "need help with shelter","help with shelter","help finding shelter",
 ]
 
+def _count_keyword_hits(text_lower: str, keywords: list) -> int:
+    # Word-boundary match, not a plain substring check - "eat" must not match
+    # inside "heat", "repair" must not match inside some longer unrelated
+    # word, etc. A query like "my dryer does not heat up" was previously
+    # scoring a false food_score hit from "eat" inside "heat", tying (or
+    # beating) the real service_score from "repair" and misclassifying the
+    # whole request as "item" instead of "service".
+    return sum(1 for w in keywords if re.search(r'\b' + re.escape(w) + r'\b', text_lower))
+
 def classify_request(text: str) -> str:
     lower = text.lower()
-    nonprofit_score = sum(1 for w in NONPROFIT_KEYWORDS if w in lower)
-    food_score      = sum(1 for w in FOOD_KEYWORDS      if w in lower)
-    service_score   = sum(1 for w in SERVICE_KEYWORDS   if w in lower)
+    nonprofit_score = _count_keyword_hits(lower, NONPROFIT_KEYWORDS)
+    food_score      = _count_keyword_hits(lower, FOOD_KEYWORDS)
+    service_score   = _count_keyword_hits(lower, SERVICE_KEYWORDS)
     if nonprofit_score > 0 and nonprofit_score >= food_score and nonprofit_score >= service_score:
         return "nonprofit"
     if food_score > service_score and food_score > 0:

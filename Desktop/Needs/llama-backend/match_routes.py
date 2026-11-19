@@ -223,13 +223,15 @@ def extract_food_context(text: str) -> dict:
 
     urgency = "Now"
     for phrase, val in sorted(URGENCY_MAP.items(), key=lambda x: -len(x[0])):
-        if phrase in lower:
+        # Word-boundary, not substring - "now" must not match inside "know"
+        # or "snow", etc.
+        if re.search(r'\b' + re.escape(phrase) + r'\b', lower):
             urgency = val
             break
 
     meal_type = None
     for phrase, val in sorted(MEAL_TYPE_MAP.items(), key=lambda x: -len(x[0])):
-        if phrase in lower:
+        if re.search(r'\b' + re.escape(phrase) + r'\b', lower):
             meal_type = val
             break
     if meal_type is None:
@@ -427,7 +429,7 @@ CATEGORY_KEYWORDS = {
 
 def _category_keyword_counts(text: str) -> dict:
     lower = text.lower()
-    counts = {cat: sum(1 for w in words if w in lower)
+    counts = {cat: _count_keyword_hits(lower, words)
               for cat, words in CATEGORY_KEYWORDS.items()}
     return {cat: n for cat, n in counts.items() if n > 0}
 
@@ -509,7 +511,7 @@ def classify_service_category(text: str):
     # "food"/"meal" never appears — defer entirely to the keyword matcher).
     if ai_category in CATEGORY_ANCHOR_REQUIRED:
         lower = text.lower()
-        if not any(anchor in lower for anchor in CATEGORY_ANCHOR_REQUIRED[ai_category]):
+        if not any(re.search(r'\b' + re.escape(anchor) + r'\b', lower) for anchor in CATEGORY_ANCHOR_REQUIRED[ai_category]):
             return kw_category
 
     if ai_category == kw_category:
@@ -930,7 +932,8 @@ def check_food_readiness_route():
         "pancakes", "waffles", "omelette", "avocado toast", "french toast",
         "latte", "espresso", "smoothie", "milkshake",
     }
-    if any(w in lower for w in SPECIFIC_FOOD_WORDS):
+    # Word-boundary, not substring - e.g. "cod" must not match inside "second".
+    if any(re.search(r'\b' + re.escape(w) + r'\b', lower) for w in SPECIFIC_FOOD_WORDS):
         return jsonify({"ready": True, "question": None})
 
     # LLM fallback: ask the model if this is a specific food item or dish name

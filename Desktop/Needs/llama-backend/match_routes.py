@@ -27,6 +27,7 @@ def get_db():
 METERS_PER_MILE = 1609.34
 RESTAURANT_RADIUS_MI = 15
 NONPROFIT_RADIUS_MI  = 35
+SERVICE_RADIUS_MI    = 20
 
 def haversine_miles(lat1, lng1, lat2, lng2):
     """Straight-line distance in miles between two lat/lng points."""
@@ -1053,24 +1054,46 @@ def find_matches():
                   "tagline", "description", "serviceArea", "businessAddress",
                   "phone", "website", "rateType", "rateMin", "rateMax",
                   "availability", "responseTime", "licensed",
-                  "topServices", "portfolioImageUrls"]
-        try:
-            docs = list(get_db()["Services"].find({}, {f: 1 for f in FIELDS}).limit(200))
-        except Exception as e:
-            logging.error(f"Services query failed: {e}")
-            return jsonify({"error": "DB error"}), 500
+                  "topServices", "portfolioImageUrls", "geoPoint"]
+
+        # Same geo-distance approach food/nonprofit already use, instead of the
+        # old hard substring check against the business's free-typed
+        # serviceArea text (e.g. a business whose serviceArea says "LA County"
+        # would fail a literal "Long Beach" match even though it's nearby).
+        # $geoNear itself caps results to SERVICE_RADIUS_MI, so everything
+        # fetch_with_geonear returns is already in range.
+        if has_coords:
+            docs, used_geo = fetch_with_geonear(
+                "Services", float(user_lat), float(user_lng),
+                SERVICE_RADIUS_MI, FIELDS
+            )
+        else:
+            try:
+                docs = list(get_db()["Services"].find({}, {f: 1 for f in FIELDS}).limit(200))
+                used_geo = False
+            except Exception as e:
+                logging.error(f"Services query failed: {e}")
+                return jsonify({"error": "DB error"}), 500
 
         detected_category = classify_service_category(query)
 
-        # Coverage gate first, then keyword score (no distance ranking for services)
-        # Only apply location gate if we actually have a city/state/zip to check —
-        # if reverse geocoding failed (all empty), skip the gate to avoid blocking everyone.
+        # Keyword/category match is primary, same as food/nonprofit - a real
+        # match within range should never be excluded before it's even scored.
+        # The old substring check is kept only as a fallback for a business
+        # with no geoPoint on file (so $geoNear never saw it, used_geo=False
+        # but it still came back from the plain find()) and only when we
+        # actually have location text to check against.
         has_location_text = bool(user_city or user_state or user_zip)
         def final_score_service(d):
-            if has_location_text:
-                if not service_covers_location(d, user_city, user_state, user_zip):
-                    return -1
-            return score_service(d, query_words, detected_category)
+            kw = score_service(d, query_words, detected_category)
+            if kw <= 0:
+                return -1
+            if used_geo:
+                dist = d.get("distance_miles", 0)
+                return kw * proximity_boost(dist, SERVICE_RADIUS_MI)
+            if has_location_text and not d.get("geoPoint") and not service_covers_location(d, user_city, user_state, user_zip):
+                return -1
+            return kw
 
         scored  = sorted(docs, key=final_score_service, reverse=True)
         matched = [d for d in scored if final_score_service(d) > 0]
@@ -1079,8 +1102,12 @@ def find_matches():
                        if (d.get("businessName") or "").lower().strip() not in exclude_names]
 
         top3    = matched[:3]
-        results = [dict(d, _id=str(d["_id"]),
-                        userId=str(d["userId"]) if d.get("userId") else None) for d in top3]
+        results = []
+        for d in top3:
+            d.pop("dist_meters", None)
+            results.append(dict(d, _id=str(d["_id"]),
+                                userId=str(d["userId"]) if d.get("userId") else None,
+                                distanceMiles=round(d.get("distance_miles", 0), 1) if used_geo else None))
         return jsonify({"type": "service", "matches": results, "context": {}})
 
     # ── NONPROFIT ─────────────────────────────────────────────────────────────

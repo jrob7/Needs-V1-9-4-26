@@ -2666,9 +2666,13 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
 
 // POST /trackRequest/:trackingKey/aiAccess — the guest's in-chat Yes/No
 // answer (see the module chat widget), recorded before confirmation even
-// happens. Just a stored preference at this point - activation only ever
+// happens. Just a stored preference at this point - activation normally
 // comes from the email confirmation click (see /confirmQuoteRequest and
-// /confirmModuleQuestion), never from this alone.
+// /confirmModuleQuestion). The exception: if the guest confirms by email
+// before answering this (the two can race - confirming is fast, the
+// widget tab might sit open), there's no still-unconfirmed pending record
+// left to store the preference on. Rather than silently losing a "yes" in
+// that race, activate it directly right here instead.
 app.post('/trackRequest/:trackingKey/aiAccess', aiAuthLimiter, async (req, res) => {
   try {
     const { trackingKey } = req.params;
@@ -2676,10 +2680,18 @@ app.post('/trackRequest/:trackingKey/aiAccess', aiAuthLimiter, async (req, res) 
     const resultQuote = await database.collection('PendingQuoteRequests').updateOne(
       { trackingKey, confirmedAt: null }, { $set: { aiAccessRequested: enabled } }
     );
-    if (resultQuote.matchedCount === 0) {
-      await database.collection('PendingModuleQuestions').updateOne(
+    let matched = resultQuote.matchedCount > 0;
+    if (!matched) {
+      const resultQuestion = await database.collection('PendingModuleQuestions').updateOne(
         { trackingKey, confirmedAt: null }, { $set: { aiAccessRequested: enabled } }
       );
+      matched = resultQuestion.matchedCount > 0;
+    }
+    if (!matched && enabled) {
+      const resolved = await resolveAiRequestByTrackingKey(trackingKey);
+      if (resolved?.confirmed) {
+        await activateAiAccessIfRequested({ aiAccessRequested: true }, trackingKey, resolved);
+      }
     }
     res.json({ success: true, enabled });
   } catch (err) {

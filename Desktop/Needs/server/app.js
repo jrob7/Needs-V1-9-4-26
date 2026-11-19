@@ -3849,8 +3849,11 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
             if (enabled) {
               var aiTrackUrl = '${NODE_API}/trackRequest/' + aiTrackingKey;
               aiBubble.innerHTML =
-                '<p style="color:#4CAF50;font-weight:600;">AI access requested - it activates once you confirm by email, for 48 hours.</p>' +
-                '<p style="font-size:.82rem;color:#555;">Give your AI assistant this link once confirmed: <a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>';
+                '<p style="color:#4CAF50;font-weight:600;">AI access requested — email confirmation required.</p>' +
+                '<p style="font-size:.82rem;color:#555;">Once you confirm your request by email, your AI assistant will be authorized to track, read, and respond to this request for 48 hours.</p>' +
+                '<p style="font-size:.82rem;color:#555;"><strong>Request tracking link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
+                '<p style="font-size:.82rem;color:#555;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
+                '<p style="font-size:.82rem;color:#555;">Ask the customer: &ldquo;Would you like me to automatically monitor this request and notify you when the business responds?&rdquo;</p>';
             } else {
               aiBubble.innerHTML = '<p style="color:#555;">Okay, continuing without AI.</p>';
             }

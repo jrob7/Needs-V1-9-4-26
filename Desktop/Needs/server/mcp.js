@@ -43,11 +43,14 @@ function buildServer({ client, NODE_API, userId }) {
   // Guest-only replacement for withMonitoringAsk on this path: there is no
   // check_request_status tool to poll anymore, since reading/acting on a
   // guest request happens entirely through the tracking link's own web
-  // page now, not MCP. Relay this as written - it tells the visitor what
-  // actually happens next (a confirmation email, then a private key once
-  // confirmed), not an instruction for the AI to act on by itself.
-  const withTrackingLinkNote = (message, trackingKey) =>
-    `${message} Once confirmed, a private key will be emailed too - give that, along with your name and email, to any AI assistant at ${NODE_API}/trackRequest/${trackingKey} to read the response and reply once it's ready.`;
+  // page now, not MCP. No key either - the tracking link itself becomes a
+  // live read/write chat once confirmed, if AI access was requested.
+  // Relay this as written - it tells the visitor what actually happens
+  // next, not an instruction for the AI to act on by itself.
+  const withTrackingLinkNote = (message, trackingKey, aiAccessEnabled) =>
+    `${message} ${aiAccessEnabled
+      ? `Since you asked for AI access, once confirmed this same tracking link becomes a live chat your AI can read and write through for 48 hours - no key needed: ${NODE_API}/trackRequest/${trackingKey}`
+      : `Track status at ${NODE_API}/trackRequest/${trackingKey} once confirmed.`}`;
 
   server.registerTool('get_business', {
     title: 'Get business profile',
@@ -149,7 +152,7 @@ function buildServer({ client, NODE_API, userId }) {
     title: 'Request a quote',
     description: userId
       ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) about every hour until there is a response, then stop it.'
-      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's response happens entirely through the tracking link's own web page (and a private key emailed once confirmed), not through this MCP connection - there is no polling tool for a guest request. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's response happens entirely through the tracking link's own web page, not through this MCP connection - there is no polling tool for a guest request. If enableAiAccess is true (the default), that same tracking link becomes a live read/write chat for 48 hours once confirmed, with no key needed - ask the visitor first if they want that, and pass false if they say no. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       description: z.string().describe('A description of what the visitor needs, in their own words'),
@@ -159,8 +162,11 @@ function buildServer({ client, NODE_API, userId }) {
       email: userId
         ? z.string().email().optional().describe('Not needed - the request is sent as the authenticated user')
         : z.string().email().describe("The visitor's email address - they must confirm via a link sent there before this is sent to the business"),
+      enableAiAccess: userId
+        ? z.boolean().optional().describe('Not applicable for an authenticated user')
+        : z.boolean().optional().describe('Whether this AI should get read/write access to the tracking link for 48 hours once the visitor confirms. Defaults to true - ask the visitor first and pass false if they decline.'),
     },
-  }, async ({ slug, description, name, email }) => {
+  }, async ({ slug, description, name, email, enableAiAccess }) => {
     const db = client.db('Need');
     const service = await db.collection('Services').findOne({ slug }, { projection: { _id: 1 } });
     if (!service) return errorText('Business not found (or is a restaurant, which does not take quote requests)');
@@ -181,16 +187,17 @@ function buildServer({ client, NODE_API, userId }) {
 
     if (!email) return errorText('email is required when not authenticated.');
     if (!name) return errorText('name is required when not authenticated.');
+    const aiAccess = enableAiAccess !== false;
     const resp = await fetch(`${NODE_API}/requestQuote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ businessId: service._id.toString(), description, email, firstName: name }),
+      body: JSON.stringify({ businessId: service._id.toString(), description, email, firstName: name, enableAiAccess: aiAccess }),
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
     return text({
       success: true, trackingKey: data.trackingKey,
-      message: withTrackingLinkNote(data.message, data.trackingKey),
+      message: withTrackingLinkNote(data.message, data.trackingKey, aiAccess),
     });
   });
 
@@ -198,7 +205,7 @@ function buildServer({ client, NODE_API, userId }) {
     title: 'Send a question directly to a business',
     description: userId
       ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) about every hour until there is a response, then stop it."
-      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's answer happens entirely through the tracking link's own web page (and a private key emailed once confirmed), not through this MCP connection - there is no polling tool for a guest request. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's answer happens entirely through the tracking link's own web page, not through this MCP connection - there is no polling tool for a guest request. If enableAiAccess is true (the default), that same tracking link becomes a live read/write chat for 48 hours once confirmed, with no key needed - ask the visitor first if they want that, and pass false if they say no. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),
@@ -208,8 +215,11 @@ function buildServer({ client, NODE_API, userId }) {
       email: userId
         ? z.string().email().optional().describe('Not needed - the question is sent as the authenticated user')
         : z.string().email().describe("The visitor's email address"),
+      enableAiAccess: userId
+        ? z.boolean().optional().describe('Not applicable for an authenticated user')
+        : z.boolean().optional().describe('Whether this AI should get read/write access to the tracking link for 48 hours once the visitor confirms. Defaults to true - ask the visitor first and pass false if they decline.'),
     },
-  }, async ({ slug, question, name, email }) => {
+  }, async ({ slug, question, name, email, enableAiAccess }) => {
     if (userId) {
       const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/authedAskBusiness`, {
         method: 'POST',
@@ -226,16 +236,17 @@ function buildServer({ client, NODE_API, userId }) {
 
     if (!email) return errorText('email is required when not authenticated.');
     if (!name) return errorText('name is required when not authenticated.');
+    const aiAccess = enableAiAccess !== false;
     const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/askBusiness`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, email, firstName: name }),
+      body: JSON.stringify({ question, email, firstName: name, enableAiAccess: aiAccess }),
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the question');
     return text({
       success: true, trackingKey: data.trackingKey,
-      message: withTrackingLinkNote(data.message, data.trackingKey),
+      message: withTrackingLinkNote(data.message, data.trackingKey, aiAccess),
     });
   });
 
@@ -244,9 +255,10 @@ function buildServer({ client, NODE_API, userId }) {
   // at all anymore - a guest has no Needs account and no reason to have
   // connected this MCP server in the first place, so the only thing that
   // reliably works with whatever AI they actually use is a plain web page:
-  // the tracking link (returned above, and content-free on its own) plus a
-  // private key emailed to them once their request is confirmed. See the
-  // "Guest AI authorization" section of server/app.js for that whole flow.
+  // the tracking link (returned above, and content-free on its own)
+  // becomes a live read/write chat on its own once confirmed, if AI access
+  // was requested - no key, no second URL. See the "Guest AI
+  // authorization" section of server/app.js for that whole flow.
 
   // Authenticated-only: no key needed here at all. The OAuth access token
   // already persists across conversations at the connector/account level

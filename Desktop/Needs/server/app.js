@@ -2810,7 +2810,15 @@ async function issueAndEmailAiAccessCode(trackingKey, { intro } = {}) {
   if (resolved.requestType === 'quote') {
     const user = await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1, firstName: 1 } });
     email = user?.email;
-    name = user?.firstName || null;
+    // Name comes from this specific request's own PendingQuoteRequests doc,
+    // not the shared Users doc - a guest email is reused across multiple
+    // requests (the same lightweight account gets found, not recreated,
+    // see /confirmQuoteRequest), so that doc's firstName can be stale or
+    // null from a prior, unrelated request under the same email. The
+    // pending record is never deleted (only confirmedAt gets set), so it's
+    // always available here as the authoritative name for this request.
+    const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey }, { projection: { firstName: 1 } });
+    name = pendingQuote?.firstName || user?.firstName || null;
     businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || 'the matched businesses';
   } else {
     email = resolved.notification.askerEmail;

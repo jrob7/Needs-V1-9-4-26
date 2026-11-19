@@ -1616,7 +1616,7 @@ export default function SearchScreen() {
 
       <View style={styles.searchContainer}>
         <View style={styles.searchRow}>
-          <TouchableOpacity style={styles.imageButton} onPress={handleMediaPick}>
+          <TouchableOpacity style={styles.imageButton} onPress={handleMediaPick} {...(IS_WEB ? { title: 'Attach a photo or video' } : {})}>
             <Image source={require('../assets/camera-button.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
           {!IS_WEB && (
@@ -1645,7 +1645,7 @@ export default function SearchScreen() {
             )}
           </View>
 
-          <TouchableOpacity style={styles.arrowButton} onPress={() => sendQuery()}>
+          <TouchableOpacity style={styles.arrowButton} onPress={() => sendQuery()} {...(IS_WEB ? { title: 'Send' } : {})}>
             <Image source={require('../assets/send-arrow-button.png')} style={[styles.arrowButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
         </View>

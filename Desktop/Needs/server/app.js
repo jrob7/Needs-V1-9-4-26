@@ -3795,13 +3795,8 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           return;
         }
         var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done, ' + safeFirstName + '! Please Confirm Your Email</p>' +
-          '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your email and click the confirmation link to send your request to ' + businessName + '.</p>';
-        if (res.data.trackingKey) {
-          var trackUrl = '${NODE_API}/trackRequest/' + res.data.trackingKey;
-          successHtml +=
-            '<p class="confirm-step"><strong>2. Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>' +
-            '<p class="confirm-step">Status: Awaiting Email Confirmation &middot; <a href="' + trackUrl + '" target="_blank" rel="noopener">Track Status</a></p>';
-        }
+          '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your email and click the confirmation link to send your request to ' + businessName + '.</p>' +
+          '<p class="confirm-step"><strong>2. Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>';
         wrap.innerHTML = successHtml;
         scrollBottom();
 
@@ -3836,9 +3831,17 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ enabled: enabled }),
             }).catch(function(err) { merr('POST /trackRequest/:trackingKey/aiAccess failed', err); });
-            aiBubble.innerHTML = enabled
-              ? '<p style="color:#4CAF50;font-weight:600;">AI access requested - it activates once you confirm by email, for 48 hours.</p>'
-              : '<p style="color:#555;">Okay, continuing without AI.</p>';
+            // The tracking link only matters once AI access is actually in
+            // play - a guest who said no just gets the response by email
+            // like everyone else, so it would be clutter to show it then.
+            if (enabled) {
+              var aiTrackUrl = '${NODE_API}/trackRequest/' + aiTrackingKey;
+              aiBubble.innerHTML =
+                '<p style="color:#4CAF50;font-weight:600;">AI access requested - it activates once you confirm by email, for 48 hours.</p>' +
+                '<p style="font-size:.82rem;color:#555;">Give your AI assistant this link once confirmed: <a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>';
+            } else {
+              aiBubble.innerHTML = '<p style="color:#555;">Okay, continuing without AI.</p>';
+            }
             scrollBottom();
           };
           document.getElementById('ai-access-yes').addEventListener('click', function() { sendAiAccessChoice(true); });

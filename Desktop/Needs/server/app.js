@@ -2634,6 +2634,26 @@ async function resolveBusinessName(notif) {
   return businessDoc?.orgName || businessDoc?.businessName || businessDoc?.providerName || 'the business';
 }
 
+// GET /trackRequest/:trackingKey/confirmStatus — tiny JSON-only endpoint for
+// the module chat widget to poll while waiting on the email confirmation
+// click. The main GET /trackRequest below renders a full HTML page once
+// confirmed, which isn't convenient for a simple fetch-and-poll loop - this
+// exists purely so the widget can know "has it been confirmed yet?" without
+// having to branch on JSON vs HTML.
+app.get('/trackRequest/:trackingKey/confirmStatus', trackRequestLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const pendingQuote = await database.collection('PendingQuoteRequests').findOne({ trackingKey }, { projection: { confirmedAt: 1 } });
+    if (pendingQuote) return res.json({ confirmed: !!pendingQuote.confirmedAt });
+    const pendingQuestion = await database.collection('PendingModuleQuestions').findOne({ trackingKey }, { projection: { confirmedAt: 1 } });
+    if (pendingQuestion) return res.json({ confirmed: !!pendingQuestion.confirmedAt });
+    return res.status(404).json({ error: 'No request found for this tracking key.' });
+  } catch (err) {
+    console.error('❌ /trackRequest/:trackingKey/confirmStatus error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
   try {
     const { trackingKey } = req.params;
@@ -3685,6 +3705,55 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     });
   }
 
+  // Shown only once the request's email confirmation has actually been
+  // detected (see the confirmStatus poll in showEmailGate below) - never
+  // offered for a request that might never be confirmed/sent.
+  function showAiAccessPrompt(aiTrackingKey, businessName) {
+    var aiBubble = document.createElement('div');
+    aiBubble.className = 'contact-form';
+    aiBubble.innerHTML =
+      '<p><strong>Would you like your AI assistant to manage this request?</strong></p>' +
+      '<p style="font-size:.82rem;color:#555;margin-bottom:4px;">Your AI assistant can:</p>' +
+      '<ul style="font-size:.82rem;color:#555;margin:0 0 10px;padding-left:18px;">' +
+        '<li>Track your request for updates.</li>' +
+        '<li>Read responses and quotes from the business.</li>' +
+        '<li>Send follow-up messages on your behalf.</li>' +
+      '</ul>' +
+      '<p style="font-size:.82rem;color:#555;">You will still need to personally approve any quote acceptance or appointment confirmation.</p>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;">' +
+        '<button class="opt-btn" id="ai-access-yes" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#1a1a1a;color:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Yes, enable AI access</button>' +
+        '<button class="opt-btn" id="ai-access-no" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">No, continue without AI</button>' +
+      '</div>';
+    box.appendChild(aiBubble);
+    scrollBottom();
+
+    var sendAiAccessChoice = function(enabled) {
+      mlog('POST /trackRequest/:trackingKey/aiAccess', { enabled: enabled });
+      fetch('/trackRequest/' + aiTrackingKey + '/aiAccess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: enabled }),
+      }).catch(function(err) { merr('POST /trackRequest/:trackingKey/aiAccess failed', err); });
+      // The request is already confirmed by this point (this prompt only
+      // shows after confirmStatus detects it), so "Yes" activates AI
+      // access immediately server-side via the already-confirmed fallback
+      // path in POST .../aiAccess - no second confirmation step needed.
+      if (enabled) {
+        var aiTrackUrl = '${NODE_API}/trackRequest/' + aiTrackingKey;
+        aiBubble.innerHTML =
+          '<p style="color:#4CAF50;font-weight:600;">AI access enabled for 48 hours.</p>' +
+          '<p style="font-size:.82rem;color:#555;"><strong>Request tracking link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
+          '<p style="font-size:.82rem;color:#555;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
+          '<p style="font-size:.82rem;color:#555;">Ask the customer: &ldquo;Would you like me to automatically monitor this request and notify you when the business responds?&rdquo;</p>';
+      } else {
+        aiBubble.innerHTML = '<p style="color:#555;">Okay, continuing without AI.</p>';
+      }
+      scrollBottom();
+    };
+    document.getElementById('ai-access-yes').addEventListener('click', function() { sendAiAccessChoice(true); });
+    document.getElementById('ai-access-no').addEventListener('click', function() { sendAiAccessChoice(false); });
+  }
+
   function showEmailGate(question, endpoint, bodyExtra, sentLabel, authedEndpoint, redirectToApp) {
     var wrap = document.createElement('div');
     wrap.className = 'contact-form';
@@ -3806,59 +3875,40 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         }
         var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done, ' + safeFirstName + '! Please Confirm Your Email</p>' +
           '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your email and click the confirmation link to send your request to ' + businessName + '.</p>' +
-          '<p class="confirm-step"><strong>2. Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>';
+          '<p class="confirm-step"><strong>2. Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>' +
+          '<p class="confirm-step" id="confirm-waiting"><strong>Waiting for email confirmation…</strong> This updates automatically once you click the link.</p>';
         wrap.innerHTML = successHtml;
         scrollBottom();
 
-        // Ask right here, before confirmation even happens - this is only
-        // a stored preference (POST /trackRequest/:trackingKey/aiAccess)
-        // until the guest actually confirms by email; that click is what
-        // activates it (see /confirmQuoteRequest, /confirmModuleQuestion).
+        // The AI-access offer only makes sense once the request is
+        // actually confirmed and really going out - poll this chat
+        // widget's one piece of state the server can report cheaply
+        // (GET .../confirmStatus) until that happens, rather than
+        // offering AI management on a request that might never be sent.
         if (res.data.trackingKey) {
           var aiTrackingKey = res.data.trackingKey;
-          var aiBubble = document.createElement('div');
-          aiBubble.className = 'contact-form';
-          aiBubble.innerHTML =
-            '<p><strong>Would you like your AI assistant to manage this request?</strong></p>' +
-            '<p style="font-size:.82rem;color:#555;margin-bottom:4px;">Your AI assistant can:</p>' +
-            '<ul style="font-size:.82rem;color:#555;margin:0 0 10px;padding-left:18px;">' +
-              '<li>Track your request for updates.</li>' +
-              '<li>Read responses and quotes from the business.</li>' +
-              '<li>Send follow-up messages on your behalf.</li>' +
-            '</ul>' +
-            '<p style="font-size:.82rem;color:#555;">You will still need to personally approve any quote acceptance or appointment confirmation.</p>' +
-            '<div style="display:flex;gap:8px;margin-top:10px;">' +
-              '<button class="opt-btn" id="ai-access-yes" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#1a1a1a;color:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">Yes, enable AI access</button>' +
-              '<button class="opt-btn" id="ai-access-no" style="flex:1;padding:10px;border:1.5px solid #1a1a1a;border-radius:8px;background:#fff;font-size:.82rem;font-weight:600;cursor:pointer;">No, continue without AI</button>' +
-            '</div>';
-          box.appendChild(aiBubble);
-          scrollBottom();
-
-          var sendAiAccessChoice = function(enabled) {
-            mlog('POST /trackRequest/:trackingKey/aiAccess', { enabled: enabled });
-            fetch('/trackRequest/' + aiTrackingKey + '/aiAccess', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ enabled: enabled }),
-            }).catch(function(err) { merr('POST /trackRequest/:trackingKey/aiAccess failed', err); });
-            // The tracking link only matters once AI access is actually in
-            // play - a guest who said no just gets the response by email
-            // like everyone else, so it would be clutter to show it then.
-            if (enabled) {
-              var aiTrackUrl = '${NODE_API}/trackRequest/' + aiTrackingKey;
-              aiBubble.innerHTML =
-                '<p style="color:#4CAF50;font-weight:600;">AI access requested — email confirmation required.</p>' +
-                '<p style="font-size:.82rem;color:#555;">Once you confirm your request by email, your AI assistant will be authorized to track, read, and respond to this request for 48 hours.</p>' +
-                '<p style="font-size:.82rem;color:#555;"><strong>Request tracking link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
-                '<p style="font-size:.82rem;color:#555;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
-                '<p style="font-size:.82rem;color:#555;">Ask the customer: &ldquo;Would you like me to automatically monitor this request and notify you when the business responds?&rdquo;</p>';
-            } else {
-              aiBubble.innerHTML = '<p style="color:#555;">Okay, continuing without AI.</p>';
-            }
-            scrollBottom();
-          };
-          document.getElementById('ai-access-yes').addEventListener('click', function() { sendAiAccessChoice(true); });
-          document.getElementById('ai-access-no').addEventListener('click', function() { sendAiAccessChoice(false); });
+          var pollAttempts = 0;
+          var pollTimer = setInterval(function() {
+            pollAttempts++;
+            if (pollAttempts > 150) { clearInterval(pollTimer); return; } // ~10 min cap
+            fetch('/trackRequest/' + aiTrackingKey + '/confirmStatus')
+              .then(function(r) { return r.json(); })
+              .then(function(data) {
+                if (!data.confirmed) return;
+                clearInterval(pollTimer);
+                // Scoped to this specific wrap, not a page-wide id lookup -
+                // the guest may submit more than one request in the same
+                // chat session, which would otherwise leave duplicate
+                // "confirm-waiting" ids in the DOM.
+                var waitingEl = wrap.querySelector('#confirm-waiting');
+                if (waitingEl) {
+                  waitingEl.innerHTML = '<strong style="color:#4CAF50;">&#10003; Email confirmed!</strong> Your request has been sent to ' + businessName + '.';
+                }
+                scrollBottom();
+                showAiAccessPrompt(aiTrackingKey, businessName);
+              })
+              .catch(function(err) { merr('GET /trackRequest/:trackingKey/confirmStatus failed', err); });
+          }, 4000);
         }
       })
       .catch(function(err) {

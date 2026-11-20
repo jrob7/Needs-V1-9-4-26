@@ -3895,16 +3895,12 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
               .then(function(data) {
                 if (!data.confirmed) return;
                 clearInterval(pollTimer);
-                // Scoped to this specific wrap, not a page-wide id lookup -
-                // the guest may submit more than one request in the same
-                // chat session, which would otherwise leave duplicate
-                // "confirm-waiting" ids in the DOM.
-                var waitingEl = wrap.querySelector('#confirm-waiting');
-                if (waitingEl) {
-                  waitingEl.outerHTML =
-                    '<p style="color:#4CAF50;font-weight:600;">&#10003; Email confirmed!<br>Your request has been sent to ' + businessName + '.</p>' +
-                    '<p class="confirm-step"><strong>Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>';
-                }
+                // Replaces the whole bubble, not just the waiting line - the
+                // "Almost Done, please confirm" header and the "1. Confirm
+                // Your Request" instructions are both stale once confirmed.
+                wrap.innerHTML =
+                  '<p style="color:#4CAF50;font-weight:600;">&#10003; Email confirmed!<br>Your request has been sent to ' + businessName + '.</p>' +
+                  '<p class="confirm-step"><strong>Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>';
                 scrollBottom();
                 showAiAccessPrompt(aiTrackingKey, businessName);
               })

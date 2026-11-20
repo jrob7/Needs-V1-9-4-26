@@ -198,6 +198,19 @@ export default function SearchScreen() {
   }, [pendingPrefillText]);
 
   const scrollViewRef = useRef(null);
+  const cameraBtnRef = useRef(null);
+  const sendBtnRef = useRef(null);
+  // react-native-web's View/TouchableOpacity only forward a fixed allowlist
+  // of props to the underlying DOM node (see its forwardedProps module) -
+  // a plain `title` prop is not on that list and gets silently dropped, so
+  // it never becomes a real hover tooltip no matter how it's passed in JSX.
+  // Setting it directly on the DOM node via the ref (which, on web, RNW
+  // points at the real element) bypasses that filter entirely.
+  useEffect(() => {
+    if (!IS_WEB) return;
+    if (cameraBtnRef.current) cameraBtnRef.current.title = 'Attach a photo or video';
+    if (sendBtnRef.current) sendBtnRef.current.title = 'Send';
+  }, []);
   const inputRef = useRef('');
   const imageEnhanceTimeoutRef = useRef(null);
   // True only once the auto-enhance-after-image-pick flow actually finishes
@@ -1616,7 +1629,7 @@ export default function SearchScreen() {
 
       <View style={styles.searchContainer}>
         <View style={styles.searchRow}>
-          <TouchableOpacity style={styles.imageButton} onPress={handleMediaPick} {...(IS_WEB ? { title: 'Attach a photo or video' } : {})}>
+          <TouchableOpacity ref={cameraBtnRef} style={styles.imageButton} onPress={handleMediaPick}>
             <Image source={require('../assets/camera-button.png')} style={[styles.cameraButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
           {!IS_WEB && (
@@ -1645,7 +1658,7 @@ export default function SearchScreen() {
             )}
           </View>
 
-          <TouchableOpacity style={styles.arrowButton} onPress={() => sendQuery()} {...(IS_WEB ? { title: 'Send' } : {})}>
+          <TouchableOpacity ref={sendBtnRef} style={styles.arrowButton} onPress={() => sendQuery()}>
             <Image source={require('../assets/send-arrow-button.png')} style={[styles.arrowButtonImage, IS_WEB && { width: 65, height: 65 }]} />
           </TouchableOpacity>
         </View>

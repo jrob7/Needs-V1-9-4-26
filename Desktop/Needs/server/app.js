@@ -3875,7 +3875,6 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         }
         var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done, ' + safeFirstName + '! Please Confirm Your Email</p>' +
           '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your email and click the confirmation link to send your request to ' + businessName + '.</p>' +
-          '<p class="confirm-step"><strong>2. Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>' +
           '<p class="confirm-step" id="confirm-waiting"><strong>Waiting for email confirmation…</strong> This updates automatically once you click the link.</p>';
         wrap.innerHTML = successHtml;
         scrollBottom();
@@ -3902,7 +3901,9 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
                 // "confirm-waiting" ids in the DOM.
                 var waitingEl = wrap.querySelector('#confirm-waiting');
                 if (waitingEl) {
-                  waitingEl.innerHTML = '<strong style="color:#4CAF50;">&#10003; Email confirmed!</strong> Your request has been sent to ' + businessName + '.';
+                  waitingEl.outerHTML =
+                    '<p style="color:#4CAF50;font-weight:600;">&#10003; Email confirmed!<br>Your request has been sent to ' + businessName + '.</p>' +
+                    '<p class="confirm-step"><strong>Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>';
                 }
                 scrollBottom();
                 showAiAccessPrompt(aiTrackingKey, businessName);

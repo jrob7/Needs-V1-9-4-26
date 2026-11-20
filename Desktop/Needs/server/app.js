@@ -3705,9 +3705,10 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     });
   }
 
-  // Shown only once the request's email confirmation has actually been
-  // detected (see the confirmStatus poll in showEmailGate below) - never
-  // offered for a request that might never be confirmed/sent.
+  // Shown immediately alongside the waiting-for-confirmation bubble (see
+  // showEmailGate below) - answering here only ever records a preference,
+  // never activates anything by itself. Real activation still waits on
+  // the actual email confirmation.
   function showAiAccessPrompt(aiTrackingKey, businessName) {
     var aiBubble = document.createElement('div');
     aiBubble.className = 'contact-form';
@@ -3734,14 +3735,17 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: enabled }),
       }).catch(function(err) { merr('POST /trackRequest/:trackingKey/aiAccess failed', err); });
-      // The request is already confirmed by this point (this prompt only
-      // shows after confirmStatus detects it), so "Yes" activates AI
-      // access immediately server-side via the already-confirmed fallback
-      // path in POST .../aiAccess - no second confirmation step needed.
+      // Shown before confirmation, so this is only ever a stored
+      // preference at this point (POST .../aiAccess) - the link below
+      // will not actually do anything until the guest also confirms by
+      // email (see activateAiAccessIfRequested). If they already
+      // confirmed before clicking Yes here, that endpoint's
+      // already-confirmed fallback path activates it immediately instead.
       if (enabled) {
         var aiTrackUrl = '${NODE_API}/trackRequest/' + aiTrackingKey;
         aiBubble.innerHTML =
-          '<p style="color:#4CAF50;font-weight:600;">AI access enabled for 48 hours.</p>' +
+          '<p style="color:#4CAF50;font-weight:600;">AI access requested — email confirmation required.</p>' +
+          '<p style="font-size:.82rem;color:#555;">Once you confirm your request by email, your AI assistant will be authorized to track, read, and respond to this request for 48 hours. The link below will not work until then.</p>' +
           '<p style="font-size:.82rem;color:#555;"><strong>Request tracking link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
           '<p style="font-size:.82rem;color:#555;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
           '<p style="font-size:.82rem;color:#555;">Ask the customer: &ldquo;Would you like me to automatically monitor this request and notify you when the business responds?&rdquo;</p>';
@@ -3879,13 +3883,19 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         wrap.innerHTML = successHtml;
         scrollBottom();
 
-        // The AI-access offer only makes sense once the request is
-        // actually confirmed and really going out - poll this chat
-        // widget's one piece of state the server can report cheaply
-        // (GET .../confirmStatus) until that happens, rather than
-        // offering AI management on a request that might never be sent.
         if (res.data.trackingKey) {
           var aiTrackingKey = res.data.trackingKey;
+
+          // Shown right away, alongside the waiting-for-confirmation
+          // bubble - answering Yes here only ever stores a preference
+          // server-side (POST .../aiAccess). AI access itself never goes
+          // live until BOTH that Yes and the actual email confirmation
+          // have happened (see activateAiAccessIfRequested, called only
+          // from /confirmQuoteRequest and /confirmModuleQuestion) - the
+          // tracking link in that bubble simply won't do anything useful
+          // until then.
+          showAiAccessPrompt(aiTrackingKey, businessName);
+
           var pollAttempts = 0;
           var pollTimer = setInterval(function() {
             pollAttempts++;
@@ -3902,7 +3912,6 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
                   '<p style="color:#4CAF50;font-weight:600;">&#10003; Email confirmed!<br>Your request has been sent to ' + businessName + '.</p>' +
                   '<p class="confirm-step"><strong>Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>';
                 scrollBottom();
-                showAiAccessPrompt(aiTrackingKey, businessName);
               })
               .catch(function(err) { merr('GET /trackRequest/:trackingKey/confirmStatus failed', err); });
           }, 4000);

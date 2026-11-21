@@ -2482,9 +2482,9 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     ? `<div class="badge badge-neutral">Sent</div>`
     : `<div class="badge ${ready ? 'badge-ready' : 'badge-not-ready'}">${ready ? 'Ready' : 'Not ready'}</div>`;
 
-  // Shown regardless of AI chat access/content below - a guest who
-  // confirmed by email should see this the next time they open the
-  // tracking link even if they never opted into the chat.
+  // Only rendered when AI chat access is on (confirmedAppointments is
+  // already empty otherwise) - a guest who opted out already got this
+  // confirmation on the one-time email-click page.
   const confirmedHtml = (confirmedAppointments || []).map(a => `
     <div class="confirmedBanner">
       <p class="confirmedTitle">✅ Appointment Confirmed</p>
@@ -2677,15 +2677,6 @@ async function resolveTrackingPageState(trackingKey) {
     ? ((resolved.quotes || []).some(q => q.status !== 'pending_business') ? 'ready' : 'not_ready')
     : (resolved.notification.answered ? 'ready' : 'not_ready');
 
-  // Shown regardless of AI chat access - a confirmed appointment is
-  // important enough that a guest should see it on the tracking page even
-  // if they never opted into the chat.
-  const confirmedAppointments = resolved.requestType === 'quote'
-    ? (resolved.quotes || [])
-        .filter(q => q.status === 'appointment_confirmed')
-        .map(q => ({ businessName: q.businessName, date: q.proposedDate, time: q.proposedTime, price: q.confirmedPrice }))
-    : [];
-
   const access = await database.collection('AIChatAccess').findOne({ trackingKey });
   let chatAccess = null;
   if (access) {
@@ -2698,10 +2689,19 @@ async function resolveTrackingPageState(trackingKey) {
   }
 
   let content = null;
+  // Gated the same as content - a guest who opted out of (or never
+  // enabled) AI tracking access already got this confirmation on the
+  // one-time email-click page; it doesn't need to persist here too.
+  let confirmedAppointments = [];
   if (chatAccess?.enabled && !chatAccess.expired) {
     content = resolved.requestType === 'quote'
       ? { requestType: 'quote', quotes: resolved.quotes || [] }
       : { requestType: 'question', businessName: await resolveBusinessName(resolved.notification), messages: conversationMessages(resolved.notification) };
+    if (resolved.requestType === 'quote') {
+      confirmedAppointments = (resolved.quotes || [])
+        .filter(q => q.status === 'appointment_confirmed')
+        .map(q => ({ businessName: q.businessName, date: q.proposedDate, time: q.proposedTime, price: q.confirmedPrice }));
+    }
   }
 
   return { resolved, status, chatAccess, content, confirmedAppointments };

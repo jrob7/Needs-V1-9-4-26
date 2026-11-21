@@ -304,14 +304,20 @@ const QuoteMessageRow = ({ item, onReply }) => {
           <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
         </View>
         <Text style={styles.rowBody}>{item.body}</Text>
-        <View style={styles.leadButtonsRow}>
-          {/* Sized to match Confirm's own width (flex:1.4 of 2.4 total in
-              its two-button row, ~58%) rather than stretching full-width
-              now that Reply has no sibling button to share the row with. */}
-          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#0EA5E9', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'flex-start', width: '58%', paddingHorizontal: 12 }]} onPress={() => onReply(item)}>
-            <Text style={styles.respondBtnText} numberOfLines={1}>💬 Reply</Text>
-          </TouchableOpacity>
-        </View>
+        {item.responded ? (
+          <Text style={[styles.rowBody, { color: '#10B981', marginTop: 6, fontWeight: '600' }]}>
+            ✓ Response sent
+          </Text>
+        ) : (
+          <View style={styles.leadButtonsRow}>
+            {/* Sized to match Confirm's own width (flex:1.4 of 2.4 total in
+                its two-button row, ~58%) rather than stretching full-width
+                now that Reply has no sibling button to share the row with. */}
+            <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#0EA5E9', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'flex-start', width: '58%', paddingHorizontal: 12 }]} onPress={() => onReply(item)}>
+              <Text style={styles.respondBtnText} numberOfLines={1}>💬 Reply</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
       {!item.read && <View style={styles.unreadDot} />}
     </View>

@@ -3083,7 +3083,7 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
         await database.collection('Notifications').updateOne(
           { quoteId: targetQuote._id, type: 'quote_message' },
           {
-            $set: { userId: targetQuote.serviceUserId, title: '💬 Question About Your Quote', body: text || '📷 Photo attached', read: false, createdAt: new Date() },
+            $set: { userId: targetQuote.serviceUserId, title: '💬 Question About Your Quote', body: text || '📷 Photo attached', read: false, responded: false, createdAt: new Date() },
             $setOnInsert: { needId: targetQuote.needId },
           },
           { upsert: true }
@@ -6939,9 +6939,13 @@ app.post('/respondToQuoteMessage', async (req, res) => {
 
     // Not just the one notification that was tapped - any other unread
     // quote_message notifications for this same quote are now answered too.
+    // responded:true is what QuoteMessageRow checks to show "Response
+    // sent" instead of the Reply button, same pattern quote_request
+    // already uses - reset back to false whenever the next new guest
+    // message arrives (see /trackRequest/:trackingKey/message).
     await database.collection('Notifications').updateMany(
-      { quoteId: new ObjectId(quoteId), type: 'quote_message', read: false },
-      { $set: { read: true } }
+      { quoteId: new ObjectId(quoteId), type: 'quote_message' },
+      { $set: { read: true, responded: true } }
     );
 
     const requester = quote.userId

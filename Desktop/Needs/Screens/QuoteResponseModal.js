@@ -325,10 +325,10 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
           <View style={st.tabs}>
             {[
               ['quote', '📋 Send Quote'],
-              ['ask', '💬 Ask Question'],
+              ['ask', '📝 Request Info'],
               // Only shown when relevant - opened directly from a
               // quote_message notification, or once a thread already exists.
-              ...((initialTab === 'messages' || quoteDoc?.messages?.length) ? [['messages', '❓ Questions']] : []),
+              ...((initialTab === 'messages' || quoteDoc?.messages?.length) ? [['messages', '💬 Messages']] : []),
             ].map(([key, label]) => (
               <TouchableOpacity key={key} style={[st.tab, activeTab === key && st.tabActive]} onPress={() => setActiveTab(key)}>
                 <Text style={[st.tabTxt, activeTab === key && st.tabTxtActive]}>{label}</Text>
@@ -573,7 +573,7 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
             {/* ── ASK TAB ────────────────────────────────────────────── */}
             {activeTab === 'ask' && (
               <>
-                <Text style={[st.sectionTitle, { marginBottom: 6 }]}>Ask the Customer</Text>
+                <Text style={[st.sectionTitle, { marginBottom: 6 }]}>Request Info From the Customer</Text>
                 <Text style={[st.noteInput, { color: '#6B7280', fontSize: 13, borderWidth: 0, paddingHorizontal: 0, backgroundColor: 'transparent', marginBottom: 12 }]}>
                   Type your question(s) below. The customer will see them in their quote view and can reply before you finalize the quote.
                 </Text>
@@ -628,7 +628,7 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                 growing on both sides, not capped at one exchange. */}
             {activeTab === 'messages' && (
               <>
-                <Text style={[st.sectionTitle, { marginBottom: 12 }]}>Customer Questions</Text>
+                <Text style={[st.sectionTitle, { marginBottom: 12 }]}>Messages With the Customer</Text>
                 {(quoteDoc?.messages || []).map((m, i) => (
                   <View
                     key={i}

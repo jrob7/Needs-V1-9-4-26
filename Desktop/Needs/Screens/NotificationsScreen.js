@@ -297,6 +297,34 @@ const QuoteRequestRow = ({ item, onRespond, onAsk, requestingInfo }) => {
   );
 };
 
+// A guest's (or their AI's) question about a quote, asked through the
+// tracking-link chat - styled like QuoteRequestRow (not the generic
+// fallback row) since it's the same underlying quote, not an unrelated
+// notification. Replying opens QuoteResponseModal on its 'messages' tab.
+const QuoteMessageRow = ({ item, onReply }) => {
+  const cfg = NOTIF_ICONS.quote_message;
+  return (
+    <View style={[styles.row, !item.read && styles.rowUnread, { alignItems: 'flex-start' }]}>
+      <View style={[styles.iconWrap, { backgroundColor: cfg.bg }]}>
+        <Ionicons name={cfg.name} size={W ? 26 : 20} color={cfg.color} />
+      </View>
+      <View style={styles.rowContent}>
+        <View style={styles.rowTop}>
+          <Text style={styles.rowTitle} numberOfLines={1}>{item.title || 'Question About Your Quote'}</Text>
+          <Text style={styles.rowTime}>{timeLabel(item.createdAt)}</Text>
+        </View>
+        <Text style={styles.rowBody}>{item.body}</Text>
+        <View style={styles.leadButtonsRow}>
+          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#0EA5E9', flex: 1 }]} onPress={() => onReply(item)}>
+            <Text style={styles.respondBtnText}>💬 Reply</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      {!item.read && <View style={styles.unreadDot} />}
+    </View>
+  );
+};
+
 const ActivityRow = ({ need, onPress, onArchive }) => (
   <TouchableOpacity style={styles.activityRow} onPress={onPress} activeOpacity={0.75}>
     <View style={{ flex: 1 }}>
@@ -1064,6 +1092,11 @@ const NotificationsScreen = () => {
                 ? <InfoProvidedRow item={item} onRespond={i => {
                     const qId = i.quoteId ? String(i.quoteId) : null;
                     if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'quote' });
+                  }} />
+              : item.type === 'quote_message'
+                ? <QuoteMessageRow item={item} onReply={i => {
+                    const qId = i.quoteId ? String(i.quoteId) : null;
+                    if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'messages' });
                   }} />
               : (item.type === 'connection_request' || item.type === 'connection_accepted')
                 ? <ConnectionRequestRow

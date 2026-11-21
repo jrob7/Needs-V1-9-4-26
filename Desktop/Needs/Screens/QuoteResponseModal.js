@@ -132,11 +132,17 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
   const [questions,     setQuestions]     = useState([]);
   const [customQuestion, setCustomQuestion] = useState('');
 
-  // Full quote doc — fetched when opened from info_provided to show customer's answers
+  // Messages (guest/AI question thread) field
+  const [messageText, setMessageText] = useState('');
+
+  // Full quote doc — fetched whenever there's a quote to show, not just for
+  // one specific notification type (that gate previously only covered
+  // info_provided, which meant any other quoteId-bearing notification type,
+  // like quote_message, opened this modal with no quote context at all).
   const [quoteDoc, setQuoteDoc] = useState(null);
   useEffect(() => {
     const qId = notification?.quoteId;
-    if (!qId || notification?.type !== 'info_provided') return;
+    if (!qId) return;
     authFetch(`${NODE_API}/serviceQuote/${qId}`)
       .then(r => r.json())
       .then(d => { if (d && !d.error) setQuoteDoc(d); })
@@ -265,6 +271,32 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
     } finally { setSending(false); }
   };
 
+  // ── Send a reply in the guest's question thread ──────────────────────────
+  // Open-ended, not a single Q&A round - messages[] just keeps growing on
+  // both sides, same as the module_question messages thread already works.
+  const handleSendMessage = async () => {
+    const trimmed = messageText.trim();
+    if (!trimmed) return;
+    const quoteId = notification?.quoteId;
+    if (!quoteId) { Alert.alert('Error', 'Quote ID missing.'); return; }
+
+    setSending(true);
+    try {
+      const resp = await fetch(`${NODE_API}/respondToQuoteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quoteId, text: trimmed }),
+      });
+      if (!resp.ok) throw new Error('Server error');
+
+      setQuoteDoc(prev => ({ ...prev, messages: [...(prev?.messages || []), { from: 'org', text: trimmed, at: new Date().toISOString() }] }));
+      setMessageText('');
+      onSent?.();
+    } catch {
+      Alert.alert('Error', "Couldn't send your reply. Please try again.");
+    } finally { setSending(false); }
+  };
+
   // ── Android time picker ──────────────────────────────────────────────────
   const onAndroidTimeChange = (event, selected) => {
     setShowTimePicker(false);
@@ -291,7 +323,13 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
 
           {/* Tabs */}
           <View style={st.tabs}>
-            {[['quote','📋 Send Quote'],['ask','💬 Ask Question']].map(([key, label]) => (
+            {[
+              ['quote', '📋 Send Quote'],
+              ['ask', '💬 Ask Question'],
+              // Only shown when relevant - opened directly from a
+              // quote_message notification, or once a thread already exists.
+              ...((initialTab === 'messages' || quoteDoc?.messages?.length) ? [['messages', '❓ Questions']] : []),
+            ].map(([key, label]) => (
               <TouchableOpacity key={key} style={[st.tab, activeTab === key && st.tabActive]} onPress={() => setActiveTab(key)}>
                 <Text style={[st.tabTxt, activeTab === key && st.tabTxtActive]}>{label}</Text>
               </TouchableOpacity>
@@ -579,6 +617,58 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                   onPress={handleSendQuestions} disabled={sending}
                 >
                   <Text style={st.sendBtnTxt}>{sending ? 'Sending…' : 'Send Questions'}</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* ── MESSAGES TAB ───────────────────────────────────────── */}
+            {/* The guest's (or their AI's) own question thread about this
+                quote - separate from the Ask tab above, which is the
+                business asking the customer something. Open-ended: keeps
+                growing on both sides, not capped at one exchange. */}
+            {activeTab === 'messages' && (
+              <>
+                <Text style={[st.sectionTitle, { marginBottom: 12 }]}>Customer Questions</Text>
+                {(quoteDoc?.messages || []).map((m, i) => (
+                  <View
+                    key={i}
+                    style={{
+                      alignSelf: m.from === 'org' ? 'flex-end' : 'flex-start',
+                      backgroundColor: m.from === 'org' ? '#0EA5E9' : '#fff',
+                      borderWidth: m.from === 'org' ? 0 : 1,
+                      borderColor: '#BAE6FD',
+                      borderRadius: 10,
+                      borderBottomRightRadius: m.from === 'org' ? 2 : 10,
+                      borderBottomLeftRadius: m.from === 'org' ? 10 : 2,
+                      paddingHorizontal: 12, paddingVertical: 8,
+                      maxWidth: '85%', marginBottom: 8,
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: m.from === 'org' ? 'rgba(255,255,255,0.75)' : '#0369A1', marginBottom: 2 }}>
+                      {m.from === 'org' ? 'You' : 'Customer'}
+                    </Text>
+                    <Text style={{ fontSize: 13, color: m.from === 'org' ? '#fff' : '#0F172A' }}>{m.text}</Text>
+                  </View>
+                ))}
+                {(!quoteDoc?.messages || quoteDoc.messages.length === 0) && (
+                  <Text style={{ fontSize: 13, color: '#94A3B8', marginBottom: 12 }}>No questions yet.</Text>
+                )}
+
+                <View style={st.divider} />
+
+                <TextInput
+                  style={[st.questionInput, { marginTop: 8 }]}
+                  placeholder="Type a reply…"
+                  placeholderTextColor="#94A3B8"
+                  value={messageText}
+                  onChangeText={setMessageText}
+                  multiline
+                />
+                <TouchableOpacity
+                  style={[st.sendBtn, { backgroundColor: '#0EA5E9' }, sending && { opacity: 0.5 }]}
+                  onPress={handleSendMessage} disabled={sending}
+                >
+                  <Text style={st.sendBtnTxt}>{sending ? 'Sending…' : 'Send Reply'}</Text>
                 </TouchableOpacity>
               </>
             )}

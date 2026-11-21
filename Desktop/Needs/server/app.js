@@ -6758,6 +6758,62 @@ app.post('/userRespondToQuote', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Internal Server Error' }); }
 });
 
+// POST /respondToQuoteMessage — the business replies, from inside the app,
+// to a guest's (or their AI's) question about this quote. Pushes into the
+// same ServiceQuotes.messages[] the guest side already writes to (see
+// POST /trackRequest/:trackingKey/message's quote branch), so both sides
+// of the conversation live in one array regardless of which end wrote to
+// it. No requireAuth, matching the sibling quote endpoints above
+// (/respondToServiceQuote, /userRespondToQuote) - quoteId possession is
+// the only check this part of the file uses.
+app.post('/respondToQuoteMessage', async (req, res) => {
+  try {
+    const { quoteId, text } = req.body || {};
+    if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+    const trimmedText = String(text || '').trim().slice(0, 2000);
+    if (!trimmedText) return res.status(400).json({ error: 'text is required' });
+
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+
+    await database.collection('ServiceQuotes').updateOne(
+      { _id: new ObjectId(quoteId) },
+      { $push: { messages: { from: 'org', text: trimmedText, at: new Date() } } }
+    );
+
+    // Not just the one notification that was tapped - any other unread
+    // quote_message notifications for this same quote are now answered too.
+    await database.collection('Notifications').updateMany(
+      { quoteId: new ObjectId(quoteId), type: 'quote_message', read: false },
+      { $set: { read: true } }
+    );
+
+    const requester = quote.userId
+      ? await database.collection('Users').findOne({ _id: quote.userId }, { projection: { email: 1 } })
+      : null;
+    if (requester?.email) {
+      const need = quote.needId
+        ? await database.collection('NeedRequests').findOne({ _id: quote.needId }, { projection: { trackingKey: 1 } })
+        : null;
+      const trackUrl = need?.trackingKey ? `${NODE_API}/trackRequest/${encodeURIComponent(need.trackingKey)}` : null;
+      await sendEmail({
+        to: requester.email,
+        subject: `${quote.businessName || 'The business'} replied to your question`,
+        html: `
+          <p><strong>${escapeHtml(quote.businessName || 'The business')}</strong> replied to your question about their quote:</p>
+          <p style="background:#EFF6FF;border-radius:8px;padding:12px 16px;color:#1E3A8A;">${escapeHtml(trimmedText)}</p>
+          ${trackUrl ? `<p><a href="${trackUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">View Your Request</a></p>` : ''}
+        `,
+      });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ /respondToQuoteMessage error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 registerOAuthRoutes(app, { database, bcrypt, signTokens: signMcpTokens, NODE_API });
 registerMcpRoutes(app, { client, NODE_API });
 

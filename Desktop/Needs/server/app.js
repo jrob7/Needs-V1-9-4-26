@@ -3057,12 +3057,19 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
         { $push: { messages: { from: 'guest', text, at: new Date() } } }
       );
       if (targetQuote.serviceUserId) {
-        await database.collection('Notifications').insertOne({
-          userId: targetQuote.serviceUserId, type: 'quote_message',
-          title: '💬 Question About Your Quote',
-          body: text,
-          needId: targetQuote.needId, quoteId: targetQuote._id, read: false, createdAt: new Date(),
-        });
+        // Update the same notification on every new message instead of
+        // inserting a fresh one each time - same precedent module_question
+        // already follows (re-surfacing read:false and bumping createdAt
+        // so it sorts back to the top, rather than piling up one card per
+        // message in what's really a single ongoing conversation).
+        await database.collection('Notifications').updateOne(
+          { quoteId: targetQuote._id, type: 'quote_message' },
+          {
+            $set: { userId: targetQuote.serviceUserId, title: '💬 Question About Your Quote', body: text, read: false, createdAt: new Date() },
+            $setOnInsert: { needId: targetQuote.needId },
+          },
+          { upsert: true }
+        );
       }
     } else {
       const notification = await database.collection('Notifications').findOne({ trackingKey, type: 'module_question' });

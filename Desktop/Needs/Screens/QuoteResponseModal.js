@@ -665,11 +665,7 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                   multiline
                 />
                 <TouchableOpacity
-                  style={[
-                    st.sendBtn,
-                    { backgroundColor: '#0EA5E9', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'center', width: 200 },
-                    sending && { opacity: 0.5 },
-                  ]}
+                  style={[st.sendBtn, { backgroundColor: '#0EA5E9' }, sending && { opacity: 0.5 }]}
                   onPress={handleSendMessage} disabled={sending}
                 >
                   <Text style={st.sendBtnTxt} numberOfLines={1}>{sending ? 'Sending…' : 'Send Reply'}</Text>
@@ -791,6 +787,15 @@ const st = StyleSheet.create({
     textAlignVertical: 'top',
   },
 
-  sendBtn:    { height: 52, borderRadius: 12, backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center' },
+  sendBtn:    {
+    height: 52, borderRadius: 12, backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center',
+    // Fixed, centered width instead of stretching full-width - set directly
+    // here (not per call site) so Send Quote/Send Questions/Send Reply, all
+    // of which use this same base style, stay consistent. flexGrow/Shrink/
+    // Basis set explicitly rather than via the `flex` shorthand, which
+    // expands to flex-basis:0% and silently wins over an explicit width in
+    // a row-direction flex container.
+    alignSelf: 'center', width: 260, flexGrow: 0, flexShrink: 0, flexBasis: 'auto',
+  },
   sendBtnTxt: { fontSize: 15, fontWeight: '800', color: '#fff' },
 });

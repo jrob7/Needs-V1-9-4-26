@@ -2476,11 +2476,23 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
 // already sits in this page's own URL, so nothing here should hand it (or
 // anything else) to a third party's logs, and nothing here should be
 // cacheable.
-function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingNote }) {
+function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingNote, confirmedAppointments }) {
   const ready = status === 'ready';
   const badge = status === 'sent'
     ? `<div class="badge badge-neutral">Sent</div>`
     : `<div class="badge ${ready ? 'badge-ready' : 'badge-not-ready'}">${ready ? 'Ready' : 'Not ready'}</div>`;
+
+  // Shown regardless of AI chat access/content below - a guest who
+  // confirmed by email should see this the next time they open the
+  // tracking link even if they never opted into the chat.
+  const confirmedHtml = (confirmedAppointments || []).map(a => `
+    <div class="confirmedBanner">
+      <p class="confirmedTitle">✅ Appointment Confirmed</p>
+      <p class="confirmedDetail">
+        Your appointment with <strong>${escapeHtml(a.businessName || 'the business')}</strong> is confirmed
+        ${a.date ? ` for <strong>${escapeHtml(a.date)}${a.time ? ` at ${escapeHtml(a.time)}` : ''}</strong>` : ''}${a.price ? ` — <strong>$${escapeHtml(String(a.price))}</strong>` : ''}.
+      </p>
+    </div>`).join('');
 
   const actionForm = (actionType, label, businessName) => `
     <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/${actionType}" style="display:inline;">
@@ -2592,6 +2604,9 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .badge-not-ready { background: #FEE2E2; color: #991B1B; }
     .badge-neutral { background: #F1F5F9; color: #334155; }
     .top { background: #fff; border-radius: 16px; padding: 24px 24px 8px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+    .confirmedBanner { background: #DCFCE7; border: 1px solid #BBF7D0; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+    .confirmedTitle { font-weight: 700; color: #166534; margin: 0 0 6px; font-size: .95rem; }
+    .confirmedDetail { color: #166534; margin: 0; font-size: .88rem; }
     .notice { background: #FEF9C3; color: #854D0E; border-radius: 10px; padding: 10px 14px; font-size: .85rem; margin-bottom: 14px; }
     .quoteCard { background: #fff; border-radius: 16px; padding: 22px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
     h2 { font-size: 1.05rem; color: #0F172A; margin: 0 0 4px; }
@@ -2620,6 +2635,7 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
       ${badge}
     </div>
     ${pendingNote ? `<div class="notice">${escapeHtml(pendingNote)}</div>` : ''}
+    ${confirmedHtml}
     ${chatHtml}
   </div>
   <script>
@@ -2661,6 +2677,15 @@ async function resolveTrackingPageState(trackingKey) {
     ? ((resolved.quotes || []).some(q => q.status !== 'pending_business') ? 'ready' : 'not_ready')
     : (resolved.notification.answered ? 'ready' : 'not_ready');
 
+  // Shown regardless of AI chat access - a confirmed appointment is
+  // important enough that a guest should see it on the tracking page even
+  // if they never opted into the chat.
+  const confirmedAppointments = resolved.requestType === 'quote'
+    ? (resolved.quotes || [])
+        .filter(q => q.status === 'appointment_confirmed')
+        .map(q => ({ businessName: q.businessName, date: q.proposedDate, time: q.proposedTime, price: q.confirmedPrice }))
+    : [];
+
   const access = await database.collection('AIChatAccess').findOne({ trackingKey });
   let chatAccess = null;
   if (access) {
@@ -2679,7 +2704,7 @@ async function resolveTrackingPageState(trackingKey) {
       : { requestType: 'question', businessName: await resolveBusinessName(resolved.notification), messages: conversationMessages(resolved.notification) };
   }
 
-  return { resolved, status, chatAccess, content };
+  return { resolved, status, chatAccess, content, confirmedAppointments };
 }
 
 function conversationMessages(notif) {
@@ -2745,7 +2770,7 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
       sendAiActivityEmail(state.resolved, trackingKey, 'read', 'Your AI assistant just opened this request.').catch(e => console.warn('⚠️ sendAiActivityEmail (read) failed:', e?.message));
     }
 
-    res.send(renderTrackingPage({ trackingKey, status: state.status, chatAccess: state.chatAccess, content: state.content }));
+    res.send(renderTrackingPage({ trackingKey, status: state.status, chatAccess: state.chatAccess, content: state.content, confirmedAppointments: state.confirmedAppointments }));
   } catch (err) {
     console.error('❌ /trackRequest error:', err);
     res.status(500).json({ error: 'Internal Server Error' });

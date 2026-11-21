@@ -2636,7 +2636,10 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
         reader.onload = function () {
           fetch('/uploadImage', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: reader.result })
             .then(function (r) { return r.json(); })
-            .then(function (data) { hiddenField.value = data.imageUrl || data.url || ''; })
+            // .url is the actual usable URL (NODE_API/images/:id) - .imageUrl
+            // is just the bare GridFS id string, not a URL at all. Matches
+            // the order Screens/MatchesModal.js's AnswerForm already uses.
+            .then(function (data) { hiddenField.value = data.url || data.imageUrl || ''; })
             .catch(function () {});
         };
         reader.readAsDataURL(file);

@@ -128,9 +128,8 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
   );
   const [note, setNote] = useState('');
 
-  // Messages tab (merged thread - ordinary messages and "needs an answer" questions)
+  // Messages tab (merged, general-purpose thread)
   const [messageText, setMessageText] = useState('');
-  const [requireAnswer, setRequireAnswer] = useState(false);
 
   // Full quote doc — fetched whenever there's a quote to show, not just for
   // one specific notification type (that gate previously only covered
@@ -241,13 +240,10 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
   };
 
   // ── Send a message in the merged Messages tab ────────────────────────────
-  // One compose box, two underlying mechanisms depending on the
-  // requireAnswer checkbox - unchecked is an ordinary message
-  // (/respondToQuoteMessage, no status effect); checked reuses the
-  // existing /respondToServiceQuote action:'ask' endpoint (now always a
-  // single question instead of the old multi-question batch UI), which
-  // flags the quote as awaiting_user_info and lets the customer attach a
-  // photo when they answer.
+  // Plain, general messages only now - no separate "needs a specific
+  // answer" mode. The guest can attach a photo to any reply on their side
+  // regardless (tracking page + the app), so that distinction no longer
+  // does anything a plain message can't already do.
   const handleSendMessage = async () => {
     const trimmed = messageText.trim();
     if (!trimmed) return;
@@ -256,37 +252,15 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
 
     setSending(true);
     try {
-      if (requireAnswer) {
-        const resp = await fetch(`${NODE_API}/respondToServiceQuote`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quoteId, action: 'ask', questions: [trimmed] }),
-        });
-        if (!resp.ok) throw new Error('Server error');
+      const resp = await fetch(`${NODE_API}/respondToQuoteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quoteId, text: trimmed }),
+      });
+      if (!resp.ok) throw new Error('Server error');
 
-        setQuoteDoc(prev => {
-          const prevComplete = prev?.infoRequest?.questions?.length && prev?.infoResponse?.answers?.length;
-          const archived = prevComplete
-            ? [...(prev.qaHistory || []), {
-                questions: prev.infoRequest.questions, askedAt: prev.infoRequest.askedAt || null,
-                answers: prev.infoResponse.answers, photoUrl: prev.infoResponse.photoUrl || null,
-                respondedAt: prev.infoResponse.respondedAt || null,
-              }]
-            : (prev?.qaHistory || []);
-          return { ...prev, qaHistory: archived, infoRequest: { questions: [trimmed], askedAt: new Date().toISOString() }, infoResponse: null };
-        });
-      } else {
-        const resp = await fetch(`${NODE_API}/respondToQuoteMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quoteId, text: trimmed }),
-        });
-        if (!resp.ok) throw new Error('Server error');
-
-        setQuoteDoc(prev => ({ ...prev, messages: [...(prev?.messages || []), { from: 'org', text: trimmed, at: new Date().toISOString() }] }));
-      }
+      setQuoteDoc(prev => ({ ...prev, messages: [...(prev?.messages || []), { from: 'org', text: trimmed, at: new Date().toISOString() }] }));
       setMessageText('');
-      setRequireAnswer(false);
       onSent?.();
     } catch {
       Alert.alert('Error', "Couldn't send. Please try again.");
@@ -579,7 +553,16 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                       <Text style={{ fontSize: 12, fontWeight: '700', color: item.m.from === 'org' ? 'rgba(255,255,255,0.75)' : '#0369A1', marginBottom: 2 }}>
                         {item.m.from === 'org' ? 'You' : 'Customer'}
                       </Text>
-                      <Text style={{ fontSize: 13, color: item.m.from === 'org' ? '#fff' : '#0F172A' }}>{item.m.text}</Text>
+                      {item.m.text ? (
+                        <Text style={{ fontSize: 13, color: item.m.from === 'org' ? '#fff' : '#0F172A' }}>{item.m.text}</Text>
+                      ) : null}
+                      {item.m.photoUrl ? (
+                        <Image
+                          source={{ uri: item.m.photoUrl }}
+                          style={{ width: 200, height: 160, borderRadius: 8, marginTop: item.m.text ? 6 : 0, backgroundColor: '#F8F5FF' }}
+                          resizeMode="contain"
+                        />
+                      ) : null}
                     </View>
                   ))}
 
@@ -594,17 +577,10 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                     multiline
                   />
                   <TouchableOpacity
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, marginBottom: 4 }}
-                    onPress={() => setRequireAnswer(v => !v)}
-                  >
-                    <Ionicons name={requireAnswer ? 'checkbox' : 'square-outline'} size={20} color="#7C3AED" />
-                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>Needs a specific answer (customer can attach a photo)</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[st.sendBtn, { backgroundColor: requireAnswer ? '#7C3AED' : '#0EA5E9' }, sending && { opacity: 0.5 }]}
+                    style={[st.sendBtn, { backgroundColor: '#0EA5E9', marginTop: 10 }, sending && { opacity: 0.5 }]}
                     onPress={handleSendMessage} disabled={sending}
                   >
-                    <Text style={st.sendBtnTxt} numberOfLines={1}>{sending ? 'Sending…' : (requireAnswer ? 'Send Question' : 'Send Message')}</Text>
+                    <Text style={st.sendBtnTxt} numberOfLines={1}>{sending ? 'Sending…' : 'Send Message'}</Text>
                   </TouchableOpacity>
                 </>
               );

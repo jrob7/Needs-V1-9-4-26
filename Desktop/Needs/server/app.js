@@ -2495,7 +2495,10 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
         const infoThread = (q.qaHistory || []).map(m => `
           <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
         const msgThread = (q.messages || []).map(m => `
-          <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
+          <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">
+            ${m.text ? escapeHtml(m.text) : ''}
+            ${m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : ''}
+          </div>`).join('');
         const hasTime = q.proposedDate && q.proposedTime;
         let actions = '';
         if (['business_confirmed', 'business_edited'].includes(q.status)) {
@@ -2536,7 +2539,9 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             ${pendingInfoRequest || `
               <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/message">
                 <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
-                <textarea name="text" placeholder="Ask a question about this quote…" required></textarea>
+                <input type="hidden" name="photoUrl" class="photoUrlField">
+                <textarea name="text" placeholder="Ask a question about this quote…"></textarea>
+                <label class="photoLabel">Attach a photo (optional): <input type="file" accept="image/*" class="photoInput"></label>
                 <button type="submit">Send</button>
               </form>`}
             ${actions ? `<div class="actions">${actions}</div>` : ''}
@@ -2545,13 +2550,18 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     } else {
       const businessName = content.businessName || 'the business';
       const thread = (content.messages || []).map(m => `
-        <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
+        <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">
+          ${m.text ? escapeHtml(m.text) : ''}
+          ${m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : ''}
+        </div>`).join('');
       chatHtml = `
         <div class="quoteCard">
           <h2>${escapeHtml(businessName)}</h2>
           <div class="thread">${thread}</div>
           <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/message">
-            <textarea name="text" placeholder="Type a message…" required></textarea>
+            <input type="hidden" name="photoUrl" class="photoUrlField">
+            <textarea name="text" placeholder="Type a message…"></textarea>
+            <label class="photoLabel">Attach a photo (optional): <input type="file" accept="image/*" class="photoInput"></label>
             <button type="submit">Send</button>
           </form>
         </div>`;
@@ -2598,7 +2608,9 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .hint a { color: #2563EB; text-decoration: none; }
     .infoRequestBox { background: #FEF9C3; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
     .infoRequestLabel { font-weight: 600; color: #854D0E; margin: 0 0 10px; }
-    .photoLabel { display: block; font-size: .82rem; color: #92400E; margin-bottom: 10px; }
+    .photoLabel { display: block; font-size: .82rem; color: #64748B; margin: 6px 0 10px; }
+    .infoRequestBox .photoLabel { color: #92400E; }
+    .bubblePhoto { max-width: 220px; border-radius: 8px; margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -3036,12 +3048,15 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
       return res.status(401).send(renderConfirmPage(false, 'AI access is not currently enabled for this request.'));
     }
     const text = String(req.body?.text || '').trim().slice(0, 2000);
-    if (!text) return res.status(400).send(renderConfirmPage(false, 'Please enter a message before sending.'));
+    const photoUrl = req.body?.photoUrl ? String(req.body.photoUrl) : null;
+    if (!text && !photoUrl) return res.status(400).send(renderConfirmPage(false, 'Please enter a message or attach a photo before sending.'));
 
-    const moderation = await moderateText(text);
-    if (moderation.blocked) {
-      console.warn('⚠️ /trackRequest/:trackingKey/message blocked by moderation, trackingKey:', trackingKey);
-      return res.status(400).send(renderConfirmPage(false, MODERATION_BLOCKED_MESSAGE));
+    if (text) {
+      const moderation = await moderateText(text);
+      if (moderation.blocked) {
+        console.warn('⚠️ /trackRequest/:trackingKey/message blocked by moderation, trackingKey:', trackingKey);
+        return res.status(400).send(renderConfirmPage(false, MODERATION_BLOCKED_MESSAGE));
+      }
     }
 
     const resolved = state.resolved;
@@ -3054,7 +3069,7 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
       }
       await database.collection('ServiceQuotes').updateOne(
         { _id: targetQuote._id },
-        { $push: { messages: { from: 'guest', text, at: new Date() } } }
+        { $push: { messages: { from: 'guest', text, photoUrl, at: new Date() } } }
       );
       if (targetQuote.serviceUserId) {
         // Update the same notification on every new message instead of
@@ -3065,7 +3080,7 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
         await database.collection('Notifications').updateOne(
           { quoteId: targetQuote._id, type: 'quote_message' },
           {
-            $set: { userId: targetQuote.serviceUserId, title: '💬 Question About Your Quote', body: text, read: false, createdAt: new Date() },
+            $set: { userId: targetQuote.serviceUserId, title: '💬 Question About Your Quote', body: text || '📷 Photo attached', read: false, createdAt: new Date() },
             $setOnInsert: { needId: targetQuote.needId },
           },
           { upsert: true }
@@ -3076,10 +3091,11 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
       if (!notification) return res.status(404).send(renderConfirmPage(false, 'Request not found.'));
       await database.collection('Notifications').updateOne(
         { _id: notification._id },
-        { $push: { messages: { from: 'guest', text, at: new Date() } }, $set: { read: false, needsReply: true } }
+        { $push: { messages: { from: 'guest', text, photoUrl, at: new Date() } }, $set: { read: false, needsReply: true } }
       );
     }
-    sendAiActivityEmail(resolved, trackingKey, 'write', `Your AI assistant sent this message: "${text}"`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
+    const activityDesc = text ? `Your AI assistant sent this message: "${text}"` : 'Your AI assistant sent a photo.';
+    sendAiActivityEmail(resolved, trackingKey, 'write', activityDesc).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
     res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}`);
   } catch (err) {
     console.error('❌ /trackRequest/:trackingKey/message error:', err);

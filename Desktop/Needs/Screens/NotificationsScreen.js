@@ -305,7 +305,10 @@ const QuoteMessageRow = ({ item, onReply }) => {
         </View>
         <Text style={styles.rowBody}>{item.body}</Text>
         <View style={styles.leadButtonsRow}>
-          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#0EA5E9', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'flex-start', width: 160, paddingHorizontal: 12 }]} onPress={() => onReply(item)}>
+          {/* Sized to match Confirm's own width (flex:1.4 of 2.4 total in
+              its two-button row, ~58%) rather than stretching full-width
+              now that Reply has no sibling button to share the row with. */}
+          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#0EA5E9', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'flex-start', width: '58%', paddingHorizontal: 12 }]} onPress={() => onReply(item)}>
             <Text style={styles.respondBtnText} numberOfLines={1}>💬 Reply</Text>
           </TouchableOpacity>
         </View>

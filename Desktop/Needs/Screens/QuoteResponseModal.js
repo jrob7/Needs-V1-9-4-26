@@ -665,10 +665,14 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
                   multiline
                 />
                 <TouchableOpacity
-                  style={[st.sendBtn, { backgroundColor: '#0EA5E9' }, sending && { opacity: 0.5 }]}
+                  style={[
+                    st.sendBtn,
+                    { backgroundColor: '#0EA5E9', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', alignSelf: 'center', width: 200 },
+                    sending && { opacity: 0.5 },
+                  ]}
                   onPress={handleSendMessage} disabled={sending}
                 >
-                  <Text style={st.sendBtnTxt}>{sending ? 'Sending…' : 'Send Reply'}</Text>
+                  <Text style={st.sendBtnTxt} numberOfLines={1}>{sending ? 'Sending…' : 'Send Reply'}</Text>
                 </TouchableOpacity>
               </>
             )}

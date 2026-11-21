@@ -40,6 +40,7 @@ const NOTIF_ICONS = {
   match:         { name: 'git-network',          color: '#8B5CF6', bg: '#F5F3FF' },
   lead:          { name: 'briefcase',            color: '#2563EB', bg: '#EFF6FF' },
   quote_request: { name: 'document-text-outline', color: '#0EA5E9', bg: '#F0F9FF' },
+  quote_message: { name: 'help-circle-outline',   color: '#0EA5E9', bg: '#F0F9FF' },
   org_request:   { name: 'mail',                 color: '#DB2777', bg: '#FDF2F8' },
   activity:      { name: 'flash',                color: '#F59E0B', bg: '#FFFBEB' },
   update:        { name: 'megaphone',            color: '#10B981', bg: '#ECFDF5' },
@@ -606,7 +607,7 @@ const NotificationsScreen = () => {
   const [requestingInfoIds, setRequestingInfoIds] = useState(new Set());
 
   const TABS = ['Messages', 'Matches', 'Scheduler', 'Status'];
-  const BUSINESS_QUOTE_TYPES = ['appointment_confirmed', 'reschedule_request', 'info_provided', 'quote_update', 'quote_accepted_by_guest'];
+  const BUSINESS_QUOTE_TYPES = ['appointment_confirmed', 'reschedule_request', 'info_provided', 'quote_update', 'quote_accepted_by_guest', 'quote_message'];
 
   const fetchNotifications = useCallback(async () => {
     if (!userId) return;

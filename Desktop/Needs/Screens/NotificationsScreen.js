@@ -315,8 +315,8 @@ const QuoteMessageRow = ({ item, onReply }) => {
         </View>
         <Text style={styles.rowBody}>{item.body}</Text>
         <View style={styles.leadButtonsRow}>
-          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#0EA5E9', flex: 0, alignSelf: 'flex-start', paddingHorizontal: 24 }]} onPress={() => onReply(item)}>
-            <Text style={styles.respondBtnText}>💬 Reply</Text>
+          <TouchableOpacity style={[styles.respondBtn, { backgroundColor: '#0EA5E9', flex: 0, alignSelf: 'flex-start', width: 160, paddingHorizontal: 12 }]} onPress={() => onReply(item)}>
+            <Text style={styles.respondBtnText} numberOfLines={1}>💬 Reply</Text>
           </TouchableOpacity>
         </View>
       </View>

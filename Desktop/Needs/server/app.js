@@ -2506,17 +2506,39 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
         if (q.status === 'awaiting_guest_time_confirmation') {
           actions += actionForm('confirm_appointment_time', 'Confirm an Appointment Time', q.businessName);
         }
+
+        // A pending info request takes priority over the ordinary reply
+        // box - same "answer this first" precedence the app's own
+        // AnswerForm gives it (Screens/MatchesModal.js). The photo input
+        // is optional; its uploaded URL lands in the hidden .photoUrlField
+        // via the page-wide script at the bottom, not a form attribute.
+        const pendingInfoRequest = q.status === 'awaiting_user_info' && q.infoRequest?.questions?.length
+          ? `
+            <div class="infoRequestBox">
+              <p class="infoRequestLabel">${escapeHtml(q.businessName)} needs more info before they can finish your quote:</p>
+              ${q.infoRequest.questions.map(qq => `<p class="bubble bubble-org">${escapeHtml(qq)}</p>`).join('')}
+              <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/answerInfoRequest">
+                <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
+                <input type="hidden" name="photoUrl" class="photoUrlField">
+                <textarea name="answer" placeholder="Your answer…" required></textarea>
+                <label class="photoLabel">Attach a photo (optional): <input type="file" accept="image/*" class="photoInput"></label>
+                <button type="submit">Send Answer</button>
+              </form>
+            </div>`
+          : '';
+
         return `
           <div class="quoteCard">
             <h2>${escapeHtml(q.businessName)}</h2>
             <p class="meta">${q.confirmedPrice ? `$${escapeHtml(String(q.confirmedPrice))}` : (q.estimate || 'No price yet')}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}</p>
             ${infoThread ? `<div class="thread">${infoThread}</div>` : ''}
             ${msgThread ? `<div class="thread">${msgThread}</div>` : ''}
-            <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/message">
-              <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
-              <textarea name="text" placeholder="Ask a question about this quote…" required></textarea>
-              <button type="submit">Send</button>
-            </form>
+            ${pendingInfoRequest || `
+              <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/message">
+                <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
+                <textarea name="text" placeholder="Ask a question about this quote…" required></textarea>
+                <button type="submit">Send</button>
+              </form>`}
             ${actions ? `<div class="actions">${actions}</div>` : ''}
           </div>`;
       }).join('');
@@ -2571,9 +2593,12 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     button, .actionBtn { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
-    .quoteCard > form > button { width: 100%; padding: 12px; font-size: .92rem; }
+    .quoteCard > form > button, .infoRequestBox button { width: 100%; padding: 12px; font-size: .92rem; }
     .hint { text-align: center; margin-top: 4px; font-size: .85rem; }
     .hint a { color: #2563EB; text-decoration: none; }
+    .infoRequestBox { background: #FEF9C3; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .infoRequestLabel { font-weight: 600; color: #854D0E; margin: 0 0 10px; }
+    .photoLabel { display: block; font-size: .82rem; color: #92400E; margin-bottom: 10px; }
   </style>
 </head>
 <body>
@@ -2585,6 +2610,27 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     ${pendingNote ? `<div class="notice">${escapeHtml(pendingNote)}</div>` : ''}
     ${chatHtml}
   </div>
+  <script>
+    // Uploads an attached photo to the existing /uploadImage endpoint and
+    // stashes the resulting URL in that form's hidden photoUrl field -
+    // same upload endpoint the app's own AnswerForm already uses, just
+    // reached from a plain file input instead of expo-image-picker.
+    document.querySelectorAll('.photoInput').forEach(function (input) {
+      input.addEventListener('change', function (e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        var hiddenField = input.closest('form').querySelector('.photoUrlField');
+        var reader = new FileReader();
+        reader.onload = function () {
+          fetch('/uploadImage', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: reader.result })
+            .then(function (r) { return r.json(); })
+            .then(function (data) { hiddenField.value = data.imageUrl || data.url || ''; })
+            .catch(function () {});
+        };
+        reader.readAsDataURL(file);
+      });
+    });
+  </script>
 </body>
 </html>`;
 }
@@ -3030,6 +3076,63 @@ app.post('/trackRequest/:trackingKey/message', aiAuthLimiter, async (req, res) =
     res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}`);
   } catch (err) {
     console.error('❌ /trackRequest/:trackingKey/message error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+// POST /trackRequest/:trackingKey/answerInfoRequest — a guest lead answering
+// a business's "I need more info before I can quote this" question, the
+// same mutation /userRespondToQuote's action:'provide_info' branch already
+// performs for an authenticated user (see Screens/MatchesModal.js's
+// AnswerForm) - this is the guest-lead equivalent, since that endpoint has
+// no login requirement either (quoteId is the only check it uses) but
+// nothing on the guest side ever surfaced the question until now.
+app.post('/trackRequest/:trackingKey/answerInfoRequest', aiAuthLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const answer = String(req.body?.answer || '').trim().slice(0, 2000);
+    const photoUrl = req.body?.photoUrl ? String(req.body.photoUrl) : null;
+    if (!answer) return res.status(400).send(renderConfirmPage(false, 'Please enter an answer before sending.'));
+
+    const state = await resolveTrackingPageState(trackingKey);
+    if (!state) return res.status(404).send(renderConfirmPage(false, 'Request not found.'));
+    if (!state.chatAccess?.enabled || state.chatAccess.expired) {
+      return res.status(401).send(renderConfirmPage(false, 'AI access is not currently enabled for this request.'));
+    }
+    if (state.resolved.requestType !== 'quote') {
+      return res.status(400).send(renderConfirmPage(false, 'This only applies to quote requests.'));
+    }
+
+    const pending = (state.resolved.quotes || []).filter(q => q.status === 'awaiting_user_info');
+    let targetQuote = pending[0];
+    if (pending.length > 1) {
+      const wanted = String(req.body?.businessName || '').trim().toLowerCase();
+      targetQuote = pending.find(q => (q.businessName || '').toLowerCase() === wanted);
+    }
+    if (!targetQuote) return res.status(404).send(renderConfirmPage(false, 'No question is currently waiting for an answer.'));
+
+    const moderation = await moderateText(answer);
+    if (moderation.blocked) {
+      console.warn('⚠️ /trackRequest/:trackingKey/answerInfoRequest blocked by moderation, trackingKey:', trackingKey);
+      return res.status(400).send(renderConfirmPage(false, MODERATION_BLOCKED_MESSAGE));
+    }
+
+    await database.collection('ServiceQuotes').updateOne(
+      { _id: targetQuote._id },
+      { $set: { status: 'user_info_provided', infoResponse: { answers: [answer], photoUrl, respondedAt: new Date() } } }
+    );
+    if (targetQuote.serviceUserId) {
+      await database.collection('Notifications').insertOne({
+        userId: targetQuote.serviceUserId, type: 'info_provided',
+        title: '📝 Customer Answered Your Question',
+        body: 'View the match to see their response and send an updated quote.',
+        needId: targetQuote.needId, quoteId: targetQuote._id, read: false, createdAt: new Date(),
+      });
+    }
+    sendAiActivityEmail(state.resolved, trackingKey, 'write', `Your AI assistant answered: "${answer}"`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
+    res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}`);
+  } catch (err) {
+    console.error('❌ /trackRequest/:trackingKey/answerInfoRequest error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });
@@ -6702,6 +6805,33 @@ app.post('/respondToServiceQuote', async (req, res) => {
           },
         }
       );
+
+      // Guest leads have no app login and no in-app Notification to see
+      // this - previously they had no way to ever find out a question was
+      // waiting. Email them the same way 'confirm'/'edit' already does,
+      // pointing at the tracking link instead of an accept link.
+      if (quote.userId) {
+        const requester = await database.collection('Users').findOne(
+          { _id: quote.userId }, { projection: { email: 1, createdViaAgent: 1 } }
+        );
+        if (requester?.createdViaAgent && requester.email) {
+          const need = quote.needId
+            ? await database.collection('NeedRequests').findOne({ _id: quote.needId }, { projection: { trackingKey: 1 } })
+            : null;
+          if (need?.trackingKey) {
+            const trackUrl = `${NODE_API}/trackRequest/${encodeURIComponent(need.trackingKey)}`;
+            await sendEmail({
+              to: requester.email,
+              subject: `${quote.businessName || 'The business'} has a question for you`,
+              html: `
+                <p><strong>${escapeHtml(quote.businessName || 'The business')}</strong> needs a bit more information before they can finish your quote:</p>
+                ${(questions || []).map(q => `<p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${escapeHtml(q)}</p>`).join('')}
+                <p><a href="${trackUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Answer Their Question</a></p>
+              `,
+            });
+          }
+        }
+      }
     } else {
       return res.status(400).json({ error: 'action must be confirm, edit, or ask' });
     }

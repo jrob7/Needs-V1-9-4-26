@@ -103,7 +103,7 @@ function MonthCalendar({ selectedDay, onSelectDay, busyDays, calMonth, onChangeM
 // ── Main modal ────────────────────────────────────────────────────────────────
 export default function QuoteResponseModal({ notification, onClose, onSent, initialTab = 'quote' }) {
   const { userId } = useContext(UserContext);
-  const [activeTab, setActiveTab] = useState(initialTab); // 'quote' | 'ask'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'quote' | 'messages'
   const [sending, setSending] = useState(false);
 
   // Calendar state
@@ -128,12 +128,9 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
   );
   const [note, setNote] = useState('');
 
-  // Ask fields
-  const [questions,     setQuestions]     = useState([]);
-  const [customQuestion, setCustomQuestion] = useState('');
-
-  // Messages (guest/AI question thread) field
+  // Messages tab (merged thread - ordinary messages and "needs an answer" questions)
   const [messageText, setMessageText] = useState('');
+  const [requireAnswer, setRequireAnswer] = useState(false);
 
   // Full quote doc — fetched whenever there's a quote to show, not just for
   // one specific notification type (that gate previously only covered
@@ -243,37 +240,14 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
     } finally { setSending(false); }
   };
 
-  // ── Send questions ───────────────────────────────────────────────────────
-  const handleSendQuestions = async () => {
-    const all = [...questions, ...(customQuestion.trim() ? [customQuestion.trim()] : [])].filter(Boolean);
-    if (all.length === 0) { Alert.alert('Add a question', 'Please add at least one question.'); return; }
-    const quoteId = notification?.quoteId;
-    if (!quoteId) { Alert.alert('Error', 'Quote ID missing.'); return; }
-
-    setSending(true);
-    try {
-      const resp = await fetch(`${NODE_API}/respondToServiceQuote`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quoteId, action: 'ask', questions: all }),
-      });
-      if (!resp.ok) throw new Error('Server error');
-
-      authFetch(`${NODE_API}/markNotificationsRead`, {
-        method: 'POST',
-        body: JSON.stringify({ notificationIds: [notification._id] }),
-      }).catch(() => {});
-
-      Alert.alert('✅ Questions Sent', 'The customer will answer your questions in their matches view.');
-      onSent?.();
-    } catch {
-      Alert.alert('Error', "Couldn't send your questions. Please try again.");
-    } finally { setSending(false); }
-  };
-
-  // ── Send a reply in the guest's question thread ──────────────────────────
-  // Open-ended, not a single Q&A round - messages[] just keeps growing on
-  // both sides, same as the module_question messages thread already works.
+  // ── Send a message in the merged Messages tab ────────────────────────────
+  // One compose box, two underlying mechanisms depending on the
+  // requireAnswer checkbox - unchecked is an ordinary message
+  // (/respondToQuoteMessage, no status effect); checked reuses the
+  // existing /respondToServiceQuote action:'ask' endpoint (now always a
+  // single question instead of the old multi-question batch UI), which
+  // flags the quote as awaiting_user_info and lets the customer attach a
+  // photo when they answer.
   const handleSendMessage = async () => {
     const trimmed = messageText.trim();
     if (!trimmed) return;
@@ -282,18 +256,40 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
 
     setSending(true);
     try {
-      const resp = await fetch(`${NODE_API}/respondToQuoteMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quoteId, text: trimmed }),
-      });
-      if (!resp.ok) throw new Error('Server error');
+      if (requireAnswer) {
+        const resp = await fetch(`${NODE_API}/respondToServiceQuote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quoteId, action: 'ask', questions: [trimmed] }),
+        });
+        if (!resp.ok) throw new Error('Server error');
 
-      setQuoteDoc(prev => ({ ...prev, messages: [...(prev?.messages || []), { from: 'org', text: trimmed, at: new Date().toISOString() }] }));
+        setQuoteDoc(prev => {
+          const prevComplete = prev?.infoRequest?.questions?.length && prev?.infoResponse?.answers?.length;
+          const archived = prevComplete
+            ? [...(prev.qaHistory || []), {
+                questions: prev.infoRequest.questions, askedAt: prev.infoRequest.askedAt || null,
+                answers: prev.infoResponse.answers, photoUrl: prev.infoResponse.photoUrl || null,
+                respondedAt: prev.infoResponse.respondedAt || null,
+              }]
+            : (prev?.qaHistory || []);
+          return { ...prev, qaHistory: archived, infoRequest: { questions: [trimmed], askedAt: new Date().toISOString() }, infoResponse: null };
+        });
+      } else {
+        const resp = await fetch(`${NODE_API}/respondToQuoteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quoteId, text: trimmed }),
+        });
+        if (!resp.ok) throw new Error('Server error');
+
+        setQuoteDoc(prev => ({ ...prev, messages: [...(prev?.messages || []), { from: 'org', text: trimmed, at: new Date().toISOString() }] }));
+      }
       setMessageText('');
+      setRequireAnswer(false);
       onSent?.();
     } catch {
-      Alert.alert('Error', "Couldn't send your reply. Please try again.");
+      Alert.alert('Error', "Couldn't send. Please try again.");
     } finally { setSending(false); }
   };
 
@@ -325,10 +321,7 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
           <View style={st.tabs}>
             {[
               ['quote', '📋 Send Quote'],
-              ['ask', '📝 Request Info'],
-              // Only shown when relevant - opened directly from a
-              // quote_message notification, or once a thread already exists.
-              ...((initialTab === 'messages' || quoteDoc?.messages?.length) ? [['messages', '💬 Messages']] : []),
+              ['messages', '💬 Messages'],
             ].map(([key, label]) => (
               <TouchableOpacity key={key} style={[st.tab, activeTab === key && st.tabActive]} onPress={() => setActiveTab(key)}>
                 <Text style={[st.tabTxt, activeTab === key && st.tabTxtActive]}>{label}</Text>
@@ -366,73 +359,6 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
             {/* ── QUOTE TAB ──────────────────────────────────────────── */}
             {activeTab === 'quote' && (
               <>
-                {/* Q&A conversation chain */}
-                {(() => {
-                  const history = Array.isArray(quoteDoc?.qaHistory) ? quoteDoc.qaHistory : [];
-                  const current = quoteDoc?.infoRequest?.questions?.length > 0 ? {
-                    questions: quoteDoc.infoRequest.questions,
-                    answers:   quoteDoc.infoResponse?.answers || null,
-                    photoUrl:  quoteDoc.infoResponse?.photoUrl || null,
-                  } : null;
-                  const allRounds = [...history, ...(current ? [current] : [])];
-                  if (allRounds.length === 0) return null;
-                  return (
-                    <View style={{ backgroundColor: '#F5F3FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#DDD6FE', marginBottom: 18 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#5B21B6', marginBottom: 12 }}>Q&A Thread</Text>
-                      {allRounds.map((round, ri) => (
-                        <View key={ri} style={{ marginBottom: ri < allRounds.length - 1 ? 16 : 0 }}>
-                          {ri > 0 && <View style={{ height: 1, backgroundColor: '#DDD6FE', marginBottom: 14 }} />}
-                          {(round.questions || []).map((q, qi) => {
-                            const isLastQ = qi === (round.questions || []).length - 1;
-                            const hasAnswer = round.answers?.[qi] != null;
-                            return (
-                              <View key={qi} style={{ marginBottom: 10 }}>
-                                {/* Business question bubble */}
-                                <View style={{ alignSelf: 'flex-end', backgroundColor: '#7C3AED', borderRadius: 10, borderBottomRightRadius: 2, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%', marginBottom: 6 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>You asked</Text>
-                                  <Text style={{ fontSize: 13, color: '#fff' }}>{q}</Text>
-                                </View>
-                                {/* Customer answer bubble */}
-                                {hasAnswer ? (
-                                  <View style={{ alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#DDD6FE', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 2 }}>Customer</Text>
-                                    <Text style={{ fontSize: 13, color: '#1E1B4B' }}>{round.answers[qi]}</Text>
-                                  </View>
-                                ) : (
-                                  <View style={{ alignSelf: 'flex-start', backgroundColor: '#FEF9C3', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
-                                    <Text style={{ fontSize: 12, color: '#92400E' }}>Awaiting response…</Text>
-                                  </View>
-                                )}
-                                {/* Customer photo bubble — shown after last answer in the round */}
-                                {isLastQ && hasAnswer && round.photoUrl ? (
-                                  <View style={{ alignSelf: 'flex-start', maxWidth: '85%', marginTop: 6 }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 4 }}>Customer</Text>
-                                    <Image
-                                      source={{ uri: round.photoUrl }}
-                                      style={{ width: 220, height: 180, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F8F5FF' }}
-                                      resizeMode="contain"
-                                    />
-                                  </View>
-                                ) : null}
-                              </View>
-                            );
-                          })}
-                        </View>
-                      ))}
-                      {/* Ask another question — only when last round has been answered */}
-                      {current?.answers?.length > 0 && (
-                        <TouchableOpacity
-                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, paddingVertical: 10, borderRadius: 9, borderWidth: 1.5, borderColor: '#7C3AED', backgroundColor: '#EDE9FE' }}
-                          onPress={() => setActiveTab('ask')}
-                        >
-                          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#7C3AED" />
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#7C3AED' }}>Ask Another Question</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  );
-                })()}
-
                 <View style={st.sectionRow}>
                   <Text style={st.sectionTitle}>Select a Date{isGuestLead ? ' (optional)' : ''}</Text>
                   {loadingMonth && <ActivityIndicator size="small" color="#2563EB" style={{ marginLeft: 8 }} />}
@@ -570,108 +496,119 @@ export default function QuoteResponseModal({ notification, onClose, onSent, init
               </>
             )}
 
-            {/* ── ASK TAB ────────────────────────────────────────────── */}
-            {activeTab === 'ask' && (
-              <>
-                <Text style={[st.sectionTitle, { marginBottom: 6 }]}>Request Info From the Customer</Text>
-                <Text style={[st.noteInput, { color: '#6B7280', fontSize: 13, borderWidth: 0, paddingHorizontal: 0, backgroundColor: 'transparent', marginBottom: 12 }]}>
-                  Type your question(s) below. The customer will see them in their quote view and can reply before you finalize the quote.
-                </Text>
-
-                {questions.map((q, i) => (
-                  <View key={i} style={st.questionRow}>
-                    <TextInput
-                      style={st.questionInput}
-                      value={q}
-                      onChangeText={v => setQuestions(prev => prev.map((old, idx) => idx === i ? v : old))}
-                      multiline
-                    />
-                    <TouchableOpacity
-                      onPress={() => setQuestions(prev => prev.filter((_, idx) => idx !== i))}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="close-circle" size={20} color="#94A3B8" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-
-                <TextInput
-                  style={[st.questionInput, { marginTop: 8 }]}
-                  placeholder="Type a question…"
-                  placeholderTextColor="#94A3B8"
-                  value={customQuestion}
-                  onChangeText={setCustomQuestion}
-                  onSubmitEditing={() => {
-                    if (customQuestion.trim()) {
-                      setQuestions(prev => [...prev, customQuestion.trim()]);
-                      setCustomQuestion('');
-                    }
-                  }}
-                  returnKeyType="done"
-                />
-
-                <View style={st.divider} />
-
-                <TouchableOpacity
-                  style={[st.sendBtn, { backgroundColor: '#7C3AED' }, sending && { opacity: 0.5 }]}
-                  onPress={handleSendQuestions} disabled={sending}
-                >
-                  <Text style={st.sendBtnTxt}>{sending ? 'Sending…' : 'Send Questions'}</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
             {/* ── MESSAGES TAB ───────────────────────────────────────── */}
-            {/* The guest's (or their AI's) own question thread about this
-                quote - separate from the Ask tab above, which is the
-                business asking the customer something. Open-ended: keeps
-                growing on both sides, not capped at one exchange. */}
-            {activeTab === 'messages' && (
-              <>
-                <Text style={[st.sectionTitle, { marginBottom: 12 }]}>Messages With the Customer</Text>
-                {(quoteDoc?.messages || []).map((m, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      alignSelf: m.from === 'org' ? 'flex-end' : 'flex-start',
-                      backgroundColor: m.from === 'org' ? '#0EA5E9' : '#fff',
-                      borderWidth: m.from === 'org' ? 0 : 1,
-                      borderColor: '#BAE6FD',
-                      borderRadius: 10,
-                      borderBottomRightRadius: m.from === 'org' ? 2 : 10,
-                      borderBottomLeftRadius: m.from === 'org' ? 10 : 2,
-                      paddingHorizontal: 12, paddingVertical: 8,
-                      maxWidth: '85%', marginBottom: 8,
-                    }}
+            {/* Everything said to/by the customer about this quote, merged
+                into one chronological thread - both the round-based
+                "needed an answer" questions (qaHistory + the current
+                infoRequest/infoResponse) and the ordinary open-ended
+                messages[] thread, which used to be two separate tabs.
+                Open-ended: keeps growing on both sides, not capped at one
+                exchange. */}
+            {activeTab === 'messages' && (() => {
+              const history = Array.isArray(quoteDoc?.qaHistory) ? quoteDoc.qaHistory : [];
+              const current = quoteDoc?.infoRequest?.questions?.length > 0 ? {
+                questions: quoteDoc.infoRequest.questions,
+                answers:   quoteDoc.infoResponse?.answers || null,
+                photoUrl:  quoteDoc.infoResponse?.photoUrl || null,
+                askedAt:   quoteDoc.infoRequest.askedAt || null,
+                respondedAt: quoteDoc.infoResponse?.respondedAt || null,
+              } : null;
+              const rounds = [...history, ...(current ? [current] : [])]
+                .map(round => ({ kind: 'round', round, at: round.respondedAt || round.askedAt || 0 }));
+              const plain = (quoteDoc?.messages || []).map(m => ({ kind: 'message', m, at: m.at || 0 }));
+              const timeline = [...rounds, ...plain].sort((a, b) => new Date(a.at) - new Date(b.at));
+
+              return (
+                <>
+                  <Text style={[st.sectionTitle, { marginBottom: 12 }]}>Messages With the Customer</Text>
+
+                  {timeline.length === 0 && (
+                    <Text style={{ fontSize: 13, color: '#94A3B8', marginBottom: 12 }}>Nothing yet.</Text>
+                  )}
+
+                  {timeline.map((item, ti) => item.kind === 'round' ? (
+                    <View key={`r${ti}`} style={{ marginBottom: 14 }}>
+                      {(item.round.questions || []).map((q, qi) => {
+                        const isLastQ = qi === (item.round.questions || []).length - 1;
+                        const hasAnswer = item.round.answers?.[qi] != null;
+                        return (
+                          <View key={qi} style={{ marginBottom: 10 }}>
+                            <View style={{ alignSelf: 'flex-end', backgroundColor: '#7C3AED', borderRadius: 10, borderBottomRightRadius: 2, paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%', marginBottom: 6 }}>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>You asked</Text>
+                              <Text style={{ fontSize: 13, color: '#fff' }}>{q}</Text>
+                            </View>
+                            {hasAnswer ? (
+                              <View style={{ alignSelf: 'flex-start', backgroundColor: '#fff', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#DDD6FE', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 2 }}>Customer</Text>
+                                <Text style={{ fontSize: 13, color: '#1E1B4B' }}>{item.round.answers[qi]}</Text>
+                              </View>
+                            ) : (
+                              <View style={{ alignSelf: 'flex-start', backgroundColor: '#FEF9C3', borderRadius: 10, borderBottomLeftRadius: 2, borderWidth: 1, borderColor: '#FDE68A', paddingHorizontal: 12, paddingVertical: 8, maxWidth: '85%' }}>
+                                <Text style={{ fontSize: 12, color: '#92400E' }}>Awaiting response…</Text>
+                              </View>
+                            )}
+                            {isLastQ && hasAnswer && item.round.photoUrl ? (
+                              <View style={{ alignSelf: 'flex-start', maxWidth: '85%', marginTop: 6 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: '#7C3AED', marginBottom: 4 }}>Customer</Text>
+                                <Image
+                                  source={{ uri: item.round.photoUrl }}
+                                  style={{ width: 220, height: 180, borderRadius: 10, borderWidth: 1, borderColor: '#DDD6FE', backgroundColor: '#F8F5FF' }}
+                                  resizeMode="contain"
+                                />
+                              </View>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <View
+                      key={`m${ti}`}
+                      style={{
+                        alignSelf: item.m.from === 'org' ? 'flex-end' : 'flex-start',
+                        backgroundColor: item.m.from === 'org' ? '#0EA5E9' : '#fff',
+                        borderWidth: item.m.from === 'org' ? 0 : 1,
+                        borderColor: '#BAE6FD',
+                        borderRadius: 10,
+                        borderBottomRightRadius: item.m.from === 'org' ? 2 : 10,
+                        borderBottomLeftRadius: item.m.from === 'org' ? 10 : 2,
+                        paddingHorizontal: 12, paddingVertical: 8,
+                        maxWidth: '85%', marginBottom: 8,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: item.m.from === 'org' ? 'rgba(255,255,255,0.75)' : '#0369A1', marginBottom: 2 }}>
+                        {item.m.from === 'org' ? 'You' : 'Customer'}
+                      </Text>
+                      <Text style={{ fontSize: 13, color: item.m.from === 'org' ? '#fff' : '#0F172A' }}>{item.m.text}</Text>
+                    </View>
+                  ))}
+
+                  <View style={st.divider} />
+
+                  <TextInput
+                    style={[st.questionInput, { marginTop: 8 }]}
+                    placeholder="Type a message…"
+                    placeholderTextColor="#94A3B8"
+                    value={messageText}
+                    onChangeText={setMessageText}
+                    multiline
+                  />
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, marginBottom: 4 }}
+                    onPress={() => setRequireAnswer(v => !v)}
                   >
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: m.from === 'org' ? 'rgba(255,255,255,0.75)' : '#0369A1', marginBottom: 2 }}>
-                      {m.from === 'org' ? 'You' : 'Customer'}
-                    </Text>
-                    <Text style={{ fontSize: 13, color: m.from === 'org' ? '#fff' : '#0F172A' }}>{m.text}</Text>
-                  </View>
-                ))}
-                {(!quoteDoc?.messages || quoteDoc.messages.length === 0) && (
-                  <Text style={{ fontSize: 13, color: '#94A3B8', marginBottom: 12 }}>No questions yet.</Text>
-                )}
-
-                <View style={st.divider} />
-
-                <TextInput
-                  style={[st.questionInput, { marginTop: 8 }]}
-                  placeholder="Type a reply…"
-                  placeholderTextColor="#94A3B8"
-                  value={messageText}
-                  onChangeText={setMessageText}
-                  multiline
-                />
-                <TouchableOpacity
-                  style={[st.sendBtn, { backgroundColor: '#0EA5E9' }, sending && { opacity: 0.5 }]}
-                  onPress={handleSendMessage} disabled={sending}
-                >
-                  <Text style={st.sendBtnTxt} numberOfLines={1}>{sending ? 'Sending…' : 'Send Reply'}</Text>
-                </TouchableOpacity>
-              </>
-            )}
+                    <Ionicons name={requireAnswer ? 'checkbox' : 'square-outline'} size={20} color="#7C3AED" />
+                    <Text style={{ fontSize: 13, color: '#374151', flex: 1 }}>Needs a specific answer (customer can attach a photo)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[st.sendBtn, { backgroundColor: requireAnswer ? '#7C3AED' : '#0EA5E9' }, sending && { opacity: 0.5 }]}
+                    onPress={handleSendMessage} disabled={sending}
+                  >
+                    <Text style={st.sendBtnTxt} numberOfLines={1}>{sending ? 'Sending…' : (requireAnswer ? 'Send Question' : 'Send Message')}</Text>
+                  </TouchableOpacity>
+                </>
+              );
+            })()}
 
             <View style={{ height: 36 }} />
           </ScrollView>

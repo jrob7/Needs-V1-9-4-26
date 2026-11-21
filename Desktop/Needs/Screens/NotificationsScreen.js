@@ -230,10 +230,9 @@ const ConnectionRequestRow = ({ item, onAccept, onDecline }) => {
 // A quote_request — auto-generated quote sent to a business for 1-tap response.
 // Business-facing quote_request row — Confirm/Edit open RespondToLeadModal (same as leads);
 // Ask sends the AI info-request to the user's Messages.
-const QuoteRequestRow = ({ item, onRespond, onAsk, requestingInfo }) => {
+const QuoteRequestRow = ({ item, onRespond, requestingInfo }) => {
   const cfg = NOTIF_ICONS.quote_request;
   const hasEstimate = item.estimateMin != null && item.estimateMax != null;
-  const askDone = item.infoRequested;
   const title = `⚡ New Quote Request${item.requesterName ? ` from ${item.requesterName}` : ''}`;
 
   return (
@@ -279,15 +278,6 @@ const QuoteRequestRow = ({ item, onRespond, onAsk, requestingInfo }) => {
             </TouchableOpacity>
             <TouchableOpacity style={[styles.requestInfoBtn, { flex: 1 }]} onPress={() => onRespond(item)}>
               <Text style={styles.requestInfoBtnText}>✏️ Edit</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.requestInfoBtn, { flex: 1 }, askDone && styles.requestInfoBtnDone]}
-              onPress={() => !askDone && onAsk(item)}
-              disabled={askDone}
-            >
-              <Text style={[styles.requestInfoBtnText, askDone && styles.requestInfoBtnTextDone]}>
-                {askDone ? '✓ Asked' : '💬 Ask'}
-              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1077,7 +1067,6 @@ const NotificationsScreen = () => {
                 ? <QuoteRequestRow
                     item={item}
                     onRespond={i => setQuoteRespondTarget({ notification: i, initialTab: 'quote' })}
-                    onAsk={i => setQuoteRespondTarget({ notification: i, initialTab: 'ask' })}
                     requestingInfo={requestingInfoIds.has(item._id)}
                   />
               : item.type === 'appointment_confirmed'
@@ -1091,7 +1080,7 @@ const NotificationsScreen = () => {
               : item.type === 'info_provided'
                 ? <InfoProvidedRow item={item} onRespond={i => {
                     const qId = i.quoteId ? String(i.quoteId) : null;
-                    if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'quote' });
+                    if (qId) setQuoteRespondTarget({ notification: { ...i, quoteId: qId }, initialTab: 'messages' });
                   }} />
               : item.type === 'quote_message'
                 ? <QuoteMessageRow item={item} onReply={i => {

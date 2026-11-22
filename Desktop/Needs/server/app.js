@@ -2499,8 +2499,10 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     if (content.requestType === 'quote') {
       chatHtml = (content.quotes || []).map(q => {
         const infoThread = (q.qaHistory || []).map(m => `
+          ${m.from === 'org' ? `<p class="bubbleSender">${escapeHtml(q.businessName)}</p>` : ''}
           <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
         const msgThread = (q.messages || []).map(m => `
+          ${m.from === 'org' ? `<p class="bubbleSender">${escapeHtml(q.businessName)}</p>` : ''}
           <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">
             ${m.text ? escapeHtml(m.text) : ''}
             ${m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : ''}
@@ -2519,6 +2521,7 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             : 'Accept Quote';
           const actionType = hasTime ? 'accept_quote_and_confirm_appointment' : 'accept_quote';
           offerBubble = `
+            <p class="bubbleSender">${escapeHtml(q.businessName)}</p>
             <div class="bubble bubble-org bubble-offer">
               <p class="offerText">💰 Quote: $${escapeHtml(String(q.confirmedPrice || q.estimate || '—'))}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}</p>
               <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/${actionType}">
@@ -2528,8 +2531,9 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             </div>`;
         } else if (q.status === 'awaiting_guest_time_confirmation') {
           offerBubble = `
+            <p class="bubbleSender">${escapeHtml(q.businessName)}</p>
             <div class="bubble bubble-org bubble-offer">
-              <p class="offerText">📅 ${escapeHtml(q.businessName)} proposed a time for your appointment.</p>
+              <p class="offerText">📅 Proposed a time for your appointment.</p>
               <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/confirm_appointment_time">
                 <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
                 <button type="submit">Confirm an Appointment Time</button>
@@ -2569,13 +2573,14 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
                 <input type="hidden" name="photoUrl" class="photoUrlField">
                 <textarea name="text" placeholder="Ask a question about this quote…"></textarea>
                 <label class="photoLabel">Attach a photo (optional): <input type="file" accept="image/*" class="photoInput"></label>
-                <button type="submit">Send</button>
+                <button type="submit" class="sendBtn">Send</button>
               </form>`}
           </div>`;
       }).join('');
     } else {
       const businessName = content.businessName || 'the business';
       const thread = (content.messages || []).map(m => `
+        ${m.from === 'org' ? `<p class="bubbleSender">${escapeHtml(businessName)}</p>` : ''}
         <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">
           ${m.text ? escapeHtml(m.text) : ''}
           ${m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : ''}
@@ -2588,7 +2593,7 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             <input type="hidden" name="photoUrl" class="photoUrlField">
             <textarea name="text" placeholder="Type a message…"></textarea>
             <label class="photoLabel">Attach a photo (optional): <input type="file" accept="image/*" class="photoInput"></label>
-            <button type="submit">Send</button>
+            <button type="submit" class="sendBtn">Send</button>
           </form>
         </div>`;
     }
@@ -2629,12 +2634,15 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .bubble { max-width: 90%; padding: 9px 13px; border-radius: 12px; font-size: .9rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
     .bubble-guest { background: #EFF6FF; color: #1E3A8A; align-self: flex-end; }
     .bubble-org { background: #F1F5F9; color: #334155; align-self: flex-start; }
-    .bubble-offer { background: #EFF6FF; border: 1px solid #BFDBFE; align-self: stretch; max-width: 100%; }
-    .offerText { margin: 0 0 10px; font-weight: 700; color: #1E3A8A; }
+    .bubbleSender { font-size: .72rem; font-weight: 700; color: #64748B; margin: 0 0 3px 2px; }
+    .bubble-offer { background: #EFF6FF; border: 1px solid #BFDBFE; align-self: flex-start; max-width: 88%; }
+    .offerText { margin: 0 0 10px; font-weight: 700; color: #1E3A8A; font-size: .9rem; }
     .bubble-offer form { margin: 0; }
+    .bubble-offer button { width: auto; display: block; margin: 0 auto; padding: 9px 18px; font-size: .85rem; }
     textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
     button { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
-    .quoteCard > form > button, .infoRequestBox button, .bubble-offer button { width: 100%; padding: 12px; font-size: .92rem; }
+    .quoteCard > form > button, .infoRequestBox button { width: 100%; padding: 12px; font-size: .92rem; }
+    .quoteCard > form > button.sendBtn { width: 70%; display: block; margin: 0 auto; }
     .hint { text-align: center; margin-top: 4px; font-size: .85rem; }
     .hint a { color: #2563EB; text-decoration: none; }
     .infoRequestBox { background: #FEF9C3; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin-bottom: 14px; }

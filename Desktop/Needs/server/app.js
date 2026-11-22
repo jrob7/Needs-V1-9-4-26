@@ -2476,7 +2476,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
 // already sits in this page's own URL, so nothing here should hand it (or
 // anything else) to a third party's logs, and nothing here should be
 // cacheable.
-function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingNote, confirmedAppointments }) {
+function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingNote, confirmedAppointments, pendingActionsByQuoteId }) {
   const ready = status === 'ready';
   const badge = status === 'sent'
     ? `<div class="badge badge-neutral">Sent</div>`
@@ -2519,7 +2519,13 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
         // sees it as one message in the thread, same as any other reply,
         // instead of a disconnected action area.
         let offerBubble = '';
-        if (['business_confirmed', 'business_edited'].includes(q.status)) {
+        const pendingActionType = pendingActionsByQuoteId?.[String(q._id)];
+        if (pendingActionType && ['business_confirmed', 'business_edited'].includes(q.status)) {
+          // Accept Quote was already tapped and is waiting on the guest's
+          // email confirmation click - show that instead of the same
+          // button again, which otherwise looks like the tap did nothing.
+          offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer bubble-pending"><p class="offerText">⏳ Pending confirmation</p><p class="offerSubtext">Check your email to finish confirming this quote.</p></div>`;
+        } else if (['business_confirmed', 'business_edited'].includes(q.status)) {
           const label = hasTime
             ? `Accept Quote & Confirm ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}`
             : 'Accept Quote';
@@ -2527,7 +2533,23 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
           const priceText = `💰 Quote: $${escapeHtml(String(q.confirmedPrice || q.estimate || '—'))}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}`;
           offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer"><p class="offerText">${priceText}</p><form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/${actionType}"><input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}"><button type="submit">${label}</button></form></div>`;
         } else if (q.status === 'awaiting_guest_time_confirmation') {
-          offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer"><p class="offerText">📅 Proposed a time for your appointment.</p><form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/confirm_appointment_time"><input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}"><button type="submit">Confirm an Appointment Time</button></form></div>`;
+          // The guest is already inside their own authenticated tracking
+          // session here (reached only via an earlier email confirmation),
+          // so confirming one of the business's proposed times finalizes
+          // immediately - no second email round-trip like Accept Quote
+          // above needs, since there's no AI-initiated ambiguity to guard
+          // against when the guest is the one looking at this page.
+          const options = (q.proposedOptions && q.proposedOptions.length)
+            ? q.proposedOptions
+            : (q.proposedDate && q.proposedTime ? [{ date: q.proposedDate, time: q.proposedTime, token: '' }] : []);
+          if (options.length > 1) {
+            const optionsHtml = options.map((opt, i) =>
+              `<label class="timeOption"><input type="radio" name="optionToken" value="${escapeHtml(opt.token)}" ${i === 0 ? 'checked' : ''}> ${escapeHtml(opt.date)} at ${escapeHtml(opt.time)}</label>`
+            ).join('');
+            offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer"><p class="offerText">📅 Proposed a few times - pick one:</p>${optionsHtml}<form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/confirmAppointmentTime"><input type="hidden" name="quoteId" value="${escapeHtml(String(q._id))}"><button type="submit">Confirm Selected Time</button></form></div>`;
+          } else if (options.length === 1) {
+            offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer"><p class="offerText">📅 Proposed: ${escapeHtml(options[0].date)} at ${escapeHtml(options[0].time)}</p><form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/confirmAppointmentTime"><input type="hidden" name="quoteId" value="${escapeHtml(String(q._id))}"><input type="hidden" name="optionToken" value="${escapeHtml(options[0].token || '')}"><button type="submit">Confirm This Time</button></form></div>`;
+          }
         }
         const thread = `${offerBubble}${infoThread}${msgThread}`;
 
@@ -2624,8 +2646,12 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .bubbleSender { font-size: .72rem; font-weight: 700; color: #64748B; margin: 0 0 3px 2px; }
     .bubble-offer { display: inline-flex; flex-direction: column; gap: 10px; background: #EFF6FF; border: 1px solid #BFDBFE; align-self: flex-start; max-width: 88%; }
     .offerText { margin: 0; font-weight: 700; color: #1E3A8A; font-size: .9rem; }
+    .offerSubtext { margin: 0; color: #1E3A8A; font-size: .82rem; }
     .bubble-offer form { margin: 0; }
     .bubble-offer button { align-self: center; width: auto; padding: 9px 18px; font-size: .85rem; }
+    .bubble-pending { background: #FEF9C3; border-color: #FDE68A; }
+    .bubble-pending .offerText, .bubble-pending .offerSubtext { color: #854D0E; }
+    .timeOption { display: block; font-size: .85rem; color: #1E3A8A; }
     textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
     button { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
     .quoteCard > form > button, .infoRequestBox button { width: 100%; padding: 12px; font-size: .92rem; }
@@ -2715,7 +2741,19 @@ async function resolveTrackingPageState(trackingKey) {
     }
   }
 
-  return { resolved, status, chatAccess, content, confirmedAppointments };
+  // So the Accept Quote bubble can visibly flip to a "check your email"
+  // state on the very next render, instead of just showing the same
+  // button again as if the click did nothing.
+  let pendingActionsByQuoteId = {};
+  if (resolved.requestType === 'quote' && (resolved.quotes || []).length) {
+    const pendingActions = await database.collection('AIPendingActions').find({
+      trackingKey, status: 'pending', expiresAt: { $gt: new Date() },
+      actionType: { $in: ['accept_quote', 'accept_quote_and_confirm_appointment'] },
+    }).toArray();
+    pendingActions.forEach(p => { if (p.quoteId) pendingActionsByQuoteId[String(p.quoteId)] = p.actionType; });
+  }
+
+  return { resolved, status, chatAccess, content, confirmedAppointments, pendingActionsByQuoteId };
 }
 
 function conversationMessages(notif) {
@@ -2781,7 +2819,11 @@ app.get('/trackRequest/:trackingKey', trackRequestLimiter, async (req, res) => {
       sendAiActivityEmail(state.resolved, trackingKey, 'read', 'Your AI assistant just opened this request.').catch(e => console.warn('⚠️ sendAiActivityEmail (read) failed:', e?.message));
     }
 
-    res.send(renderTrackingPage({ trackingKey, status: state.status, chatAccess: state.chatAccess, content: state.content, confirmedAppointments: state.confirmedAppointments }));
+    res.send(renderTrackingPage({
+      trackingKey, status: state.status, chatAccess: state.chatAccess, content: state.content,
+      confirmedAppointments: state.confirmedAppointments, pendingActionsByQuoteId: state.pendingActionsByQuoteId,
+      pendingNote: req.query.pending ? String(req.query.pending).slice(0, 300) : null,
+    }));
   } catch (err) {
     console.error('❌ /trackRequest error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -3199,6 +3241,55 @@ app.post('/trackRequest/:trackingKey/answerInfoRequest', aiAuthLimiter, async (r
   }
 });
 
+// POST /trackRequest/:trackingKey/confirmAppointmentTime — the guest picks
+// (or confirms the one) proposed appointment time directly from the
+// tracking page's chat bubble. No second email round-trip here, unlike
+// accept_quote below: the guest already proved email ownership once to
+// get AI chat access in the first place, and is the one looking at this
+// page right now - there's no AI-initiated-without-a-human-present
+// ambiguity to guard against for picking a time slot the business itself
+// proposed. Finalizes immediately on submit via the existing shared
+// finalizeAppointmentConfirmation helper.
+app.post('/trackRequest/:trackingKey/confirmAppointmentTime', aiAuthLimiter, async (req, res) => {
+  try {
+    const { trackingKey } = req.params;
+    const { quoteId, optionToken } = req.body || {};
+    if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).send(renderConfirmPage(false, 'quoteId required.'));
+
+    const state = await resolveTrackingPageState(trackingKey);
+    if (!state) return res.status(404).send(renderConfirmPage(false, 'Request not found.'));
+    if (!state.chatAccess?.enabled || state.chatAccess.expired) {
+      return res.status(401).send(renderConfirmPage(false, 'AI access is not currently enabled for this request.'));
+    }
+    const quote = (state.resolved.quotes || []).find(q => String(q._id) === String(quoteId));
+    if (!quote) return res.status(404).send(renderConfirmPage(false, 'This quote could not be found.'));
+    if (quote.status === 'appointment_confirmed') {
+      return res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}`);
+    }
+    if (quote.status !== 'awaiting_guest_time_confirmation') {
+      return res.status(409).send(renderConfirmPage(false, `No proposed times are awaiting confirmation for this quote (status: ${quote.status}).`));
+    }
+
+    let date, time;
+    if (Array.isArray(quote.proposedOptions) && quote.proposedOptions.length) {
+      const option = findProposedOption(quote, String(optionToken || ''));
+      if (!option) return res.status(400).send(renderConfirmPage(false, 'That time option is no longer available. A different one may have already been chosen.'));
+      date = option.date; time = option.time;
+      await database.collection('ServiceQuotes').updateOne({ _id: quote._id }, { $set: { proposedDate: date, proposedTime: time } });
+    } else if (quote.proposedDate && quote.proposedTime) {
+      date = quote.proposedDate; time = quote.proposedTime;
+    } else {
+      return res.status(400).send(renderConfirmPage(false, 'No proposed time to confirm.'));
+    }
+
+    await finalizeAppointmentConfirmation({ ...quote, proposedDate: date, proposedTime: time }, quote._id.toString());
+    res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}`);
+  } catch (err) {
+    console.error('❌ /trackRequest/:trackingKey/confirmAppointmentTime error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
 // POST /trackRequest/:trackingKey/actions/:actionType — the AI attempts a
 // consequential action; nothing is performed yet. A pending action is
 // created and the customer is sent a fresh confirmation built from Needs'
@@ -3276,7 +3367,7 @@ app.post('/trackRequest/:trackingKey/actions/:actionType', aiAuthLimiter, async 
     }
     sendAiActivityEmail(resolved, trackingKey, 'write', `Your AI assistant proposed: ${confirmLabels[actionType]}. Check your email for the confirmation link.`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
 
-    res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}?pending=${encodeURIComponent('Ask the customer to check their email to confirm before this is finalized.')}`);
+    res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}?pending=${encodeURIComponent('Check your email to confirm before this is finalized.')}`);
   } catch (err) {
     console.error('❌ /trackRequest/:trackingKey/actions error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));

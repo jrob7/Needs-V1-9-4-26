@@ -2498,15 +2498,19 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
   if (chatAccess?.enabled && !chatAccess.expired && content) {
     if (content.requestType === 'quote') {
       chatHtml = (content.quotes || []).map(q => {
-        const infoThread = (q.qaHistory || []).map(m => `
-          ${m.from === 'org' ? `<p class="bubbleSender">${escapeHtml(q.businessName)}</p>` : ''}
-          <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`).join('');
-        const msgThread = (q.messages || []).map(m => `
-          ${m.from === 'org' ? `<p class="bubbleSender">${escapeHtml(q.businessName)}</p>` : ''}
-          <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">
-            ${m.text ? escapeHtml(m.text) : ''}
-            ${m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : ''}
-          </div>`).join('');
+        // Built as single-line strings, not multi-line template literals -
+        // .bubble uses white-space:pre-wrap (to preserve real line breaks a
+        // guest types), which also preserves the literal indentation/newlines
+        // a multi-line template literal leaves *inside* the bubble div,
+        // rendering them as real blank lines and bloating the bubble's height.
+        const senderLabel = (name) => `<p class="bubbleSender">${escapeHtml(name)}</p>`;
+        const infoThread = (q.qaHistory || []).map(m =>
+          `${m.from === 'org' ? senderLabel(q.businessName) : ''}<div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${escapeHtml(m.text)}</div>`
+        ).join('');
+        const msgThread = (q.messages || []).map(m => {
+          const photoHtml = m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : '';
+          return `${m.from === 'org' ? senderLabel(q.businessName) : ''}<div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${m.text ? escapeHtml(m.text) : ''}${photoHtml}</div>`;
+        }).join('');
         const hasTime = q.proposedDate && q.proposedTime;
 
         // The quote itself (and any pending time proposal) renders as a
@@ -2520,25 +2524,10 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             ? `Accept Quote & Confirm ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}`
             : 'Accept Quote';
           const actionType = hasTime ? 'accept_quote_and_confirm_appointment' : 'accept_quote';
-          offerBubble = `
-            <p class="bubbleSender">${escapeHtml(q.businessName)}</p>
-            <div class="bubble bubble-org bubble-offer">
-              <p class="offerText">💰 Quote: $${escapeHtml(String(q.confirmedPrice || q.estimate || '—'))}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}</p>
-              <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/${actionType}">
-                <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
-                <button type="submit">${label}</button>
-              </form>
-            </div>`;
+          const priceText = `💰 Quote: $${escapeHtml(String(q.confirmedPrice || q.estimate || '—'))}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}`;
+          offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer"><p class="offerText">${priceText}</p><form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/${actionType}"><input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}"><button type="submit">${label}</button></form></div>`;
         } else if (q.status === 'awaiting_guest_time_confirmation') {
-          offerBubble = `
-            <p class="bubbleSender">${escapeHtml(q.businessName)}</p>
-            <div class="bubble bubble-org bubble-offer">
-              <p class="offerText">📅 Proposed a time for your appointment.</p>
-              <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/confirm_appointment_time">
-                <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
-                <button type="submit">Confirm an Appointment Time</button>
-              </form>
-            </div>`;
+          offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer"><p class="offerText">📅 Proposed a time for your appointment.</p><form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/confirm_appointment_time"><input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}"><button type="submit">Confirm an Appointment Time</button></form></div>`;
         }
         const thread = `${offerBubble}${infoThread}${msgThread}`;
 
@@ -2579,12 +2568,10 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
       }).join('');
     } else {
       const businessName = content.businessName || 'the business';
-      const thread = (content.messages || []).map(m => `
-        ${m.from === 'org' ? `<p class="bubbleSender">${escapeHtml(businessName)}</p>` : ''}
-        <div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">
-          ${m.text ? escapeHtml(m.text) : ''}
-          ${m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : ''}
-        </div>`).join('');
+      const thread = (content.messages || []).map(m => {
+        const photoHtml = m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : '';
+        return `${m.from === 'org' ? `<p class="bubbleSender">${escapeHtml(businessName)}</p>` : ''}<div class="bubble ${m.from === 'org' ? 'bubble-org' : 'bubble-guest'}">${m.text ? escapeHtml(m.text) : ''}${photoHtml}</div>`;
+      }).join('');
       chatHtml = `
         <div class="quoteCard">
           <h2>${escapeHtml(businessName)}</h2>

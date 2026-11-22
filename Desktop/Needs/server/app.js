@@ -2494,12 +2494,6 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
       </p>
     </div>`).join('');
 
-  const actionForm = (actionType, label, businessName) => `
-    <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/${actionType}" style="display:inline;">
-      ${businessName ? `<input type="hidden" name="businessName" value="${escapeHtml(businessName)}">` : ''}
-      <button type="submit" class="actionBtn">${label}</button>
-    </form>`;
-
   let chatHtml = '';
   if (chatAccess?.enabled && !chatAccess.expired && content) {
     if (content.requestType === 'quote') {
@@ -2512,15 +2506,37 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             ${m.photoUrl ? `<br><img src="${escapeHtml(m.photoUrl)}" class="bubblePhoto">` : ''}
           </div>`).join('');
         const hasTime = q.proposedDate && q.proposedTime;
-        let actions = '';
+
+        // The quote itself (and any pending time proposal) renders as a
+        // chat bubble with its own Accept/Confirm button inline, rather
+        // than a separate button row below the compose box - the guest
+        // sees it as one message in the thread, same as any other reply,
+        // instead of a disconnected action area.
+        let offerBubble = '';
         if (['business_confirmed', 'business_edited'].includes(q.status)) {
-          actions += hasTime
-            ? actionForm('accept_quote_and_confirm_appointment', `Accept Quote & Confirm ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}`, q.businessName)
-            : actionForm('accept_quote', 'Accept Quote', q.businessName);
+          const label = hasTime
+            ? `Accept Quote & Confirm ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}`
+            : 'Accept Quote';
+          const actionType = hasTime ? 'accept_quote_and_confirm_appointment' : 'accept_quote';
+          offerBubble = `
+            <div class="bubble bubble-org bubble-offer">
+              <p class="offerText">💰 Quote: $${escapeHtml(String(q.confirmedPrice || q.estimate || '—'))}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}</p>
+              <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/${actionType}">
+                <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
+                <button type="submit">${label}</button>
+              </form>
+            </div>`;
+        } else if (q.status === 'awaiting_guest_time_confirmation') {
+          offerBubble = `
+            <div class="bubble bubble-org bubble-offer">
+              <p class="offerText">📅 ${escapeHtml(q.businessName)} proposed a time for your appointment.</p>
+              <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/actions/confirm_appointment_time">
+                <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
+                <button type="submit">Confirm an Appointment Time</button>
+              </form>
+            </div>`;
         }
-        if (q.status === 'awaiting_guest_time_confirmation') {
-          actions += actionForm('confirm_appointment_time', 'Confirm an Appointment Time', q.businessName);
-        }
+        const thread = `${offerBubble}${infoThread}${msgThread}`;
 
         // A pending info request takes priority over the ordinary reply
         // box - same "answer this first" precedence the app's own
@@ -2546,8 +2562,7 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
           <div class="quoteCard">
             <h2>${escapeHtml(q.businessName)}</h2>
             <p class="meta">${q.confirmedPrice ? `$${escapeHtml(String(q.confirmedPrice))}` : (q.estimate || 'No price yet')}${hasTime ? ` · ${escapeHtml(q.proposedDate)} at ${escapeHtml(q.proposedTime)}` : ''}</p>
-            ${infoThread ? `<div class="thread">${infoThread}</div>` : ''}
-            ${msgThread ? `<div class="thread">${msgThread}</div>` : ''}
+            ${thread ? `<div class="thread">${thread}</div>` : ''}
             ${pendingInfoRequest || `
               <form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/message">
                 <input type="hidden" name="businessName" value="${escapeHtml(q.businessName)}">
@@ -2556,7 +2571,6 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
                 <label class="photoLabel">Attach a photo (optional): <input type="file" accept="image/*" class="photoInput"></label>
                 <button type="submit">Send</button>
               </form>`}
-            ${actions ? `<div class="actions">${actions}</div>` : ''}
           </div>`;
       }).join('');
     } else {
@@ -2615,10 +2629,12 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .bubble { max-width: 90%; padding: 9px 13px; border-radius: 12px; font-size: .9rem; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
     .bubble-guest { background: #EFF6FF; color: #1E3A8A; align-self: flex-end; }
     .bubble-org { background: #F1F5F9; color: #334155; align-self: flex-start; }
+    .bubble-offer { background: #EFF6FF; border: 1px solid #BFDBFE; align-self: stretch; max-width: 100%; }
+    .offerText { margin: 0 0 10px; font-weight: 700; color: #1E3A8A; }
+    .bubble-offer form { margin: 0; }
     textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    button, .actionBtn { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
-    .quoteCard > form > button, .infoRequestBox button { width: 100%; padding: 12px; font-size: .92rem; }
+    button { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
+    .quoteCard > form > button, .infoRequestBox button, .bubble-offer button { width: 100%; padding: 12px; font-size: .92rem; }
     .hint { text-align: center; margin-top: 4px; font-size: .85rem; }
     .hint a { color: #2563EB; text-decoration: none; }
     .infoRequestBox { background: #FEF9C3; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin-bottom: 14px; }

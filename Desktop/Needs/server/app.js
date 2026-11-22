@@ -2635,10 +2635,10 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .bubble-guest { background: #EFF6FF; color: #1E3A8A; align-self: flex-end; }
     .bubble-org { background: #F1F5F9; color: #334155; align-self: flex-start; }
     .bubbleSender { font-size: .72rem; font-weight: 700; color: #64748B; margin: 0 0 3px 2px; }
-    .bubble-offer { background: #EFF6FF; border: 1px solid #BFDBFE; align-self: flex-start; max-width: 88%; }
-    .offerText { margin: 0 0 10px; font-weight: 700; color: #1E3A8A; font-size: .9rem; }
+    .bubble-offer { display: inline-flex; flex-direction: column; gap: 10px; background: #EFF6FF; border: 1px solid #BFDBFE; align-self: flex-start; max-width: 88%; }
+    .offerText { margin: 0; font-weight: 700; color: #1E3A8A; font-size: .9rem; }
     .bubble-offer form { margin: 0; }
-    .bubble-offer button { width: auto; display: block; margin: 0 auto; padding: 9px 18px; font-size: .85rem; }
+    .bubble-offer button { align-self: center; width: auto; padding: 9px 18px; font-size: .85rem; }
     textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
     button { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
     .quoteCard > form > button, .infoRequestBox button { width: 100%; padding: 12px; font-size: .92rem; }

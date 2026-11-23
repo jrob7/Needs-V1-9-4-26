@@ -2551,7 +2551,19 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
             offerBubble = `${senderLabel(q.businessName)}<div class="bubble bubble-org bubble-offer"><p class="offerText">📅 Proposed: ${escapeHtml(options[0].date)} at ${escapeHtml(options[0].time)}</p><form method="POST" action="/trackRequest/${encodeURIComponent(trackingKey)}/confirmAppointmentTime"><input type="hidden" name="quoteId" value="${escapeHtml(String(q._id))}"><input type="hidden" name="optionToken" value="${escapeHtml(options[0].token || '')}"><button type="submit">Confirm This Time</button></form></div>`;
           }
         }
-        const thread = `${offerBubble}${infoThread}${msgThread}`;
+
+        // The quote's own offer/pending/proposed-time bubble sits at the
+        // top of the thread (it's the quote's current state, shown right
+        // under the price line), but once the guest accepts a price-only
+        // quote there's nothing left to show there - without this, the
+        // whole offer bubble just disappears with no record of what
+        // happened. This renders as the newest message instead, at the
+        // bottom of the thread, so it reads as the next thing that
+        // happened after any Q&A that came before it.
+        const confirmationBubble = q.status === 'guest_accepted'
+          ? `<div class="bubble bubble-org bubble-confirmed"><p class="offerText">✅ Quote confirmed and sent to ${escapeHtml(q.businessName)}.</p><p class="offerSubtext">They'll propose a time to schedule next.</p></div>`
+          : '';
+        const thread = `${offerBubble}${infoThread}${msgThread}${confirmationBubble}`;
 
         // A pending info request takes priority over the ordinary reply
         // box - same "answer this first" precedence the app's own
@@ -2651,6 +2663,8 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .bubble-offer button { align-self: center; width: auto; padding: 9px 18px; font-size: .85rem; }
     .bubble-pending { background: #fff; border-color: #BFDBFE; }
     .bubble-pending .offerText, .bubble-pending .offerSubtext { color: #2563EB; }
+    .bubble-confirmed { background: #fff; border: 1px solid #BBF7D0; }
+    .bubble-confirmed .offerText, .bubble-confirmed .offerSubtext { color: #166534; }
     .timeOption { display: block; font-size: .85rem; color: #1E3A8A; }
     textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
     button { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }

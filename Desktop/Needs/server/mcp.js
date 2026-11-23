@@ -295,6 +295,79 @@ function buildServer({ client, NODE_API, userId, scopes = null }) {
     });
   }
 
+  if (userId && hasScope('read')) {
+    server.registerTool('read_my_conversations', {
+      title: 'Read my requests, quotes, and conversations',
+      description: "List the authenticated Needs user's own quote requests and questions across every business - status, price, proposed time(s), and the full message thread for each. No business slug needed - tied to the signed-in account.",
+      inputSchema: {},
+    }, async () => {
+      const resp = await fetch(`${NODE_API}/myConversations`, {
+        headers: { 'Authorization': `Bearer ${currentBearerToken(server)}` },
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not read your conversations');
+      return text(data);
+    });
+  }
+
+  if (userId && hasScope('respond')) {
+    server.registerTool('respond_to_business', {
+      title: 'Send a message to a business about my quote',
+      description: "Send a free-form message on an existing quote conversation, as the authenticated Needs user - e.g. answering a question the business asked, or asking one of your own. Not for accepting a quote, confirming a time, or canceling an appointment - those are separate tools that always need the user's own separate confirmation first.",
+      inputSchema: {
+        quoteId: z.string().describe('The quoteId from read_my_conversations'),
+        text: z.string().describe('The message to send'),
+      },
+    }, async ({ quoteId, text: messageText }) => {
+      const resp = await fetch(`${NODE_API}/respondAsCustomer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentBearerToken(server)}` },
+        body: JSON.stringify({ quoteId, text: messageText }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not send the message');
+      return text({ success: true });
+    });
+  }
+
+  // These three are consequential (money and/or schedule commitments), so
+  // none of them finalize anything directly - each just asks the server to
+  // email *the account's own* address a confirm link, same pause-then-
+  // email-confirm pattern the guest tracking link already uses for these
+  // same actions. The AI being OAuth-authorized only proves the account
+  // trusts it to act in general, not that the user is watching this
+  // specific decision right now - see /mcpRequestConsequentialAction.
+  if (userId && hasScope('schedule')) {
+    const requestConsequentialAction = async (quoteId, actionType) => {
+      const resp = await fetch(`${NODE_API}/mcpRequestConsequentialAction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentBearerToken(server)}` },
+        body: JSON.stringify({ quoteId, actionType }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return errorText(data.error || 'Could not start this action');
+      return text({ success: true, message: data.message });
+    };
+
+    server.registerTool('accept_quote', {
+      title: 'Accept a quote',
+      description: "Accept a quote from a business, as the authenticated Needs user. This is consequential - nothing is finalized here. The user's own email gets a confirmation link, and this only takes effect once they click it themselves. Relay the returned message to them as written, do not shorten it away.",
+      inputSchema: { quoteId: z.string().describe('The quoteId from read_my_conversations') },
+    }, async ({ quoteId }) => requestConsequentialAction(quoteId, 'accept_quote'));
+
+    server.registerTool('confirm_appointment_time', {
+      title: 'Confirm a proposed appointment time',
+      description: "Confirm the appointment time a business proposed, as the authenticated Needs user. This is consequential - nothing is finalized here. The user's own email gets a confirmation link (showing the actual proposed time(s) to pick from if there's more than one), and this only takes effect once they click it themselves. Relay the returned message to them as written, do not shorten it away.",
+      inputSchema: { quoteId: z.string().describe('The quoteId from read_my_conversations') },
+    }, async ({ quoteId }) => requestConsequentialAction(quoteId, 'confirm_appointment_time'));
+
+    server.registerTool('cancel_appointment', {
+      title: 'Cancel a confirmed appointment',
+      description: "Cancel an already-confirmed appointment, as the authenticated Needs user. This is consequential and cannot be undone - nothing is finalized here. The user's own email gets a confirmation link, and this only takes effect once they click it themselves. Relay the returned message to them as written, do not shorten it away.",
+      inputSchema: { quoteId: z.string().describe('The quoteId from read_my_conversations') },
+    }, async ({ quoteId }) => requestConsequentialAction(quoteId, 'cancel_appointment'));
+  }
+
   return server;
 }
 

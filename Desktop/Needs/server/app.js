@@ -3091,6 +3091,7 @@ function renderAiConfirmActionPage(businessName, actionType, detailsHtml, formAc
     accept_quote: 'Accept This Quote?',
     confirm_appointment_time: 'Confirm Appointment Time',
     accept_quote_and_confirm_appointment: 'Accept Quote & Confirm Appointment',
+    cancel_appointment: 'Cancel This Appointment?',
   };
   return `<!DOCTYPE html>
 <html lang="en">
@@ -3527,6 +3528,267 @@ app.post('/ai/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
   } catch (err) {
     console.error('❌ POST /ai/confirmAction error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+// POST /mcpRequestConsequentialAction — called by the accept_quote/
+// confirm_appointment_time/cancel_appointment MCP tools (server/mcp.js) for
+// an authenticated user. Mirrors /trackRequest/:trackingKey/actions above,
+// but for a real account instead of a guest tracking link: nothing is
+// finalized here, it only creates a pending action and emails *this
+// account's own* registered address (never one the AI could supply) a
+// confirm link - these three are consequential enough that a human has to
+// separately approve them regardless of how trusted the MCP connection is.
+// quoteId ownership is re-checked here against req.userId (the validated
+// token), never trusted from the request body alone.
+app.post('/mcpRequestConsequentialAction', requireAuthAnyScope, async (req, res) => {
+  try {
+    const { quoteId, actionType } = req.body || {};
+    if (!['accept_quote', 'confirm_appointment_time', 'cancel_appointment'].includes(actionType)) {
+      return res.status(400).json({ error: 'Unknown actionType.' });
+    }
+    if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+    if (!quote.userId || quote.userId.toString() !== req.userId) {
+      return res.status(403).json({ error: 'This quote does not belong to the authenticated account.' });
+    }
+
+    const requiredStatus = {
+      accept_quote: ['business_confirmed', 'business_edited'],
+      confirm_appointment_time: ['awaiting_guest_time_confirmation'],
+      cancel_appointment: ['appointment_confirmed'],
+    }[actionType];
+    if (!requiredStatus.includes(quote.status)) {
+      return res.status(409).json({ error: `This action isn't available for this quote's current state (status: ${quote.status}).` });
+    }
+
+    const user = await database.collection('Users').findOne({ _id: new ObjectId(req.userId) }, { projection: { email: 1 } });
+    if (!user?.email) return res.status(400).json({ error: 'No email on file for this account.' });
+
+    const confirmToken = crypto.randomBytes(16).toString('hex');
+    await database.collection('AIPendingActions').insertOne({
+      pendingActionId: crypto.randomBytes(12).toString('hex'),
+      userId: req.userId, quoteId: quote._id, actionType,
+      status: 'pending', confirmToken,
+      createdAt: new Date(), expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
+
+    const confirmLabels = {
+      accept_quote: `Accept the Quote${quote.confirmedPrice ? ` ($${quote.confirmedPrice})` : ''}`,
+      confirm_appointment_time: 'Confirm an Appointment Time',
+      cancel_appointment: 'Cancel the Appointment',
+    };
+    await sendEmail({
+      to: user.email,
+      subject: `Confirm: ${confirmLabels[actionType]} — ${quote.businessName}`,
+      html: `
+        <p>Your AI assistant is asking to <strong>${escapeHtml(confirmLabels[actionType])}</strong> with <strong>${escapeHtml(quote.businessName)}</strong>.</p>
+        <p>Nothing happens until you confirm directly with Needs.</p>
+        <p><a href="${NODE_API}/mcp/confirmAction/${confirmToken}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review and Confirm</a></p>
+      `,
+    });
+
+    res.json({ success: true, message: `Ask the user to check their email (${user.email}) and click the confirmation link before this is finalized.` });
+  } catch (err) {
+    console.error('❌ /mcpRequestConsequentialAction error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET/POST /mcp/confirmAction/:confirmToken — the human-facing confirmation
+// for a pending action created above. Same pause-then-email-confirm pattern
+// as /ai/confirmAction, but resolved by quoteId/userId directly instead of
+// a guest trackingKey, since an authenticated account has no tracking link.
+app.get('/mcp/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
+  try {
+    const action = await database.collection('AIPendingActions').findOne({ confirmToken: req.params.confirmToken });
+    if (!action) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has expired.'));
+    if (action.status !== 'pending' || action.expiresAt < new Date()) {
+      return res.send(renderConfirmPage(action.status === 'confirmed', action.status === 'pending' ? 'This confirmation link has expired.' : `This request was already ${action.status}.`));
+    }
+
+    const quote = action.quoteId ? await database.collection('ServiceQuotes').findOne({ _id: action.quoteId }) : null;
+    if (!quote) return res.status(404).send(renderConfirmPage(false, 'This quote could not be found.'));
+    const businessName = quote.businessName || 'the business';
+    let detailsHtml = '', extraFieldsHtml = '';
+
+    if (action.actionType === 'accept_quote') {
+      detailsHtml = `Accept the quote${quote.confirmedPrice ? ` of <strong>$${escapeHtml(String(quote.confirmedPrice))}</strong>` : ''} from ${escapeHtml(businessName)}?`;
+    } else if (action.actionType === 'confirm_appointment_time') {
+      const options = quote.proposedOptions?.length ? quote.proposedOptions : (quote.proposedDate && quote.proposedTime ? [{ date: quote.proposedDate, time: quote.proposedTime, token: '' }] : []);
+      detailsHtml = `${escapeHtml(businessName)} proposed:`;
+      extraFieldsHtml = options.map((o, i) => `
+        <label class="opt"><input type="radio" name="optionToken" value="${escapeHtml(o.token)}" ${i === 0 ? 'checked' : ''}> ${escapeHtml(o.date)} at ${escapeHtml(o.time)}</label>`
+      ).join('');
+    } else if (action.actionType === 'cancel_appointment') {
+      detailsHtml = `Cancel your confirmed appointment with ${escapeHtml(businessName)}${quote.proposedDate ? ` on <strong>${escapeHtml(quote.proposedDate)}${quote.proposedTime ? ` at ${escapeHtml(quote.proposedTime)}` : ''}</strong>` : ''}? This cannot be undone.`;
+    }
+
+    res.send(renderAiConfirmActionPage(businessName, action.actionType, detailsHtml, `/mcp/confirmAction/${req.params.confirmToken}`, extraFieldsHtml));
+  } catch (err) {
+    console.error('❌ GET /mcp/confirmAction error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+app.post('/mcp/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
+  try {
+    const action = await database.collection('AIPendingActions').findOne({ confirmToken: req.params.confirmToken });
+    if (!action) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has expired.'));
+    if (action.status !== 'pending' || action.expiresAt < new Date()) {
+      return res.send(renderConfirmPage(action.status === 'confirmed', action.status === 'pending' ? 'This confirmation link has expired.' : `This request was already ${action.status}.`));
+    }
+
+    const decision = req.body?.decision === 'confirm' ? 'confirmed' : 'declined';
+    await database.collection('AIPendingActions').updateOne({ _id: action._id }, { $set: { status: decision } });
+    if (decision === 'declined') {
+      return res.send(renderConfirmPage(true, 'Declined. Nothing was changed.'));
+    }
+
+    const quote = action.quoteId ? await database.collection('ServiceQuotes').findOne({ _id: action.quoteId }) : null;
+    if (!quote) return res.send(renderConfirmPage(false, 'This quote could not be found.'));
+    // Re-checked here too, not just at request time - the confirm token is
+    // the only thing proving who clicked, so this is the last point
+    // ownership can actually be verified before anything happens.
+    if (!quote.userId || quote.userId.toString() !== action.userId) {
+      return res.send(renderConfirmPage(false, 'This confirmation link is no longer valid for this account.'));
+    }
+
+    if (action.actionType === 'accept_quote') {
+      await database.collection('ServiceQuotes').updateOne({ _id: quote._id }, { $set: { status: 'guest_accepted', guestAcceptedAt: new Date() } });
+      if (quote.serviceUserId) {
+        const requester = await database.collection('Users').findOne({ _id: quote.userId }, { projection: { email: 1 } });
+        await database.collection('Notifications').insertOne({
+          userId: quote.serviceUserId, type: 'quote_accepted_by_guest',
+          title: '🎉 Customer Accepted Your Quote',
+          body: `${requester?.email || 'The customer'} accepted your quote${quote.confirmedPrice ? ` of $${quote.confirmedPrice}` : ''}. Propose a time below, or reach out directly to schedule.`,
+          needId: quote.needId, quoteId: quote._id, guestEmail: requester?.email || null, read: false, createdAt: new Date(),
+        });
+      }
+      return res.send(renderConfirmPage(true, `You accepted the quote from ${escapeHtml(quote.businessName)}. They will reach out to schedule a time.`));
+    }
+
+    if (action.actionType === 'confirm_appointment_time') {
+      let date, time;
+      if (Array.isArray(quote.proposedOptions) && quote.proposedOptions.length) {
+        const option = findProposedOption(quote, String(req.body?.optionToken || ''));
+        if (!option) return res.send(renderConfirmPage(false, 'That time option is no longer available. A different one may have already been chosen.'));
+        date = option.date; time = option.time;
+        await database.collection('ServiceQuotes').updateOne({ _id: quote._id }, { $set: { proposedDate: date, proposedTime: time } });
+      } else if (quote.proposedDate && quote.proposedTime) {
+        date = quote.proposedDate; time = quote.proposedTime;
+      } else {
+        return res.send(renderConfirmPage(false, 'No proposed time to confirm.'));
+      }
+      await finalizeAppointmentConfirmation({ ...quote, proposedDate: date, proposedTime: time }, quote._id.toString());
+      return res.send(renderConfirmPage(true, `Your appointment with ${escapeHtml(quote.businessName)} is confirmed for ${escapeHtml(date)} at ${escapeHtml(time)}.`));
+    }
+
+    if (action.actionType === 'cancel_appointment') {
+      if (quote.status !== 'appointment_confirmed') {
+        return res.send(renderConfirmPage(false, `This appointment is no longer in a cancelable state (status: ${quote.status}).`));
+      }
+      await database.collection('ServiceQuotes').updateOne({ _id: quote._id }, { $set: { status: 'cancelled', cancelledAt: new Date() } });
+      await database.collection('Appointments').updateOne({ quoteId: quote._id }, { $set: { status: 'cancelled', updatedAt: new Date() } });
+      if (quote.serviceUserId) {
+        await database.collection('Notifications').insertOne({
+          userId: quote.serviceUserId, type: 'appointment_cancelled',
+          title: '❌ Appointment Canceled',
+          body: `The customer canceled the appointment${quote.proposedDate ? ` for ${quote.proposedDate}` : ''}.`,
+          needId: quote.needId, quoteId: quote._id, read: false, createdAt: new Date(),
+        });
+      }
+      return res.send(renderConfirmPage(true, `Your appointment with ${escapeHtml(quote.businessName)} has been canceled.`));
+    }
+
+    res.send(renderConfirmPage(false, 'Unknown action.'));
+  } catch (err) {
+    console.error('❌ POST /mcp/confirmAction error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+// GET /myConversations — backs the read_my_conversations MCP tool. Unlike
+// /m/:slug/myRequests (scoped to one business, status-only), this returns
+// the authenticated account's own quotes and questions across every
+// business, including message threads - scoped entirely by req.userId
+// (the validated token), never by anything the caller supplies.
+app.get('/myConversations', requireAuthAnyScope, async (req, res) => {
+  try {
+    const quotes = await database.collection('ServiceQuotes')
+      .find({ userId: new ObjectId(req.userId) })
+      .sort({ createdAt: -1 }).limit(20).toArray();
+    const questions = await database.collection('Notifications')
+      .find({ fromUserId: new ObjectId(req.userId), type: 'module_question' })
+      .sort({ createdAt: -1 }).limit(20).toArray();
+
+    res.json({
+      quotes: quotes.map(q => ({
+        quoteId: q._id.toString(), businessName: q.businessName, status: q.status,
+        confirmedPrice: q.confirmedPrice || null, estimate: q.estimate || null,
+        proposedDate: q.proposedDate || null, proposedTime: q.proposedTime || null,
+        proposedOptions: (q.proposedOptions || []).map(o => ({ date: o.date, time: o.time })),
+        messages: [...(q.qaHistory || []), ...(q.messages || [])]
+          .map(m => ({ from: m.from, text: m.text, at: m.at }))
+          .sort((a, b) => new Date(a.at) - new Date(b.at)),
+        createdAt: q.createdAt,
+      })),
+      questions: questions.map(n => ({
+        questionId: n._id.toString(), question: n.question, answered: !!n.answered,
+        answer: n.answered ? (n.answer || null) : null, createdAt: n.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error('❌ /myConversations error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /respondAsCustomer — backs the respond_to_business MCP tool. Same
+// quote_message upsert pattern the guest tracking link's own message route
+// already uses (one notification per conversation, responded:false reset
+// on every new customer message), just reached from an authenticated
+// account instead of a tracking key. Not consequential (no money/schedule
+// commitment), so no pause-and-confirm gate - matches how a guest's own
+// messages never needed one either.
+app.post('/respondAsCustomer', requireAuthAnyScope, async (req, res) => {
+  try {
+    const { quoteId, text } = req.body || {};
+    if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+    const trimmedText = String(text || '').trim().slice(0, 2000);
+    if (!trimmedText) return res.status(400).json({ error: 'text is required' });
+
+    const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
+    if (!quote) return res.status(404).json({ error: 'Quote not found' });
+    if (!quote.userId || quote.userId.toString() !== req.userId) {
+      return res.status(403).json({ error: 'This quote does not belong to the authenticated account.' });
+    }
+
+    const moderation = await moderateText(trimmedText);
+    if (moderation.blocked) return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
+
+    await database.collection('ServiceQuotes').updateOne(
+      { _id: quote._id },
+      { $push: { messages: { from: 'guest', text: trimmedText, at: new Date() } } }
+    );
+
+    if (quote.serviceUserId) {
+      await database.collection('Notifications').updateOne(
+        { quoteId: quote._id, type: 'quote_message' },
+        {
+          $set: { userId: quote.serviceUserId, title: '💬 Question About Your Quote', body: trimmedText, read: false, responded: false, createdAt: new Date() },
+          $setOnInsert: { needId: quote.needId },
+        },
+        { upsert: true }
+      );
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ /respondAsCustomer error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

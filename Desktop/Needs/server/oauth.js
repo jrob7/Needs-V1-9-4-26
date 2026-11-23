@@ -363,10 +363,19 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
         { userId: userIdStr, client_id: authCode.client_id },
         {
           $set: {
-            clientName: oauthClient?.client_name || 'Unnamed MCP client', revoked: false, grantedAt: new Date(),
+            clientName: oauthClient?.client_name || 'Unnamed MCP client',
+            // A fresh approval clears both revoked (user-initiated
+            // disconnect) and suspended (auto-flagged for unusual
+            // activity) - re-running this whole login+approve flow is
+            // itself the "user reviewed and decided" step suspension
+            // exists to force, and it doubles as a verification event too,
+            // so a stale connection doesn't still show as needing one
+            // right after being reconnected.
+            revoked: false, suspended: false, grantedAt: new Date(), lastVerifiedAt: new Date(),
             scopes: Array.isArray(authCode.scopes) ? authCode.scopes : [],
           },
-          $setOnInsert: { lastVerifiedAt: new Date(), readCountSinceVerified: 0, createdAt: new Date() },
+          $unset: { rateLimitTrips: '', suspendedAt: '' },
+          $setOnInsert: { readCountSinceVerified: 0, createdAt: new Date() },
         },
         { upsert: true }
       );

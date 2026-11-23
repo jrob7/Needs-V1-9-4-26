@@ -574,6 +574,7 @@ const AccountTabContent = () => {
 
         <Section icon="person" title="Profile" color="#475569">
           <MenuItem icon="person-outline"   label="View / Edit Profile" onPress={handleEditProfile} />
+          <MenuItem icon="hardware-chip-outline" label="Connected AI" onPress={() => navigation.navigate('ConnectedAiScreen')} />
           <MenuItem icon="log-out-outline"  label="Sign Out"     onPress={handleLogout} destructive />
         </Section>
 

@@ -3077,6 +3077,12 @@ async function resolveAiRequestByTrackingKey(trackingKey) {
 const AI_CHAT_ACCESS_MS = 48 * 60 * 60 * 1000;
 const AI_CHAT_ACCESS_EXTEND_MS = 24 * 60 * 60 * 1000;
 
+// Mirrors the same constant in mcp.js (computeEffectiveScopes) - duplicated
+// rather than imported since the two modules don't otherwise share
+// internals, but the actual staleness check an MCP connection enforces
+// lives there; this copy is only for display in the Connected AI screen.
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
 // A request still has something left for an AI to help with. Quotes are
 // "closed" once an appointment is actually locked in; questions have no
 // equivalent terminal state, since a conversation can always continue.
@@ -3918,6 +3924,59 @@ app.post('/respondAsCustomer', requireAuthAnyScope, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('❌ /respondAsCustomer error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET /connectedAi — backs the app's own Account -> Connected AI screen.
+// requireAuth (not requireAuthAnyScope) on purpose: this is reached by the
+// user browsing their own account in the regular app, not by an MCP client,
+// and requireAuth already refuses an mcp-scoped token outright.
+app.get('/connectedAi', requireAuth, async (req, res) => {
+  try {
+    const grants = await database.collection('OAuthGrants')
+      .find({ userId: req.userId })
+      .sort({ grantedAt: -1 }).toArray();
+
+    const withActivity = await Promise.all(grants.map(async (g) => {
+      const recentActivity = await database.collection('McpActivityLog')
+        .find({ userId: req.userId, clientId: g.client_id })
+        .sort({ at: -1 }).limit(10).toArray();
+      const stale = !g.lastVerifiedAt || (Date.now() - new Date(g.lastVerifiedAt).getTime()) > THIRTY_DAYS_MS;
+      return {
+        clientId: g.client_id,
+        clientName: g.clientName || 'Unnamed MCP client',
+        scopes: g.scopes || [],
+        revoked: !!g.revoked,
+        suspended: !!g.suspended,
+        needsReverification: !g.revoked && !g.suspended && stale,
+        grantedAt: g.grantedAt,
+        lastVerifiedAt: g.lastVerifiedAt || null,
+        recentActivity: recentActivity.map(a => ({ tool: a.tool, outcome: a.outcome, at: a.at })),
+      };
+    }));
+
+    res.json({ connections: withActivity });
+  } catch (err) {
+    console.error('❌ /connectedAi error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /connectedAi/:clientId/revoke — "Disconnect" in that same screen.
+// Ownership-scoped to req.userId (the validated token), never trusts
+// clientId alone - this can only ever revoke a grant that actually belongs
+// to the authenticated account.
+app.post('/connectedAi/:clientId/revoke', requireAuth, async (req, res) => {
+  try {
+    const result = await database.collection('OAuthGrants').updateOne(
+      { userId: req.userId, client_id: req.params.clientId },
+      { $set: { revoked: true, revokedAt: new Date() } }
+    );
+    if (result.matchedCount === 0) return res.status(404).json({ error: 'Connection not found.' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ /connectedAi/:clientId/revoke error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

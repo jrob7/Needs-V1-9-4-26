@@ -25,11 +25,21 @@ const { z } = require('zod');
 const jwt = require('jsonwebtoken');
 const { ObjectId } = require('mongodb');
 
-function buildServer({ client, NODE_API, userId }) {
+function buildServer({ client, NODE_API, userId, scopes = null }) {
   const server = new McpServer({ name: 'needs-module', version: '1.0.0' });
 
   const text = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
   const errorText = (message) => ({ isError: true, content: [{ type: 'text', text: message }] });
+
+  // scopes is only ever a real array when this call resolved an actual
+  // OAuthGrants row (always true for /mcp/account; best-effort for /mcp).
+  // null means "no grant to check against" - guest use, or a token that
+  // predates grants - and stays fully permissive, same as before scopes
+  // existed at all. Only an authenticated session with a *resolved* grant
+  // gets denied for a missing scope.
+  const hasScope = (id) => scopes === null || scopes.includes(id);
+  const scopeDeniedText = (label) =>
+    errorText(`This connection doesn't have permission to ${label}. The user can enable it under Account → Connected AI on needs-module.com.`);
 
   // Folded into the same message the server already returns for the
   // email-confirmation step, instead of a separate field. The confirmation
@@ -58,6 +68,7 @@ function buildServer({ client, NODE_API, userId }) {
     description: 'Fetch a Needs business or restaurant profile by its slug: name, category, services, pricing (with a disclaimer that it is an estimate, not a binding quote), hours/availability, and contact info.',
     inputSchema: { slug: z.string().describe('The business slug, e.g. "example-technology-business-law-firm"') },
   }, async ({ slug }) => {
+    if (userId && !hasScope('search')) return scopeDeniedText('search businesses');
     const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/profile`);
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Business not found');
@@ -91,6 +102,7 @@ function buildServer({ client, NODE_API, userId }) {
       limit: z.number().int().min(1).max(25).optional().describe('Max results (default 10)'),
     },
   }, async ({ query, limit }) => {
+    if (userId && !hasScope('search')) return scopeDeniedText('search businesses');
     const db = client.db('Need');
     const rx = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     const max = limit || 10;
@@ -133,6 +145,7 @@ function buildServer({ client, NODE_API, userId }) {
       question: z.string().describe('The question to ask'),
     },
   }, async ({ slug, question }) => {
+    if (userId && !hasScope('search')) return scopeDeniedText('ask businesses general questions');
     const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -173,6 +186,7 @@ function buildServer({ client, NODE_API, userId }) {
     if (!service) return errorText('Business not found (or is a restaurant, which does not take quote requests)');
 
     if (userId) {
+      if (!hasScope('request')) return scopeDeniedText('create quote requests');
       const resp = await fetch(`${NODE_API}/authedRequestQuote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentBearerToken(server)}` },
@@ -222,6 +236,7 @@ function buildServer({ client, NODE_API, userId }) {
     },
   }, async ({ slug, question, name, email, enableAiAccess }) => {
     if (userId) {
+      if (!hasScope('request')) return scopeDeniedText('ask businesses questions');
       const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/authedAskBusiness`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentBearerToken(server)}` },
@@ -265,7 +280,7 @@ function buildServer({ client, NODE_API, userId }) {
   // already persists across conversations at the connector/account level
   // (unlike a guest, who has nothing durable), so this just works
   // automatically in any future call, same session or a brand new one.
-  if (userId) {
+  if (userId && hasScope('read')) {
     server.registerTool('check_my_requests', {
       title: 'Check my requests to a business',
       description: 'Check the status of the authenticated Needs user’s recent quote requests and questions to a specific business. No key or email needed - this is tied to the signed-in account and works the same in any future conversation.',
@@ -287,16 +302,29 @@ function buildServer({ client, NODE_API, userId }) {
 // and returns the userId it represents, or null if there is none/it is
 // invalid/expired - an invalid token degrades to guest access rather than
 // rejecting the request, since every tool here is safe to use as a guest.
-function getAuthedUserId(req) {
+// Best-effort scope resolution: only looked up when the token carries a
+// clientId (every token minted since OAuthGrants existed); scopes stays
+// null (fully permissive, same as before scopes existed) if that lookup
+// doesn't resolve - this endpoint's guest-first behavior never gets
+// *stricter* because of scopes, only /mcp/account does.
+async function getAuthedUserId(req, client) {
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) return { userId: null, token: null };
+  if (!header || !header.startsWith('Bearer ')) return { userId: null, token: null, scopes: null };
   const token = header.slice('Bearer '.length);
+  let payload;
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    return { userId: payload.userId, token };
+    payload = jwt.verify(token, process.env.JWT_SECRET);
   } catch {
-    return { userId: null, token: null };
+    return { userId: null, token: null, scopes: null };
   }
+  let scopes = null;
+  if (payload.clientId) {
+    const grant = await client.db('Need').collection('OAuthGrants')
+      .findOne({ userId: payload.userId, client_id: payload.clientId })
+      .catch(() => null);
+    if (grant && !grant.revoked) scopes = grant.scopes || [];
+  }
+  return { userId: payload.userId, token, scopes };
 }
 
 // Validates the incoming Bearer token for /mcp/account, the dedicated
@@ -328,7 +356,7 @@ async function getStrictAuthedUserId(req, client) {
   const grant = await db.collection('OAuthGrants').findOne({ userId: payload.userId, client_id: payload.clientId });
   if (!grant || grant.revoked) return { ok: false };
 
-  return { ok: true, userId: payload.userId, clientId: payload.clientId, token };
+  return { ok: true, userId: payload.userId, clientId: payload.clientId, token, scopes: grant.scopes || [] };
 }
 
 function sendAuthRequired(req, res, NODE_API) {
@@ -343,8 +371,8 @@ function sendAuthRequired(req, res, NODE_API) {
 function registerMcpRoutes(app, { client, NODE_API }) {
   app.post('/mcp', async (req, res) => {
     try {
-      const { userId, token } = getAuthedUserId(req);
-      const server = buildServer({ client, NODE_API, userId });
+      const { userId, token, scopes } = await getAuthedUserId(req, client);
+      const server = buildServer({ client, NODE_API, userId, scopes });
       // Stashed so the authed-tool handlers above can forward the same
       // token to the authedRequestQuote/authedAskBusiness calls they make.
       server._bearerToken = token;
@@ -379,7 +407,7 @@ function registerMcpRoutes(app, { client, NODE_API }) {
       const auth = await getStrictAuthedUserId(req, client);
       if (!auth.ok) return sendAuthRequired(req, res, NODE_API);
 
-      const server = buildServer({ client, NODE_API, userId: auth.userId });
+      const server = buildServer({ client, NODE_API, userId: auth.userId, scopes: auth.scopes });
       server._bearerToken = auth.token;
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
       res.on('close', () => { transport.close(); server.close(); });

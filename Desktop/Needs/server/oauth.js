@@ -31,6 +31,20 @@ const { escapeHtml } = require('./htmlEscape');
 
 const AUTH_CODE_TTL_MS = 60 * 1000; // single-use, exchanged almost immediately
 
+// The permissions an approving user can grant/withhold per connection.
+// Stored on the auth code at approval time, then copied onto the resulting
+// OAuthGrants row at token exchange - every MCP tool checks this array
+// (via /mcp/account's resolved scopes) before doing anything, independent
+// of whatever the connecting client itself claims to want.
+const SCOPE_CATALOG = [
+  { id: 'search',   label: 'Search businesses and services' },
+  { id: 'request',  label: 'Create quote requests and ask businesses questions' },
+  { id: 'read',     label: 'Read your existing requests, quotes, and conversations' },
+  { id: 'respond',  label: 'Respond to businesses on your behalf' },
+  { id: 'schedule', label: 'Request, propose, and confirm appointment times' },
+];
+const DEFAULT_SCOPES = SCOPE_CATALOG.map(s => s.id);
+
 // Registration itself grants no access (a real user still has to approve a
 // client by logging in at /oauth/authorize), so this isn't a hard security
 // boundary - it just raises the cost of mass-registering throwaway clients
@@ -45,7 +59,7 @@ const registerLimiter = rateLimit({
   message: { error: 'rate_limited', error_description: 'Too many client registrations from this address. Try again later.' },
 });
 
-function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, error }) {
+function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, error, selectedScopes }) {
   // client_name and redirect_uri are both attacker-controlled free text at
   // registration time (POST /oauth/register accepts any string) - this page
   // renders on our own real domain, so without escaping, a malicious
@@ -56,6 +70,12 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
   const hiddenInputs = Object.entries(hidden)
     .map(([k, v]) => `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v || '')}">`)
     .join('');
+  const checkedScopes = new Set(selectedScopes || DEFAULT_SCOPES);
+  const scopeRows = SCOPE_CATALOG.map(s => `
+    <label class="scope-row">
+      <input type="checkbox" name="scopes" value="${escapeHtml(s.id)}" ${checkedScopes.has(s.id) ? 'checked' : ''}>
+      <span>${escapeHtml(s.label)}</span>
+    </label>`).join('');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -81,6 +101,11 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
   .scope-note { font-size: .76rem; color: #94A3B8; margin-top: 16px; line-height: 1.5; }
   .redirect-box { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; margin-bottom: 18px; font-size: .76rem; color: #334155; word-break: break-all; text-align: left; }
   .redirect-box b { display: block; font-size: .68rem; color: #94A3B8; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; font-weight: 700; }
+  .scopes-label { font-size: .72rem; font-weight: 700; color: #94A3B8; text-transform: uppercase; letter-spacing: .4px; text-align: left; margin-bottom: 8px; }
+  .scope-row { display: flex; align-items: center; gap: 10px; text-align: left; padding: 9px 0; border-bottom: 1px solid #F1F5F9; font-size: .85rem; color: #334155; }
+  .scope-row:last-child { border-bottom: none; }
+  .scope-row input { width: 17px; height: 17px; flex-shrink: 0; accent-color: #2563EB; }
+  .scopes-box { background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 12px 14px; margin-bottom: 18px; }
 </style>
 </head>
 <body>
@@ -96,9 +121,11 @@ function renderAuthorizePage({ clientName, redirectUri, formAction, hidden, erro
       ${hiddenInputs}
       <input class="field" type="email" name="email" placeholder="Email address" required autofocus>
       <input class="field" type="password" name="password" placeholder="Password" required>
+      <div class="scopes-label">${safeClientName} is requesting</div>
+      <div class="scopes-box">${scopeRows}</div>
       <button class="submit" type="submit">Log In &amp; Authorize</button>
     </form>
-    <div class="scope-note">This lets ${safeClientName} request quotes and ask businesses questions as you, skipping the usual email confirmation step. You can revoke access anytime from Account Settings &rarr; Sign Out &rarr; Sign Out of All Devices.</div>
+    <div class="scope-note">Uncheck anything you don't want to allow. Accepting a quote, confirming an appointment, or canceling one always asks you separately, no matter what's checked above. You can review or revoke this anytime from Account &rarr; Connected AI.</div>
   </div>
 </body>
 </html>`;
@@ -213,6 +240,15 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
         return res.status(400).send(renderOAuthError('Invalid client or redirect_uri.'));
       }
 
+      // Checkbox fields only arrive as an array when 2+ are checked; a
+      // single checked box posts as a bare string instead.
+      const rawScopes = req.body?.scopes;
+      const requestedScopes = Array.isArray(rawScopes) ? rawScopes : (rawScopes ? [rawScopes] : []);
+      // Never trust an unknown value through to storage - whitelist against
+      // the catalog this page itself rendered.
+      const validScopeIds = new Set(SCOPE_CATALOG.map(s => s.id));
+      const scopes = requestedScopes.filter(s => validScopeIds.has(s));
+
       const normEmail = String(email || '').trim().toLowerCase();
       const user = await database.collection('Users').findOne({ email: normEmail });
       const dbPw = user?.password;
@@ -228,12 +264,13 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
           formAction: '/oauth/authorize',
           hidden: { client_id, redirect_uri, code_challenge, state: state || '' },
           error: 'Incorrect email or password.',
+          selectedScopes: scopes,
         }));
       }
 
       const code = crypto.randomBytes(24).toString('hex');
       await database.collection('OAuthAuthCodes').insertOne({
-        code, client_id, userId: user._id, redirect_uri, code_challenge,
+        code, client_id, userId: user._id, redirect_uri, code_challenge, scopes,
         createdAt: new Date(), used: false,
       });
 
@@ -325,7 +362,10 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
       await database.collection('OAuthGrants').updateOne(
         { userId: userIdStr, client_id: authCode.client_id },
         {
-          $set: { clientName: oauthClient?.client_name || 'Unnamed MCP client', revoked: false, grantedAt: new Date() },
+          $set: {
+            clientName: oauthClient?.client_name || 'Unnamed MCP client', revoked: false, grantedAt: new Date(),
+            scopes: Array.isArray(authCode.scopes) ? authCode.scopes : [],
+          },
           $setOnInsert: { lastVerifiedAt: new Date(), readCountSinceVerified: 0, createdAt: new Date() },
         },
         { upsert: true }

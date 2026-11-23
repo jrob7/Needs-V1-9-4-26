@@ -6864,6 +6864,28 @@ async function finalizeAppointmentConfirmation(quote, quoteId) {
       needId: quote.needId, quoteId: new ObjectId(quoteId), read: false, createdAt: new Date(),
     });
   }
+
+  // One final confirmation email to the guest with the locked-in price and
+  // time - until now nothing ever emailed this; guests only ever saw it on
+  // the one-time post-click page, or by separately reopening the tracking
+  // link afterward. Fire-and-forget, same as the other email sends here.
+  if (quote.userId) {
+    database.collection('Users').findOne({ _id: quote.userId }, { projection: { email: 1 } })
+      .then(requester => {
+        if (!requester?.email) return;
+        return sendEmail({
+          to: requester.email,
+          subject: `Appointment Confirmed — ${quote.businessName || 'your service'}`,
+          html: `
+            <p>Your appointment with <strong>${escapeHtml(quote.businessName || 'the business')}</strong> is confirmed.</p>
+            ${quote.proposedDate ? `<p><strong>When:</strong> ${escapeHtml(quote.proposedDate)}${quote.proposedTime ? ` at ${escapeHtml(quote.proposedTime)}` : ''}</p>` : ''}
+            ${quote.confirmedPrice ? `<p><strong>Price:</strong> $${escapeHtml(String(quote.confirmedPrice))}</p>` : ''}
+          `,
+        });
+      })
+      .catch(e => console.warn('⚠️ appointment-confirmed email failed:', e?.message));
+  }
+
   setImmediate(async () => {
     try {
       if (!quote.serviceUserId) return;

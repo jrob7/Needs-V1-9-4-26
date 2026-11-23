@@ -187,6 +187,20 @@ const requireAuthAnyScope = async (req, res, next) => {
   }
 };
 
+// requireAuthAnyScope only checks a token's own signature/tokenVersion, not
+// OAuthGrants state - called after it, on every MCP-only endpoint below, so
+// a still-cryptographically-valid token for a since-revoked/suspended
+// connection can't reach them directly, bypassing /mcp/account's own gate
+// (the path every MCP tool call actually goes through in normal use).
+// A token with no clientId at all (a regular app session, not MCP) has no
+// grant to check and is always considered active.
+async function mcpGrantIsActive(req) {
+  const payload = jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), JWT_SECRET);
+  if (!payload.clientId) return true;
+  const grant = await database.collection('OAuthGrants').findOne({ userId: req.userId, client_id: payload.clientId });
+  return !!grant && !grant.revoked && !grant.suspended;
+}
+
 // Guard the two guest-facing endpoints that send a real email to an address
 // the caller fully controls (no auth required) - /requestQuote and
 // /m/:slug/askBusiness. Both the MCP tools and the module page's own guest
@@ -243,6 +257,57 @@ const aiAuthLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
+});
+
+// Keyed per-connection (userId + clientId from the token itself, not IP) so
+// one misbehaving AI client doesn't get lumped in with - or throttle -
+// every other connection on the same network. A soft trip just 429s; three
+// trips inside an hour escalates to actually suspending the grant (not the
+// account) and emailing the user, since a short single burst can be
+// innocent but a repeated pattern of them is the "severe risk" case worth
+// intervening on without waiting for a human to notice.
+const mcpAccountLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    try {
+      const payload = jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), JWT_SECRET);
+      return `${payload.userId}:${payload.clientId}`;
+    } catch {
+      return req.ip;
+    }
+  },
+  handler: async (req, res) => {
+    try {
+      const payload = jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), JWT_SECRET);
+      if (payload.clientId && ObjectId.isValid(payload.userId)) {
+        const updated = await database.collection('OAuthGrants').findOneAndUpdate(
+          { userId: payload.userId, client_id: payload.clientId },
+          { $push: { rateLimitTrips: { $each: [new Date()], $slice: -20 } } },
+          { returnDocument: 'after' }
+        );
+        const grant = updated?.value || updated; // driver version differences
+        const recentTrips = (grant?.rateLimitTrips || []).filter(t => Date.now() - new Date(t).getTime() < 60 * 60 * 1000);
+        if (grant && recentTrips.length >= 3 && !grant.suspended) {
+          await database.collection('OAuthGrants').updateOne(
+            { _id: grant._id },
+            { $set: { suspended: true, suspendedAt: new Date() } }
+          );
+          const user = await database.collection('Users').findOne({ _id: new ObjectId(payload.userId) }, { projection: { email: 1 } });
+          if (user?.email) {
+            sendEmail({
+              to: user.email,
+              subject: `A connected AI was suspended for unusual activity — Needs`,
+              html: `<p><strong>${escapeHtml(grant.clientName || 'A connected AI')}</strong> was automatically suspended after repeatedly making an unusually high number of requests in a short time. Nothing else on your account was changed. You can review or reconnect it from Account → Connected AI.</p>`,
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (_) {}
+    res.status(429).json({ jsonrpc: '2.0', error: { code: -32005, message: 'Too many requests from this connection in a short time. Please slow down.' }, id: null });
+  },
 });
 
 // /guestSearchBusinesses is new, unauthenticated, and proxies to an
@@ -3548,6 +3613,7 @@ app.post('/mcpRequestConsequentialAction', requireAuthAnyScope, async (req, res)
       return res.status(400).json({ error: 'Unknown actionType.' });
     }
     if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+    if (!(await mcpGrantIsActive(req))) return res.status(401).json({ error: 'This connection is no longer active.' });
 
     const quote = await database.collection('ServiceQuotes').findOne({ _id: new ObjectId(quoteId) });
     if (!quote) return res.status(404).json({ error: 'Quote not found' });
@@ -3597,6 +3663,49 @@ app.post('/mcpRequestConsequentialAction', requireAuthAnyScope, async (req, res)
   }
 });
 
+// POST /mcpRequestReverification — backs the request_reverification MCP
+// tool, offered only once a connection's grant has gone stale (30+ days
+// since last confirmed - see getStrictAuthedUserId in mcp.js). clientId
+// comes from the validated token itself, never the request body, so
+// there's nothing here an AI could tamper with to target a different
+// connection than its own.
+app.post('/mcpRequestReverification', requireAuthAnyScope, async (req, res) => {
+  try {
+    const payload = jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), JWT_SECRET);
+    const clientId = payload.clientId;
+    if (!clientId) return res.status(400).json({ error: 'Not an MCP connection.' });
+
+    const grant = await database.collection('OAuthGrants').findOne({ userId: req.userId, client_id: clientId });
+    if (!grant || grant.revoked || grant.suspended) return res.status(404).json({ error: 'Connection not found.' });
+
+    const user = await database.collection('Users').findOne({ _id: new ObjectId(req.userId) }, { projection: { email: 1 } });
+    if (!user?.email) return res.status(400).json({ error: 'No email on file for this account.' });
+
+    const confirmToken = crypto.randomBytes(16).toString('hex');
+    await database.collection('AIPendingActions').insertOne({
+      pendingActionId: crypto.randomBytes(12).toString('hex'),
+      userId: req.userId, clientId, actionType: 'reverify_connection',
+      status: 'pending', confirmToken,
+      createdAt: new Date(), expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+
+    await sendEmail({
+      to: user.email,
+      subject: `Re-verify: ${grant.clientName || 'your connected AI'} — Needs`,
+      html: `
+        <p><strong>${escapeHtml(grant.clientName || 'A connected AI')}</strong> is asking to keep its access to your Needs account - this is a routine 30-day check, not a new request.</p>
+        <p>Nothing changes until you confirm directly with Needs.</p>
+        <p><a href="${NODE_API}/mcp/confirmAction/${confirmToken}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review and Confirm</a></p>
+      `,
+    });
+
+    res.json({ success: true, message: `Ask the user to check their email (${user.email}) and click the link to keep this connection active - until then, reading or acting on private account data isn't available.` });
+  } catch (err) {
+    console.error('❌ /mcpRequestReverification error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // GET/POST /mcp/confirmAction/:confirmToken — the human-facing confirmation
 // for a pending action created above. Same pause-then-email-confirm pattern
 // as /ai/confirmAction, but resolved by quoteId/userId directly instead of
@@ -3607,6 +3716,16 @@ app.get('/mcp/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => {
     if (!action) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has expired.'));
     if (action.status !== 'pending' || action.expiresAt < new Date()) {
       return res.send(renderConfirmPage(action.status === 'confirmed', action.status === 'pending' ? 'This confirmation link has expired.' : `This request was already ${action.status}.`));
+    }
+
+    if (action.actionType === 'reverify_connection') {
+      const grant = await database.collection('OAuthGrants').findOne({ userId: action.userId, client_id: action.clientId });
+      const clientName = grant?.clientName || 'This connected AI';
+      return res.send(renderAiConfirmActionPage(
+        clientName, 'accept_quote', // reuses the generic "Accept/Decline" card layout, not its literal copy
+        `Keep <strong>${escapeHtml(clientName)}</strong> connected to your Needs account for another 30 days?`,
+        `/mcp/confirmAction/${req.params.confirmToken}`, ''
+      ));
     }
 
     const quote = action.quoteId ? await database.collection('ServiceQuotes').findOne({ _id: action.quoteId }) : null;
@@ -3645,6 +3764,15 @@ app.post('/mcp/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => 
     await database.collection('AIPendingActions').updateOne({ _id: action._id }, { $set: { status: decision } });
     if (decision === 'declined') {
       return res.send(renderConfirmPage(true, 'Declined. Nothing was changed.'));
+    }
+
+    if (action.actionType === 'reverify_connection') {
+      const result = await database.collection('OAuthGrants').updateOne(
+        { userId: action.userId, client_id: action.clientId },
+        { $set: { lastVerifiedAt: new Date() }, $unset: { rateLimitTrips: '' } }
+      );
+      if (result.matchedCount === 0) return res.send(renderConfirmPage(false, 'This connection could not be found - it may have already been disconnected.'));
+      return res.send(renderConfirmPage(true, 'Connection re-verified. It can resume reading and acting on your account.'));
     }
 
     const quote = action.quoteId ? await database.collection('ServiceQuotes').findOne({ _id: action.quoteId }) : null;
@@ -3717,6 +3845,7 @@ app.post('/mcp/confirmAction/:confirmToken', aiAuthLimiter, async (req, res) => 
 // (the validated token), never by anything the caller supplies.
 app.get('/myConversations', requireAuthAnyScope, async (req, res) => {
   try {
+    if (!(await mcpGrantIsActive(req))) return res.status(401).json({ error: 'This connection is no longer active.' });
     const quotes = await database.collection('ServiceQuotes')
       .find({ userId: new ObjectId(req.userId) })
       .sort({ createdAt: -1 }).limit(20).toArray();
@@ -3757,6 +3886,7 @@ app.post('/respondAsCustomer', requireAuthAnyScope, async (req, res) => {
   try {
     const { quoteId, text } = req.body || {};
     if (!quoteId || !ObjectId.isValid(quoteId)) return res.status(400).json({ error: 'quoteId required' });
+    if (!(await mcpGrantIsActive(req))) return res.status(401).json({ error: 'This connection is no longer active.' });
     const trimmedText = String(text || '').trim().slice(0, 2000);
     if (!trimmedText) return res.status(400).json({ error: 'text is required' });
 
@@ -7404,7 +7534,7 @@ app.post('/respondToQuoteMessage', async (req, res) => {
 });
 
 registerOAuthRoutes(app, { database, bcrypt, signTokens: signMcpTokens, NODE_API });
-registerMcpRoutes(app, { client, NODE_API });
+registerMcpRoutes(app, { client, NODE_API, mcpAccountLimiter });
 
 // Render
 httpServer.listen(port, () => {

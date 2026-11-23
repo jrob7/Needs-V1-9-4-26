@@ -2635,7 +2635,7 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .confirmedBanner { background: #DCFCE7; border: 1px solid #BBF7D0; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
     .confirmedTitle { font-weight: 700; color: #166534; margin: 0 0 6px; font-size: .95rem; }
     .confirmedDetail { color: #166534; margin: 0; font-size: .88rem; }
-    .notice { background: #FEF9C3; color: #854D0E; border-radius: 10px; padding: 10px 14px; font-size: .85rem; margin-bottom: 14px; }
+    .notice { background: #fff; color: #2563EB; border: 1px solid #BFDBFE; border-radius: 10px; padding: 10px 14px; font-size: .85rem; margin-bottom: 14px; }
     .quoteCard { background: #fff; border-radius: 16px; padding: 22px 20px; margin-bottom: 16px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
     h2 { font-size: 1.05rem; color: #0F172A; margin: 0 0 4px; }
     .meta { font-size: .9rem; color: #334155; margin: 0 0 12px; }
@@ -2649,8 +2649,8 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .offerSubtext { margin: 0; color: #1E3A8A; font-size: .82rem; }
     .bubble-offer form { margin: 0; }
     .bubble-offer button { align-self: center; width: auto; padding: 9px 18px; font-size: .85rem; }
-    .bubble-pending { background: #FEF9C3; border-color: #FDE68A; }
-    .bubble-pending .offerText, .bubble-pending .offerSubtext { color: #854D0E; }
+    .bubble-pending { background: #fff; border-color: #BFDBFE; }
+    .bubble-pending .offerText, .bubble-pending .offerSubtext { color: #2563EB; }
     .timeOption { display: block; font-size: .85rem; color: #1E3A8A; }
     textarea { width: 100%; box-sizing: border-box; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; font-size: .9rem; font-family: inherit; min-height: 70px; resize: vertical; margin-bottom: 8px; }
     button { background: #2563EB; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; }
@@ -2658,10 +2658,10 @@ function renderTrackingPage({ trackingKey, status, chatAccess, content, pendingN
     .quoteCard > form > button.sendBtn { width: 70%; display: block; margin: 0 auto; }
     .hint { text-align: center; margin-top: 4px; font-size: .85rem; }
     .hint a { color: #2563EB; text-decoration: none; }
-    .infoRequestBox { background: #FEF9C3; border: 1px solid #FDE68A; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
-    .infoRequestLabel { font-weight: 600; color: #854D0E; margin: 0 0 10px; }
+    .infoRequestBox { background: #fff; border: 1px solid #BFDBFE; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+    .infoRequestLabel { font-weight: 600; color: #2563EB; margin: 0 0 10px; }
     .photoLabel { display: block; font-size: .82rem; color: #64748B; margin: 6px 0 10px; }
-    .infoRequestBox .photoLabel { color: #92400E; }
+    .infoRequestBox .photoLabel { color: #2563EB; }
     .bubblePhoto { max-width: 220px; border-radius: 8px; margin-top: 6px; }
   </style>
 </head>

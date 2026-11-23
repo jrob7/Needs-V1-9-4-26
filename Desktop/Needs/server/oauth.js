@@ -133,9 +133,12 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
     });
   });
 
+  // /mcp itself is optionally-authenticated (guest-first by design - see
+  // mcp.js) so it isn't really "protected" in the sense this document means.
+  // /mcp/account is the endpoint that actually requires a valid grant.
   app.get('/.well-known/oauth-protected-resource', (req, res) => {
     res.json({
-      resource: `${ISSUER}/mcp`,
+      resource: `${ISSUER}/mcp/account`,
       authorization_servers: [ISSUER],
     });
   });
@@ -265,7 +268,14 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
           if (!user || (user.tokenVersion || 0) !== (payload.tokenVersion || 0)) {
             return res.status(400).json({ error: 'invalid_grant' });
           }
-          const { token, refreshToken } = signTokens(payload.userId, user.tokenVersion || 0);
+          // Same check as /mcp/account's own gate - a refresh for a since-
+          // revoked connection (Account -> Connected AI -> Disconnect)
+          // must fail here too, not just on its next actual tool call.
+          if (payload.clientId) {
+            const grant = await database.collection('OAuthGrants').findOne({ userId: payload.userId, client_id: payload.clientId });
+            if (!grant || grant.revoked) return res.status(400).json({ error: 'invalid_grant' });
+          }
+          const { token, refreshToken } = signTokens(payload.userId, user.tokenVersion || 0, payload.clientId || null);
           return res.json({ access_token: token, refresh_token: refreshToken, token_type: 'Bearer', expires_in: 1800 });
         } catch {
           return res.status(400).json({ error: 'invalid_grant' });
@@ -304,7 +314,24 @@ function registerOAuthRoutes(app, { database, bcrypt, signTokens, NODE_API }) {
       const user = await database.collection('Users').findOne(
         { _id: authCode.userId }, { projection: { tokenVersion: 1 } }
       );
-      const { token, refreshToken } = signTokens(authCode.userId.toString(), user?.tokenVersion || 0);
+      const userIdStr = authCode.userId.toString();
+
+      // This is the actual "user approved this client" moment - record it as
+      // its own grant (keyed by userId + client_id) so /mcp/account can
+      // reject just this one connection later without touching any other
+      // approved client or the user's regular app sessions. Upsert because
+      // the same client can be re-authorized after being disconnected.
+      const oauthClient = await database.collection('OAuthClients').findOne({ client_id: authCode.client_id });
+      await database.collection('OAuthGrants').updateOne(
+        { userId: userIdStr, client_id: authCode.client_id },
+        {
+          $set: { clientName: oauthClient?.client_name || 'Unnamed MCP client', revoked: false, grantedAt: new Date() },
+          $setOnInsert: { lastVerifiedAt: new Date(), readCountSinceVerified: 0, createdAt: new Date() },
+        },
+        { upsert: true }
+      );
+
+      const { token, refreshToken } = signTokens(userIdStr, user?.tokenVersion || 0, authCode.client_id);
       res.json({ access_token: token, refresh_token: refreshToken, token_type: 'Bearer', expires_in: 1800 });
     } catch (err) {
       console.error('❌ /oauth/token error:', err);

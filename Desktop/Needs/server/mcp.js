@@ -23,6 +23,7 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { z } = require('zod');
 const jwt = require('jsonwebtoken');
+const { ObjectId } = require('mongodb');
 
 function buildServer({ client, NODE_API, userId }) {
   const server = new McpServer({ name: 'needs-module', version: '1.0.0' });
@@ -298,6 +299,43 @@ function getAuthedUserId(req) {
   }
 }
 
+// Validates the incoming Bearer token for /mcp/account, the dedicated
+// "I specifically want my real account" endpoint - unlike getAuthedUserId
+// above, this NEVER degrades to guest access. Missing, malformed, expired,
+// wrong-scope, or belonging to a since-revoked grant (Account -> Connected
+// AI -> Disconnect, or a global Sign Out of All Devices via tokenVersion)
+// all reject outright. Also the one place that resolves which Needs account
+// a call acts as - every tool handler must derive userId from here, never
+// from an argument the AI itself supplied.
+async function getStrictAuthedUserId(req, client) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return { ok: false };
+  const token = header.slice('Bearer '.length);
+  let payload;
+  try {
+    payload = jwt.verify(token, process.env.JWT_SECRET);
+  } catch {
+    return { ok: false };
+  }
+  if (payload.scope !== 'mcp' || !payload.clientId || !ObjectId.isValid(payload.userId)) return { ok: false };
+
+  const db = client.db('Need');
+  const user = await db.collection('Users').findOne(
+    { _id: new ObjectId(payload.userId) }, { projection: { tokenVersion: 1 } }
+  );
+  if (!user || (user.tokenVersion || 0) !== (payload.tokenVersion || 0)) return { ok: false };
+
+  const grant = await db.collection('OAuthGrants').findOne({ userId: payload.userId, client_id: payload.clientId });
+  if (!grant || grant.revoked) return { ok: false };
+
+  return { ok: true, userId: payload.userId, clientId: payload.clientId, token };
+}
+
+function sendAuthRequired(req, res, NODE_API) {
+  res.set('WWW-Authenticate', `Bearer realm="needs", resource_metadata="${NODE_API}/.well-known/oauth-protected-resource"`);
+  res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Authentication required, expired, or revoked.' }, id: null });
+}
+
 // Stateless by design (sessionIdGenerator: undefined, a fresh server+transport
 // per request): simpler and safer for a multi-instance deployment than
 // session affinity, and every tool call here is independent anyway - nothing
@@ -330,6 +368,32 @@ function registerMcpRoutes(app, { client, NODE_API }) {
   app.delete('/mcp', (req, res) => {
     res.status(405).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Method not allowed.' }, id: null });
   });
+
+  // POST /mcp/account - same tools as /mcp, but this is the endpoint a user
+  // reaches from Account -> Connected AI specifically to connect their real
+  // account, so it never silently falls back to guest: no token, an
+  // invalid/expired one, or one tied to a since-revoked grant all get a
+  // hard 401 instead of quietly degrading to anonymous access.
+  app.post('/mcp/account', async (req, res) => {
+    try {
+      const auth = await getStrictAuthedUserId(req, client);
+      if (!auth.ok) return sendAuthRequired(req, res, NODE_API);
+
+      const server = buildServer({ client, NODE_API, userId: auth.userId });
+      server._bearerToken = auth.token;
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      res.on('close', () => { transport.close(); server.close(); });
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+      console.error('❌ /mcp/account error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal server error' }, id: null });
+      }
+    }
+  });
+  app.get('/mcp/account', (req, res) => sendAuthRequired(req, res, NODE_API));
+  app.delete('/mcp/account', (req, res) => sendAuthRequired(req, res, NODE_API));
 }
 
 function currentBearerToken(server) {

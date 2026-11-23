@@ -116,10 +116,14 @@ function signTokens(userId, tokenVersion = 0) {
 // calls. A token with no scope claim at all (every token issued before this
 // existed, and everything /login/createUser/web-handoff still issue today)
 // is treated as full access, unchanged from before this existed.
-function signMcpTokens(userId, tokenVersion = 0) {
+// clientId ties this token to one specific OAuth-approved connection
+// (an OAuthGrants row) so /mcp/account can reject it the instant that one
+// connection is revoked, without signing every other connection out too.
+function signMcpTokens(userId, tokenVersion = 0, clientId = null) {
+  const payload = { userId, tokenVersion, scope: 'mcp', clientId };
   return {
-    token: jwt.sign({ userId, tokenVersion, scope: 'mcp' }, JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL }),
-    refreshToken: jwt.sign({ userId, tokenVersion, scope: 'mcp' }, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }),
+    token: jwt.sign(payload, JWT_SECRET, { expiresIn: ACCESS_TOKEN_TTL }),
+    refreshToken: jwt.sign(payload, REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_TTL }),
   };
 }
 

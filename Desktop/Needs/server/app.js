@@ -2393,6 +2393,20 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
         trackingKey: instantTrackingKey, aiAccessRequested: enableAiAccess === true,
       });
       await database.collection('McpGuestSessions').updateOne({ _id: activeSession._id }, { $inc: { requestCount: 1 } });
+      // Audit-copy notification - this one went out with no fresh
+      // confirmation click (that's the whole point of an active session),
+      // so this is the only thing telling the guest it happened at all.
+      // Same spirit as sendAiActivityEmail on the tracking link, just sent
+      // directly since the email is already known here.
+      sendEmail({
+        to: activeSession.email,
+        subject: `Your AI assistant sent a new question to ${businessName}`,
+        html: `
+          <p>Your AI assistant just sent a new question to <strong>${escapeHtml(businessName)}</strong>, using the email confirmation you already gave earlier in this conversation.</p>
+          <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${escapeHtml(question)}</p>
+          <p style="color:#94A3B8;font-size:.85rem;">Didn't expect this? This session allows up to 5 requests over 48 hours before requiring a fresh confirmation - ignore this if you're the one driving it.</p>
+        `,
+      }).catch(e => console.warn('⚠️ guest session instant-request email failed:', e?.message));
       return res.json({
         success: true, instant: true, trackingKey: instantTrackingKey, sessionToken,
         message: `Sent immediately to ${businessName} - no email confirmation needed this time, since you already confirmed earlier in this conversation.`,
@@ -6748,6 +6762,20 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
       });
       await database.collection('McpGuestSessions').updateOne({ _id: activeSession._id }, { $inc: { requestCount: 1 } });
       const sentToName = service.businessName || service.providerName || 'the business';
+      // Audit-copy notification - this one went out with no fresh
+      // confirmation click (that's the whole point of an active session),
+      // so this is the only thing telling the guest it happened at all.
+      // Same spirit as sendAiActivityEmail on the tracking link, just sent
+      // directly since the email is already known here.
+      sendEmail({
+        to: activeSession.email,
+        subject: `Your AI assistant sent a new quote request to ${sentToName}`,
+        html: `
+          <p>Your AI assistant just sent a new quote request to <strong>${escapeHtml(sentToName)}</strong>, using the email confirmation you already gave earlier in this conversation.</p>
+          <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${escapeHtml(description)}</p>
+          <p style="color:#94A3B8;font-size:.85rem;">Didn't expect this? This session allows up to 5 requests over 48 hours before requiring a fresh confirmation - ignore this if you're the one driving it.</p>
+        `,
+      }).catch(e => console.warn('⚠️ guest session instant-request email failed:', e?.message));
       return res.json({
         success: true, instant: true, trackingKey: instantTrackingKey, sessionToken,
         message: `Sent immediately to ${sentToName} - no email confirmation needed this time, since you already confirmed earlier in this conversation.`,

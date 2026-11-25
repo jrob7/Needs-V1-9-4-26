@@ -51,14 +51,39 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
       userId, clientId, tool: toolName, outcome, at: new Date(),
     }).catch(() => {});
   };
+
+  // Guests have no account to view an in-app activity log from, so this is
+  // Needs' own operational record, not something they can self-serve browse
+  // - abuse investigation, disputes, and the data substrate for any future
+  // guest-side anomaly detection (guest MCP otherwise has zero record of
+  // what happened, unlike the OAuth path above). Tied to the confirmed
+  // guest session's own email - a tool called before any session exists
+  // (e.g. the very first search, or request_quote's own first call) logs
+  // with no email/session at all, since there's nothing to tie it to yet.
+  const logGuestActivity = async (toolName, outcome, sessionToken, rawEmail) => {
+    let email = rawEmail || null;
+    if (!email && sessionToken) {
+      const session = await client.db('Need').collection('McpGuestSessions')
+        .findOne({ sessionToken }, { projection: { email: 1 } }).catch(() => null);
+      email = session?.email || null;
+    }
+    client.db('Need').collection('GuestMcpActivityLog').insertOne({
+      sessionToken: sessionToken || null, email, tool: toolName, outcome, at: new Date(),
+    }).catch(() => {});
+  };
+
   const registerLoggedTool = (name, config, handler) => {
     server.registerTool(name, config, async (...args) => {
+      const input = args[0] || {};
       try {
         const result = await handler(...args);
-        logActivity(name, result?.isError ? 'denied' : 'success');
+        const outcome = result?.isError ? 'denied' : 'success';
+        if (userId) logActivity(name, outcome);
+        else logGuestActivity(name, outcome, input.sessionToken, input.email);
         return result;
       } catch (err) {
-        logActivity(name, 'error');
+        if (userId) logActivity(name, 'error');
+        else logGuestActivity(name, 'error', input.sessionToken, input.email);
         throw err;
       }
     });
@@ -89,7 +114,12 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
   registerLoggedTool('get_business', {
     title: 'Get business profile',
     description: 'Fetch a Needs business or restaurant profile by its slug: name, category, services, pricing (with a disclaimer that it is an estimate, not a binding quote), hours/availability, and contact info.',
-    inputSchema: { slug: z.string().describe('The business slug, e.g. "example-technology-business-law-firm"') },
+    inputSchema: {
+      slug: z.string().describe('The business slug, e.g. "example-technology-business-law-firm"'),
+      sessionToken: userId
+        ? z.string().optional().describe('Not applicable for an authenticated user')
+        : z.string().optional().describe('If you have one from a previous request_quote/ask_business call in this conversation, pass it along - purely so this lookup is recorded as part of the same conversation. Has no effect on the result either way.'),
+    },
   }, async ({ slug }) => {
     if (userId && !hasScope('search')) return scopeDeniedText('search businesses');
     const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/profile`);
@@ -123,6 +153,9 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
     inputSchema: {
       query: z.string().describe('Search text, e.g. "lawyer", "plumber", "italian restaurant"'),
       limit: z.number().int().min(1).max(25).optional().describe('Max results (default 10)'),
+      sessionToken: userId
+        ? z.string().optional().describe('Not applicable for an authenticated user')
+        : z.string().optional().describe('If you have one from a previous request_quote/ask_business call in this conversation, pass it along - purely so this search is recorded as part of the same conversation. Has no effect on the results either way.'),
     },
   }, async ({ query, limit }) => {
     if (userId && !hasScope('search')) return scopeDeniedText('search businesses');
@@ -166,6 +199,9 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to ask'),
+      sessionToken: userId
+        ? z.string().optional().describe('Not applicable for an authenticated user')
+        : z.string().optional().describe('If you have one from a previous request_quote/ask_business call in this conversation, pass it along - purely so this is recorded as part of the same conversation. Has no effect on the result either way.'),
     },
   }, async ({ slug, question }) => {
     if (userId && !hasScope('search')) return scopeDeniedText('ask businesses general questions');

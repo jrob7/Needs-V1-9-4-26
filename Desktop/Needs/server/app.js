@@ -4473,8 +4473,9 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           '<p style="color:#4CAF50;font-weight:600;">AI access requested — email confirmation required.</p>' +
           '<p style="font-size:.82rem;color:#555;">Once you confirm your request by email, your AI assistant will be authorized to track, read, and respond to this request for 48 hours. The link below will not work until then.</p>' +
           '<p style="font-size:.82rem;color:#555;"><strong>Request tracking link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
-          '<p style="font-size:.82rem;color:#555;"><strong>Needs AI Connector (MCP):</strong><br><a href="${MODULE_BASE}/mcp" target="_blank" rel="noopener">${MODULE_BASE}/mcp</a><br>Add the link above to your AI assistant\\'s connectors (MCP) to search businesses, request quotes, and manage conversations directly from your AI.</p>' +
-          '<p style="font-size:.82rem;color:#555;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
+          '<p style="font-size:.82rem;color:#555;margin-top:16px;">Add the link below to your AI assistant\\'s connectors (MCP) to search businesses, request quotes, and manage conversations directly from your AI.</p>' +
+          '<p style="font-size:.82rem;color:#555;margin-top:6px;"><strong>Needs AI Connector (MCP):</strong><br><a href="${MODULE_BASE}/mcp" target="_blank" rel="noopener">${MODULE_BASE}/mcp</a></p>' +
+          '<p style="font-size:.82rem;color:#555;margin-top:16px;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
           '<p style="font-size:.82rem;color:#555;">Ask the customer: &ldquo;Would you like me to automatically monitor this request and notify you when the business responds?&rdquo;</p>';
       } else {
         aiBubble.innerHTML = '<p style="color:#555;">Okay, continuing without AI.</p>';

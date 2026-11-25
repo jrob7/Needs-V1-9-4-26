@@ -3122,7 +3122,18 @@ const GUEST_SESSION_MAX_REQUESTS = 5;
 async function getActiveGuestSession(sessionToken) {
   if (!sessionToken) return null;
   const session = await database.collection('McpGuestSessions').findOne({ sessionToken });
-  if (!session || !session.confirmed || session.requestCount >= GUEST_SESSION_MAX_REQUESTS || session.expiresAt < new Date()) {
+  if (!session || !session.confirmed) return null;
+  const lapsed = session.requestCount >= GUEST_SESSION_MAX_REQUESTS || session.expiresAt < new Date();
+  if (lapsed) {
+    // Fires once (guarded by expiredNotified, reset on extend) - same
+    // pattern as sendAiAccessExpiredEmail for the tracking link's own
+    // 48-hour window. Lazy: there's no persistent page for a guest session
+    // to "visit" and trigger this, so the next attempted use of the
+    // now-lapsed token is what notices it and sends the one notice.
+    if (!session.expiredNotified) {
+      sendGuestSessionExpiredEmail(session).catch(e => console.warn('⚠️ sendGuestSessionExpiredEmail failed:', e?.message));
+      await database.collection('McpGuestSessions').updateOne({ _id: session._id }, { $set: { expiredNotified: true } });
+    }
     return null;
   }
   return session;
@@ -3132,10 +3143,29 @@ async function createGuestSession(email, firstName) {
   const sessionToken = crypto.randomBytes(16).toString('hex');
   await database.collection('McpGuestSessions').insertOne({
     sessionToken, email, firstName: firstName || null,
-    confirmed: false, requestCount: 0,
+    confirmed: false, requestCount: 0, expiredNotified: false,
     createdAt: new Date(), expiresAt: new Date(Date.now() + GUEST_SESSION_MS),
   });
   return sessionToken;
+}
+
+// The guest's own email gets a one-click "want 5 more requests over
+// another 48 hours?" link - reuses the exact same sessionToken rather than
+// minting a new one, so whatever the AI already has from earlier in the
+// conversation just starts working again the moment this is clicked,
+// instead of requiring the guest to relay a brand-new token back to it.
+async function sendGuestSessionExpiredEmail(session) {
+  if (!session.email) return;
+  await sendEmail({
+    to: session.email,
+    subject: `Continue using your AI assistant with Needs?`,
+    html: `
+      <p>Your AI assistant's session with Needs has ended - either 48 hours have passed, or it reached the 5-request limit for this session.</p>
+      <p>Click below to allow it 5 more requests over another 48 hours, without needing to confirm by email again for each one.</p>
+      <p><a href="${NODE_API}/mcpGuestSession/${session.sessionToken}/extend" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Extend Session</a></p>
+      <p style="color:#94A3B8;font-size:.85rem;">If you don't want this, you can safely ignore this email - nothing happens unless you click the link above.</p>
+    `,
+  });
 }
 
 // Called from the two email-confirm routes once the underlying pending
@@ -3615,6 +3645,39 @@ app.post('/trackRequest/:trackingKey/extendAiAccess', aiAuthLimiter, async (req,
     res.send(renderConfirmPage(true, 'AI access has been extended 24 hours.'));
   } catch (err) {
     console.error('❌ POST /trackRequest/:trackingKey/extendAiAccess error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+
+// GET/POST /mcpGuestSession/:sessionToken/extend — the link in the "your AI
+// session ended" email. Side-effect-free GET, real extension only on POST -
+// same discipline as every other guest action page. Reuses the same
+// sessionToken rather than minting a new one, same reasoning as the
+// tracking link's own extendAiAccess reusing its trackingKey.
+app.get('/mcpGuestSession/:sessionToken/extend', aiAuthLimiter, async (req, res) => {
+  try {
+    const session = await database.collection('McpGuestSessions').findOne({ sessionToken: req.params.sessionToken });
+    if (!session) return res.status(404).send(renderConfirmPage(false, 'This session could not be found.'));
+    res.send(renderClickToConfirmPage(
+      'Extend Your AI Session?',
+      `<p>This allows your AI assistant 5 more requests to Needs businesses over another 48 hours, without a fresh email confirmation for each one.</p>`,
+      `/mcpGuestSession/${encodeURIComponent(req.params.sessionToken)}/extend`
+    ));
+  } catch (err) {
+    console.error('❌ GET /mcpGuestSession/:sessionToken/extend error:', err);
+    res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
+  }
+});
+app.post('/mcpGuestSession/:sessionToken/extend', aiAuthLimiter, async (req, res) => {
+  try {
+    const result = await database.collection('McpGuestSessions').updateOne(
+      { sessionToken: req.params.sessionToken },
+      { $set: { requestCount: 0, expiresAt: new Date(Date.now() + GUEST_SESSION_MS), expiredNotified: false } }
+    );
+    if (result.matchedCount === 0) return res.status(404).send(renderConfirmPage(false, 'This session could not be found.'));
+    res.send(renderConfirmPage(true, 'Your AI session has been extended for 5 more requests over the next 48 hours.'));
+  } catch (err) {
+    console.error('❌ POST /mcpGuestSession/:sessionToken/extend error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
   }
 });

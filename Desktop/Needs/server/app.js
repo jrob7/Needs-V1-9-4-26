@@ -4575,10 +4575,14 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         var aiTrackUrl = '${NODE_API}/trackRequest/' + aiTrackingKey;
         aiBubble.innerHTML =
           '<p style="color:#4CAF50;font-weight:600;">AI access requested — email confirmation required.</p>' +
-          '<p style="font-size:.82rem;color:#555;">Once you confirm your request by email, your AI assistant will be authorized to track, read, and respond to this request for 48 hours. The link below will not work until then.</p>' +
-          '<p style="font-size:.82rem;color:#555;"><strong>Request tracking link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
-          '<p style="font-size:.82rem;color:#555;margin-top:16px;">Add the link below to your AI assistant\\'s connectors (MCP) so it can search businesses and submit new requests for you next time. It won\\'t track or manage this current request - use the tracking link above for that.</p>' +
+          '<p style="font-size:.82rem;color:#555;"><strong>1. AI Access for This Request</strong></p>' +
+          '<p style="font-size:.82rem;color:#555;">Once you confirm your request by email, your AI assistant will be authorized to track, read, and respond to this request for 48 hours.</p>' +
+          '<p style="font-size:.82rem;color:#555;">Share the tracking link below with your AI assistant so it can monitor your request and notify you when the business responds. Access will activate after email confirmation.</p>' +
+          '<p style="font-size:.82rem;color:#555;"><strong>Request Tracking Link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
+          '<p style="font-size:.82rem;color:#555;margin-top:16px;"><strong>2. Connect Your AI to Needs (Optional)</strong></p>' +
+          '<p style="font-size:.82rem;color:#555;">Want to use your AI assistant for future requests? Add the Needs AI Connector below to your AI assistant\\'s connectors (MCP) to discover businesses, ask questions, and request personalized quotes directly from your AI.</p>' +
           '<p style="font-size:.82rem;color:#555;margin-top:6px;"><strong>Needs AI Connector (MCP):</strong><br><a href="${MODULE_BASE}/mcp" target="_blank" rel="noopener">${MODULE_BASE}/mcp</a></p>' +
+          '<p style="font-size:.82rem;color:#555;">To manage your current request, continue using the tracking link above.</p>' +
           '<p style="font-size:.82rem;color:#555;margin-top:16px;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
           '<p style="font-size:.82rem;color:#555;">Ask the customer: &ldquo;Would you like me to automatically monitor this request and notify you when the business responds?&rdquo;</p>';
       } else {

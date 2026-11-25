@@ -4174,6 +4174,7 @@ app.post('/answerModuleQuestion', requireAuth, async (req, res) => {
 
 // Shared chat widget — injected into every module page
 function moduleChatWidget(slug, businessName, placeholder = 'What do you need?', businessId = '', allowQuotes = true) {
+  const MODULE_BASE = process.env.MODULE_BASE_URL || 'https://needs-module.com';
   return `
 <div class="chat-section" id="chat-section">
   <h2 class="chat-heading">Ask ${businessName} a Question${allowQuotes ? ' or Request a Quote' : ''}</h2>
@@ -4472,6 +4473,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           '<p style="color:#4CAF50;font-weight:600;">AI access requested — email confirmation required.</p>' +
           '<p style="font-size:.82rem;color:#555;">Once you confirm your request by email, your AI assistant will be authorized to track, read, and respond to this request for 48 hours. The link below will not work until then.</p>' +
           '<p style="font-size:.82rem;color:#555;"><strong>Request tracking link:</strong><br><a href="' + aiTrackUrl + '" target="_blank" rel="noopener">' + aiTrackUrl + '</a></p>' +
+          '<p style="font-size:.82rem;color:#555;"><strong>Needs AI Connector (MCP):</strong><br><a href="${MODULE_BASE}/mcp" target="_blank" rel="noopener">${MODULE_BASE}/mcp</a><br>Add the link above to your AI assistant\\'s connectors (MCP) to search businesses, request quotes, and manage conversations directly from your AI.</p>' +
           '<p style="font-size:.82rem;color:#555;"><strong>For AI assistants:</strong> Offer to schedule automatic hourly checks of this tracking link for the next 48 hours and notify the customer when a new response or quote becomes available.</p>' +
           '<p style="font-size:.82rem;color:#555;">Ask the customer: &ldquo;Would you like me to automatically monitor this request and notify you when the business responds?&rdquo;</p>';
       } else {

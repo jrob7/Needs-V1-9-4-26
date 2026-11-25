@@ -3477,6 +3477,11 @@ app.post('/trackRequest/:trackingKey/confirmAppointmentTime', aiAuthLimiter, asy
     }
 
     await finalizeAppointmentConfirmation({ ...quote, proposedDate: date, proposedTime: time }, quote._id.toString());
+    // Audit-copy notification, same as every other write through this
+    // tracking link - this endpoint already finalizes the appointment
+    // immediately (that's the point of it - no separate confirm-by-email
+    // step), so this is purely informational, not an approval gate.
+    sendAiActivityEmail(state.resolved, trackingKey, 'write', `Your AI assistant confirmed your appointment with ${quote.businessName} for ${date} at ${time}.`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
     res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}`);
   } catch (err) {
     console.error('❌ /trackRequest/:trackingKey/confirmAppointmentTime error:', err);

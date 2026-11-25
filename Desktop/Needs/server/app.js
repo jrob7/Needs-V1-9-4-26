@@ -2361,16 +2361,10 @@ app.post('/m/:slug/chat', async (req, res) => {
 app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
     const { slug } = req.params;
-    const { question, email, firstName, enableAiAccess } = req.body || {};
+    const { question, email, firstName, enableAiAccess, sessionToken } = req.body || {};
     if (!question) return res.status(400).json({ error: 'question required' });
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'A valid email is required' });
-    }
-    if (!firstName || !String(firstName).trim()) {
-      return res.status(400).json({ error: 'A first name is required' });
-    }
 
-    const moderation = await moderateText(`Name: ${firstName}\nMessage: ${question}`);
+    const moderation = await moderateText(`Name: ${firstName || ''}\nMessage: ${question}`);
     if (moderation.blocked) {
       console.warn('⚠️ /m/:slug/askBusiness blocked by moderation, slug:', slug);
       return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
@@ -2387,16 +2381,42 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
       : type === 'nonprofit' ? doc.orgName
       : (doc.businessName || doc.providerName);
 
+    // Session-skip path - see /requestQuote for the full explanation. Same
+    // rule here: only the first question in a conversation ever requires
+    // its own fresh email confirmation.
+    const activeSession = await getActiveGuestSession(sessionToken);
+    if (activeSession) {
+      const instantTrackingKey = crypto.randomBytes(16).toString('hex');
+      await finalizeGuestModuleQuestion({
+        email: activeSession.email, firstName: activeSession.firstName,
+        question: String(question).slice(0, 1000), slug, businessId: doc._id, businessType: type, businessName,
+        trackingKey: instantTrackingKey, aiAccessRequested: enableAiAccess === true,
+      });
+      await database.collection('McpGuestSessions').updateOne({ _id: activeSession._id }, { $inc: { requestCount: 1 } });
+      return res.json({
+        success: true, instant: true, trackingKey: instantTrackingKey, sessionToken,
+        message: `Sent immediately to ${businessName} - no email confirmation needed this time, since you already confirmed earlier in this conversation.`,
+      });
+    }
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'A valid email is required' });
+    }
+    if (!firstName || !String(firstName).trim()) {
+      return res.status(400).json({ error: 'A first name is required' });
+    }
+
     const token = crypto.randomBytes(24).toString('hex');
     // See /requestQuote for why this is separate from the email-confirm
     // token - a durable reference an MCP/AI caller can check status with
     // later, including in a different conversation, without needing email.
     const trackingKey = crypto.randomBytes(16).toString('hex');
+    const newSessionToken = await createGuestSession(email, firstName);
     await db.collection('PendingModuleQuestions').insertOne({
       slug, businessId: doc._id, businessType: type, businessName,
       question: String(question).slice(0, 1000), email,
       firstName: String(firstName).trim().slice(0, 80),
-      token, trackingKey,
+      token, trackingKey, sessionToken: newSessionToken,
       // Set directly here when an MCP-calling AI states its own preference
       // (see mcp.js ask_business) - the guest module widget instead sets
       // this afterward via POST /trackRequest/:trackingKey/aiAccess, since
@@ -2417,7 +2437,7 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
       `,
     });
 
-    res.json({ success: true, message: 'Check your email to confirm before your question is sent.', trackingKey });
+    res.json({ success: true, message: 'Check your email to confirm before your question is sent.', trackingKey, sessionToken: newSessionToken });
   } catch (err) {
     console.error('❌ /m/:slug/askBusiness error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -2456,70 +2476,16 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
     if (!pending) return res.status(404).send(renderConfirmPage(false, 'This confirmation link is invalid or has already been used.'));
     if (pending.confirmedAt) return res.send(renderConfirmPage(true, 'This question was already confirmed and sent.'));
 
-    let user = await database.collection('Users').findOne({ email: pending.email });
-    let userId;
-    if (user) {
-      userId = user._id;
-    } else {
-      const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
-      const result = await database.collection('Users').insertOne({
-        firstName: pending.firstName || null, lastName: null, organization: null, email: pending.email,
-        password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
-        accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
-        cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
-        recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
-      });
-      userId = result.insertedId;
-    }
-
-    const businessDoc = pending.businessType === 'service'
-      ? await database.collection('Services').findOne({ _id: pending.businessId })
-      : pending.businessType === 'nonprofit'
-      ? await database.collection('Nonprofits').findOne({ _id: pending.businessId })
-      : null;
-
-    if (businessDoc?.userId) {
-      await database.collection('Notifications').insertOne({
-        userId: businessDoc.userId,
-        fromUserId: userId,
-        type: 'module_question',
-        title: '💬 New Question',
-        body: pending.question,
-        question: pending.question,
-        askerEmail: pending.email,
-        askerName: pending.firstName || null,
-        businessId: pending.businessId,
-        businessType: pending.businessType,
-        trackingKey: pending.trackingKey || null,
-        messages: [{ from: 'guest', text: pending.question, at: new Date() }],
-        needsReply: true,
-        read: false,
-        answered: false,
-        createdAt: new Date(),
-      });
-    } else {
-      // Restaurants (or any business without a linked userId) fall back to
-      // the plain record — no Activity-tab surface for them yet.
-      await database.collection('ModuleQuestions').insertOne({
-        slug: pending.slug, businessId: pending.businessId, businessName: pending.businessName,
-        type: pending.businessType, question: pending.question, contactEmail: pending.email,
-        trackingKey: pending.trackingKey || null,
-        createdAt: new Date(),
-      });
-    }
+    await finalizeGuestModuleQuestion({
+      email: pending.email, firstName: pending.firstName, question: pending.question,
+      slug: pending.slug, businessId: pending.businessId, businessType: pending.businessType,
+      businessName: pending.businessName, trackingKey: pending.trackingKey, aiAccessRequested: pending.aiAccessRequested,
+    });
 
     await database.collection('PendingModuleQuestions').updateOne(
       { _id: pending._id }, { $set: { confirmedAt: new Date() } }
     );
-
-    // Best-effort - activateAiAccessIfRequested safely no-ops (and
-    // resolveAiRequestByTrackingKey can return null) for a request type it
-    // can't resolve yet, e.g. a restaurant with no in-app reply flow at
-    // all, which was never in scope for the AI-authorization system.
-    if (pending.trackingKey) {
-      const resolved = await resolveAiRequestByTrackingKey(pending.trackingKey).catch(() => null);
-      if (resolved) await activateAiAccessIfRequested(pending, pending.trackingKey, resolved).catch(e => console.warn('⚠️ activateAiAccessIfRequested failed:', e?.message));
-    }
+    await activateGuestSession(pending.sessionToken);
 
     res.send(renderConfirmPage(true, `Your question has been sent to ${escapeHtml(pending.businessName)}. They will respond soon.`));
   } catch (err) {
@@ -3122,6 +3088,144 @@ async function activateAiAccessIfRequested(pending, trackingKey, resolved) {
     }, $setOnInsert: { createdAt: new Date() } },
     { upsert: true }
   );
+}
+
+// A lightweight, email-confirmed "trust window" for a guest using the MCP
+// connector (see mcp.js request_quote/ask_business) - not a login, just lets
+// the *first* request's email confirmation cover up to 5 total submissions
+// (quote requests or questions, combined) over 48 hours, instead of
+// requiring a fresh email click for every single one. The session is
+// permanently locked to the one email that actually got confirmed:
+// finalizeGuestQuoteRequest/finalizeGuestModuleQuestion always use the
+// session's own stored identity on the instant path, never anything freshly
+// supplied by the caller, so there's no way to swap in a different,
+// unconfirmed person mid-session. The very first request in any session
+// still always requires its own real email confirmation - this only ever
+// saves the 2nd-5th click, not the 1st.
+const GUEST_SESSION_MS = 48 * 60 * 60 * 1000;
+const GUEST_SESSION_MAX_REQUESTS = 5;
+
+async function getActiveGuestSession(sessionToken) {
+  if (!sessionToken) return null;
+  const session = await database.collection('McpGuestSessions').findOne({ sessionToken });
+  if (!session || !session.confirmed || session.requestCount >= GUEST_SESSION_MAX_REQUESTS || session.expiresAt < new Date()) {
+    return null;
+  }
+  return session;
+}
+
+async function createGuestSession(email, firstName) {
+  const sessionToken = crypto.randomBytes(16).toString('hex');
+  await database.collection('McpGuestSessions').insertOne({
+    sessionToken, email, firstName: firstName || null,
+    confirmed: false, requestCount: 0,
+    createdAt: new Date(), expiresAt: new Date(Date.now() + GUEST_SESSION_MS),
+  });
+  return sessionToken;
+}
+
+// Called from the two email-confirm routes once the underlying pending
+// request is actually confirmed - this is the one moment a session is
+// allowed to start skipping confirmation on future requests.
+async function activateGuestSession(sessionToken) {
+  if (!sessionToken) return;
+  await database.collection('McpGuestSessions').updateOne({ sessionToken }, { $set: { confirmed: true } });
+}
+
+// Shared by /confirmQuoteRequest/:token (email-click path) and
+// /requestQuote's instant-session path - the actual "create the real
+// request" logic is identical either way, only how permission to run it was
+// obtained differs (an email click vs. an already-confirmed MCP session).
+async function finalizeGuestQuoteRequest({ email, firstName, description, serviceId, trackingKey, aiAccessRequested }) {
+  let user = await database.collection('Users').findOne({ email });
+  let userId;
+  if (user) {
+    userId = user._id;
+  } else {
+    const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
+    const result = await database.collection('Users').insertOne({
+      firstName: firstName || null, lastName: null, organization: null, email,
+      password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
+      accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
+      cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
+      recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
+    });
+    userId = result.insertedId;
+  }
+
+  const needResult = await database.collection('NeedRequests').insertOne({
+    searchText: description, urgency: 'ASAP', bidprice: 0,
+    context: description, needType: 'service', userId,
+    serviceMatchStatus: 'processing', mediaType: null, mediaUri: null, fileName: 'media',
+    trackingKey: trackingKey || null,
+    date: new Date(), createdAt: new Date(),
+  });
+
+  if (trackingKey) {
+    const resolved = await resolveAiRequestByTrackingKey(trackingKey).catch(() => null);
+    if (resolved) await activateAiAccessIfRequested({ aiAccessRequested }, trackingKey, resolved).catch(e => console.warn('⚠️ activateAiAccessIfRequested failed:', e?.message));
+  }
+
+  // Reuse the existing matching pipeline exactly as the normal in-app flow does
+  fetch(`${NODE_API}/triggerServiceMatching`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ needId: needResult.insertedId.toString(), userId: userId.toString(), query: description }),
+  }).catch(e => console.warn('⚠️ triggerServiceMatching call failed:', e?.message));
+
+  return { userId, needId: needResult.insertedId };
+}
+
+// Shared by /confirmModuleQuestion/:token (email-click path) and
+// /m/:slug/askBusiness's instant-session path - same relationship as
+// finalizeGuestQuoteRequest above.
+async function finalizeGuestModuleQuestion({ email, firstName, question, slug, businessId, businessType, businessName, trackingKey, aiAccessRequested }) {
+  let user = await database.collection('Users').findOne({ email });
+  let userId;
+  if (user) {
+    userId = user._id;
+  } else {
+    const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
+    const result = await database.collection('Users').insertOne({
+      firstName: firstName || null, lastName: null, organization: null, email,
+      password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
+      accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
+      cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
+      recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
+    });
+    userId = result.insertedId;
+  }
+
+  const businessDoc = businessType === 'service'
+    ? await database.collection('Services').findOne({ _id: businessId })
+    : businessType === 'nonprofit'
+    ? await database.collection('Nonprofits').findOne({ _id: businessId })
+    : null;
+
+  if (businessDoc?.userId) {
+    await database.collection('Notifications').insertOne({
+      userId: businessDoc.userId, fromUserId: userId, type: 'module_question',
+      title: '💬 New Question', body: question, question, askerEmail: email, askerName: firstName || null,
+      businessId, businessType, trackingKey: trackingKey || null,
+      messages: [{ from: 'guest', text: question, at: new Date() }],
+      needsReply: true, read: false, answered: false, createdAt: new Date(),
+    });
+  } else {
+    // Restaurants (or any business without a linked userId) fall back to
+    // the plain record — no Activity-tab surface for them yet.
+    await database.collection('ModuleQuestions').insertOne({
+      slug: slug || null, businessId, businessName,
+      type: businessType, question, contactEmail: email,
+      trackingKey: trackingKey || null, createdAt: new Date(),
+    });
+  }
+
+  if (trackingKey) {
+    const resolved = await resolveAiRequestByTrackingKey(trackingKey).catch(() => null);
+    if (resolved) await activateAiAccessIfRequested({ aiAccessRequested }, trackingKey, resolved).catch(e => console.warn('⚠️ activateAiAccessIfRequested failed:', e?.message));
+  }
+
+  return { userId };
 }
 
 // Fires once (guarded by expiredNotified, reset on extend) when access is
@@ -6605,14 +6709,13 @@ function renderConversationPage(businessName, messages, trackingKey) {
 // POST /requestQuote — body: { businessId, description, email, firstName }
 app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
-    const { businessId, description, email, firstName, enableAiAccess } = req.body || {};
-    if (!businessId || !description || !email || !firstName) {
-      return res.status(400).json({ error: 'businessId, description, email, and firstName are required' });
+    const { businessId, description, email, firstName, enableAiAccess, sessionToken } = req.body || {};
+    if (!businessId || !description) {
+      return res.status(400).json({ error: 'businessId and description are required' });
     }
     if (!ObjectId.isValid(businessId)) return res.status(400).json({ error: 'Invalid businessId' });
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
 
-    const moderation = await moderateText(`Name: ${firstName}\nMessage: ${description}`);
+    const moderation = await moderateText(`Name: ${firstName || ''}\nMessage: ${description}`);
     if (moderation.blocked) {
       console.warn('⚠️ /requestQuote blocked by moderation, businessId:', businessId);
       return res.status(400).json({ error: MODERATION_BLOCKED_MESSAGE });
@@ -6621,6 +6724,30 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
     const service = await database.collection('Services').findOne({ _id: new ObjectId(businessId) });
     if (!service) return res.status(404).json({ error: 'Business not found' });
 
+    // Session-skip path: a prior request in this same MCP conversation
+    // already had its email confirmed, and this one is still within that
+    // session's 48-hour/5-request allowance - send immediately, using the
+    // session's own locked-in identity, never whatever name/email this call
+    // happens to also pass.
+    const activeSession = await getActiveGuestSession(sessionToken);
+    if (activeSession) {
+      const instantTrackingKey = crypto.randomBytes(16).toString('hex');
+      await finalizeGuestQuoteRequest({
+        email: activeSession.email, firstName: activeSession.firstName,
+        description, serviceId: service._id, trackingKey: instantTrackingKey,
+        aiAccessRequested: enableAiAccess === true,
+      });
+      await database.collection('McpGuestSessions').updateOne({ _id: activeSession._id }, { $inc: { requestCount: 1 } });
+      const sentToName = service.businessName || service.providerName || 'the business';
+      return res.json({
+        success: true, instant: true, trackingKey: instantTrackingKey, sessionToken,
+        message: `Sent immediately to ${sentToName} - no email confirmation needed this time, since you already confirmed earlier in this conversation.`,
+      });
+    }
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
+    if (!firstName) return res.status(400).json({ error: 'businessId, description, email, and firstName are required' });
+
     const token = crypto.randomBytes(24).toString('hex');
     // Separate from the email-confirm token above: a durable reference an
     // MCP/AI caller gets back immediately (see mcp.js) so it can check on
@@ -6628,6 +6755,10 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
     // needing to know the requester's email. Unguessable, so possession of
     // it is itself proof of having made the original request.
     const trackingKey = crypto.randomBytes(16).toString('hex');
+    // A new, not-yet-confirmed guest session - stored on the pending record
+    // so the confirm route below can activate it once this first request is
+    // actually clicked. Inert until then; see getActiveGuestSession.
+    const newSessionToken = await createGuestSession(email, firstName);
     await database.collection('PendingQuoteRequests').insertOne({
       serviceId: new ObjectId(businessId),
       description: String(description).slice(0, 2000),
@@ -6635,6 +6766,7 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
       firstName: String(firstName).trim().slice(0, 80),
       token,
       trackingKey,
+      sessionToken: newSessionToken,
       // Set directly here when an MCP-calling AI states its own preference
       // (see mcp.js request_quote) - the guest module widget instead sets
       // this afterward via POST /trackRequest/:trackingKey/aiAccess, since
@@ -6663,7 +6795,7 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
     res.json({
       success: true, skipped: !!emailResult?.skipped,
       message: 'Check your email to confirm your request before it is sent to the business.',
-      trackingKey,
+      trackingKey, sessionToken: newSessionToken,
     });
   } catch (err) {
     console.error('❌ /requestQuote error:', err);
@@ -6713,54 +6845,20 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
       return res.send(renderConfirmPage(true, 'This request was already confirmed and sent.'));
     }
 
-    // Find or create a lightweight account tied to this email so the
-    // request flows through the existing matching/quote system unchanged.
-    let user = await database.collection('Users').findOne({ email: pending.email });
-    let userId;
-    if (user) {
-      userId = user._id;
-    } else {
-      const randomPassword = crypto.randomBytes(16).toString('hex');
-      const hashedPassword = await bcrypt.hash(randomPassword, 12);
-      const result = await database.collection('Users').insertOne({
-        firstName: pending.firstName || null, lastName: null, organization: null, email: pending.email,
-        password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
-        accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
-        cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
-        recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
-      });
-      userId = result.insertedId;
-    }
-
     const service = await database.collection('Services').findOne({ _id: pending.serviceId });
 
-    const needResult = await database.collection('NeedRequests').insertOne({
-      searchText: pending.description, urgency: 'ASAP', bidprice: 0,
-      context: pending.description, needType: 'service', userId,
-      serviceMatchStatus: 'processing', mediaType: null, mediaUri: null, fileName: 'media',
-      trackingKey: pending.trackingKey || null,
-      date: new Date(), createdAt: new Date(),
+    await finalizeGuestQuoteRequest({
+      email: pending.email, firstName: pending.firstName, description: pending.description,
+      serviceId: pending.serviceId, trackingKey: pending.trackingKey, aiAccessRequested: pending.aiAccessRequested,
     });
 
     await database.collection('PendingQuoteRequests').updateOne(
       { _id: pending._id }, { $set: { confirmedAt: new Date() } }
     );
-
-    if (pending.trackingKey) {
-      const resolved = await resolveAiRequestByTrackingKey(pending.trackingKey).catch(() => null);
-      if (resolved) await activateAiAccessIfRequested(pending, pending.trackingKey, resolved).catch(e => console.warn('⚠️ activateAiAccessIfRequested failed:', e?.message));
-    }
-
-    // Reuse the existing matching pipeline exactly as the normal in-app flow does
-    fetch(`${NODE_API}/triggerServiceMatching`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        needId: needResult.insertedId.toString(),
-        userId: userId.toString(),
-        query: pending.description,
-      }),
-    }).catch(e => console.warn('⚠️ triggerServiceMatching call failed:', e?.message));
+    // This is the one moment this request's guest session is allowed to
+    // start skipping confirmation on future requests in the same
+    // conversation - see activateGuestSession/getActiveGuestSession.
+    await activateGuestSession(pending.sessionToken);
 
     const businessName = service?.businessName || service?.providerName || 'the business';
     res.send(renderConfirmPage(true, `Your request has been confirmed and sent to ${escapeHtml(businessName)}. They will reach out soon.`));

@@ -189,21 +189,24 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
     title: 'Request a quote',
     description: userId
       ? 'Send a quote request to a business as the authenticated Needs user. Sent immediately - no email confirmation needed, since this request is already authorized. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) about every hour until there is a response, then stop it.'
-      : "Send a quote request to a business on a visitor's behalf. Without authentication, the visitor's email is required and will receive a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's response happens entirely through the tracking link's own web page, not through this MCP connection - there is no polling tool for a guest request. If enableAiAccess is true (the default), that same tracking link becomes a live read/write chat for 48 hours once confirmed, with no key needed - ask the visitor first if they want that, and pass false if they say no. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      : "Send a quote request to a business on a visitor's behalf. The first request in a conversation needs the visitor's email and will send a confirmation link - nothing is sent to the business until they click it. This is a deliberate anti-spam/anti-impersonation step, not an extra round trip to skip. The result message will include a sessionToken once that first request is confirmed - pass it on later calls in this same conversation (up to 5 total within 48 hours) to skip the email step; omit it and a fresh confirmation is required again, same as the first time. The result message already explains what to do - relay it to them as written, do not shorten it away. Checking status later or reading the business's response happens entirely through the tracking link's own web page, not through this MCP connection. If enableAiAccess is true (the default), that same tracking link becomes a live read/write chat for 48 hours once confirmed, with no key needed - ask the visitor first if they want that, and pass false if they say no. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on every request permanently instead.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       description: z.string().describe('A description of what the visitor needs, in their own words'),
       name: userId
         ? z.string().optional().describe('Not needed - the request is sent as the authenticated user')
-        : z.string().describe("The visitor's first name, so the business can address them by name"),
+        : z.string().optional().describe("The visitor's first name - required on the first request in a conversation, not needed if a valid sessionToken is passed instead"),
       email: userId
         ? z.string().email().optional().describe('Not needed - the request is sent as the authenticated user')
-        : z.string().email().describe("The visitor's email address - they must confirm via a link sent there before this is sent to the business"),
+        : z.string().email().optional().describe("The visitor's email address - required on the first request in a conversation (they must confirm via a link sent there), not needed if a valid sessionToken is passed instead"),
       enableAiAccess: userId
         ? z.boolean().optional().describe('Not applicable for an authenticated user')
         : z.boolean().optional().describe('Whether this AI should get read/write access to the tracking link for 48 hours once the visitor confirms. Defaults to true - ask the visitor first and pass false if they decline.'),
+      sessionToken: userId
+        ? z.string().optional().describe('Not applicable for an authenticated user')
+        : z.string().optional().describe('Returned in the result of a previous request_quote/ask_business call in this same conversation, once that first request was confirmed by the visitor. Pass it to skip the email confirmation step on this call. Omit entirely on the first request of a conversation.'),
     },
-  }, async ({ slug, description, name, email, enableAiAccess }) => {
+  }, async ({ slug, description, name, email, enableAiAccess, sessionToken }) => {
     const db = client.db('Need');
     const service = await db.collection('Services').findOne({ slug }, { projection: { _id: 1 } });
     if (!service) return errorText('Business not found (or is a restaurant, which does not take quote requests)');
@@ -223,19 +226,26 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
       });
     }
 
-    if (!email) return errorText('email is required when not authenticated.');
-    if (!name) return errorText('name is required when not authenticated.');
+    if (!sessionToken && (!email || !name)) {
+      return errorText('email and name are required for the first request in a conversation (no sessionToken yet).');
+    }
     const aiAccess = enableAiAccess !== false;
     const resp = await fetch(`${NODE_API}/requestQuote`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ businessId: service._id.toString(), description, email, firstName: name, enableAiAccess: aiAccess }),
+      body: JSON.stringify({ businessId: service._id.toString(), description, email, firstName: name, enableAiAccess: aiAccess, sessionToken }),
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the quote request');
+
+    // Instant path (a still-active sessionToken was presented) - the
+    // server's own message is already self-contained, nothing to add.
+    if (data.instant) {
+      return text({ success: true, trackingKey: data.trackingKey, sessionToken: data.sessionToken, message: data.message });
+    }
     return text({
-      success: true, trackingKey: data.trackingKey,
-      message: withTrackingLinkNote(data.message, data.trackingKey, aiAccess),
+      success: true, trackingKey: data.trackingKey, sessionToken: data.sessionToken,
+      message: `${withTrackingLinkNote(data.message, data.trackingKey, aiAccess)} Once the visitor confirms this one, you can send up to 4 more requests in this same conversation (within 48 hours) by passing sessionToken: "${data.sessionToken}" to skip the email step each time.`,
     });
   });
 
@@ -243,21 +253,24 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
     title: 'Send a question directly to a business',
     description: userId
       ? "Send a question to a business as the authenticated Needs user, when it could not be answered from its public profile. Sent immediately - the business's answer will be delivered through the normal Needs notification flow. The result message already asks the user whether they want periodic status checks - relay it to them as written, do not shorten it away. If they say yes, set up a recurring task that calls check_my_requests(slug) about every hour until there is a response, then stop it."
-      : "Send a question to a business that could not be answered from its public profile. Without authentication, the visitor's email is required and will receive a confirmation link before the question is actually sent, and will later receive the business's answer by email. The result message already explains what happens next - relay it to them as written, do not shorten it away. Checking status later or reading the business's answer happens entirely through the tracking link's own web page, not through this MCP connection - there is no polling tool for a guest request. If enableAiAccess is true (the default), that same tracking link becomes a live read/write chat for 48 hours once confirmed, with no key needed - ask the visitor first if they want that, and pass false if they say no. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on future requests.",
+      : "Send a question to a business that could not be answered from its public profile. The first question in a conversation needs the visitor's email and will send a confirmation link before it's actually sent - will later receive the business's answer by email too. The result message will include a sessionToken once that first question is confirmed - pass it on later calls in this same conversation (up to 5 total within 48 hours) to skip the email step; omit it and a fresh confirmation is required again, same as the first time. The result message already explains what to do - relay it to them as written, do not shorten it away. Checking status later or reading the business's answer happens entirely through the tracking link's own web page, not through this MCP connection. If enableAiAccess is true (the default), that same tracking link becomes a live read/write chat for 48 hours once confirmed, with no key needed - ask the visitor first if they want that, and pass false if they say no. If the visitor has a Needs account, call get_sign_in_url first to skip the email step on every request permanently instead.",
     inputSchema: {
       slug: z.string().describe('The business slug'),
       question: z.string().describe('The question to send'),
       name: userId
         ? z.string().optional().describe('Not needed - the question is sent as the authenticated user')
-        : z.string().describe("The visitor's first name, so the business can address them by name"),
+        : z.string().optional().describe("The visitor's first name - required on the first question in a conversation, not needed if a valid sessionToken is passed instead"),
       email: userId
         ? z.string().email().optional().describe('Not needed - the question is sent as the authenticated user')
-        : z.string().email().describe("The visitor's email address"),
+        : z.string().email().optional().describe('The visitor\'s email address - required on the first question in a conversation, not needed if a valid sessionToken is passed instead'),
       enableAiAccess: userId
         ? z.boolean().optional().describe('Not applicable for an authenticated user')
         : z.boolean().optional().describe('Whether this AI should get read/write access to the tracking link for 48 hours once the visitor confirms. Defaults to true - ask the visitor first and pass false if they decline.'),
+      sessionToken: userId
+        ? z.string().optional().describe('Not applicable for an authenticated user')
+        : z.string().optional().describe('Returned in the result of a previous request_quote/ask_business call in this same conversation, once that first request was confirmed by the visitor. Pass it to skip the email confirmation step on this call. Omit entirely on the first request of a conversation.'),
     },
-  }, async ({ slug, question, name, email, enableAiAccess }) => {
+  }, async ({ slug, question, name, email, enableAiAccess, sessionToken }) => {
     if (userId) {
       if (!hasScope('request')) return scopeDeniedText('ask businesses questions');
       const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/authedAskBusiness`, {
@@ -273,19 +286,24 @@ function buildServer({ client, NODE_API, userId, clientId = null, scopes = null,
       });
     }
 
-    if (!email) return errorText('email is required when not authenticated.');
-    if (!name) return errorText('name is required when not authenticated.');
+    if (!sessionToken && (!email || !name)) {
+      return errorText('email and name are required for the first request in a conversation (no sessionToken yet).');
+    }
     const aiAccess = enableAiAccess !== false;
     const resp = await fetch(`${NODE_API}/m/${encodeURIComponent(slug)}/askBusiness`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, email, firstName: name, enableAiAccess: aiAccess }),
+      body: JSON.stringify({ question, email, firstName: name, enableAiAccess: aiAccess, sessionToken }),
     });
     const data = await resp.json();
     if (!resp.ok) return errorText(data.error || 'Could not send the question');
+
+    if (data.instant) {
+      return text({ success: true, trackingKey: data.trackingKey, sessionToken: data.sessionToken, message: data.message });
+    }
     return text({
-      success: true, trackingKey: data.trackingKey,
-      message: withTrackingLinkNote(data.message, data.trackingKey, aiAccess),
+      success: true, trackingKey: data.trackingKey, sessionToken: data.sessionToken,
+      message: `${withTrackingLinkNote(data.message, data.trackingKey, aiAccess)} Once the visitor confirms this one, you can send up to 4 more requests in this same conversation (within 48 hours) by passing sessionToken: "${data.sessionToken}" to skip the email step each time.`,
     });
   });
 

@@ -66,6 +66,56 @@ async function sendEmail({ to, subject, html, replyTo }) {
   return result;
 }
 
+// ── Text (Twilio) ────────────────────────────────────────────────────────────
+// Lazy/optional, same discipline as sendEmail above - a missing/unconfigured
+// Twilio account degrades to a no-op rather than crashing anything. Plain
+// REST call instead of the Twilio SDK - this is the one endpoint (send an
+// SMS) the app needs, not worth a whole dependency for.
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+const twilioConfigured = !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER);
+
+async function sendText({ to, body }) {
+  if (!twilioConfigured) {
+    console.warn('⚠️ sendText skipped — Twilio env vars not set');
+    return { skipped: true };
+  }
+  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+  const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+    method: 'POST',
+    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ To: to, From: TWILIO_PHONE_NUMBER, Body: body }),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    console.error('❌ Twilio send failed:', JSON.stringify(data));
+    return { error: data };
+  }
+  console.log('📱 Twilio send ok:', data.sid);
+  return data;
+}
+
+// Picks whichever contact method is actually on file - phone OR email,
+// never both (a guest/account picks one channel up front; see
+// resolveContactMethod below for how that's determined). SMS has no HTML,
+// so this builds a short plain-text version of the same message + link
+// instead of trying to share markup between the two channels.
+async function sendConfirmationNotice({ email, phone, subject, bodyText, linkUrl, linkLabel }) {
+  if (phone) {
+    const smsBody = linkUrl ? `${bodyText} ${linkLabel || 'Confirm'}: ${linkUrl}` : bodyText;
+    return sendText({ to: phone, body: smsBody });
+  }
+  if (email) {
+    const html = `
+      <p>${escapeHtml(bodyText)}</p>
+      ${linkUrl ? `<p><a href="${linkUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">${escapeHtml(linkLabel || 'Confirm')}</a></p>` : ''}
+    `;
+    return sendEmail({ to: email, subject, html });
+  }
+  return { skipped: true };
+}
+
 // Checks guest/requester-authored text for vulgar or sexually explicit
 // language before it reaches a business through a public module page.
 // Fails open: if the AI call itself errors or times out, the submission
@@ -221,8 +271,11 @@ const guestRequestEmailLimiter = rateLimit({
   limit: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => String(req.body?.email || '').trim().toLowerCase() || req.ip,
-  message: { error: 'rate_limited', error_description: 'Too many requests to this email address. Try again later.' },
+  // Phone replaces email, never both (see the guest session design), so
+  // this keys by whichever one was actually given - falls back to IP only
+  // if neither was (caught by validation downstream anyway).
+  keyGenerator: (req) => String(req.body?.email || req.body?.phone || '').trim().toLowerCase() || req.ip,
+  message: { error: 'rate_limited', error_description: 'Too many requests to this contact method. Try again later.' },
 });
 
 // trackingKeys are 128-bit random tokens, not practically guessable, but a
@@ -295,12 +348,12 @@ const mcpAccountLimiter = rateLimit({
             { _id: grant._id },
             { $set: { suspended: true, suspendedAt: new Date() } }
           );
-          const user = await database.collection('Users').findOne({ _id: new ObjectId(payload.userId) }, { projection: { email: 1 } });
-          if (user?.email) {
-            sendEmail({
-              to: user.email,
+          const user = await database.collection('Users').findOne({ _id: new ObjectId(payload.userId) }, { projection: { email: 1, phoneNumber: 1 } });
+          if (user?.email || user?.phoneNumber) {
+            sendConfirmationNotice({
+              email: user.email, phone: user.phoneNumber,
               subject: `A connected AI was suspended for unusual activity — Needs`,
-              html: `<p><strong>${escapeHtml(grant.clientName || 'A connected AI')}</strong> was automatically suspended after repeatedly making an unusually high number of requests in a short time. Nothing else on your account was changed. You can review or reconnect it from Account → Connected AI.</p>`,
+              bodyText: `${grant.clientName || 'A connected AI'} was automatically suspended after repeatedly making an unusually high number of requests in a short time. Nothing else on your account was changed. You can review or reconnect it from Account → Connected AI.`,
             }).catch(() => {});
           }
         }
@@ -2361,7 +2414,7 @@ app.post('/m/:slug/chat', async (req, res) => {
 app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
     const { slug } = req.params;
-    const { question, email, firstName, enableAiAccess, sessionToken } = req.body || {};
+    const { question, email, phone, firstName, enableAiAccess, sessionToken } = req.body || {};
     if (!question) return res.status(400).json({ error: 'question required' });
 
     const moderation = await moderateText(`Name: ${firstName || ''}\nMessage: ${question}`);
@@ -2388,7 +2441,7 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
     if (activeSession) {
       const instantTrackingKey = crypto.randomBytes(16).toString('hex');
       await finalizeGuestModuleQuestion({
-        email: activeSession.email, firstName: activeSession.firstName,
+        email: activeSession.email, phone: activeSession.phone, firstName: activeSession.firstName,
         question: String(question).slice(0, 1000), slug, businessId: doc._id, businessType: type, businessName,
         trackingKey: instantTrackingKey, aiAccessRequested: enableAiAccess === true,
       });
@@ -2397,38 +2450,42 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
       // confirmation click (that's the whole point of an active session),
       // so this is the only thing telling the guest it happened at all.
       // Same spirit as sendAiActivityEmail on the tracking link, just sent
-      // directly since the email is already known here.
-      sendEmail({
-        to: activeSession.email,
+      // directly since the contact method is already known here.
+      sendConfirmationNotice({
+        email: activeSession.email, phone: activeSession.phone,
         subject: `Your AI assistant sent a new question to ${businessName}`,
-        html: `
-          <p>Your AI assistant just sent a new question to <strong>${escapeHtml(businessName)}</strong>, using the email confirmation you already gave earlier in this conversation.</p>
-          <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${escapeHtml(question)}</p>
-          <p style="color:#94A3B8;font-size:.85rem;">Didn't expect this? This session allows up to 5 requests over 48 hours before requiring a fresh confirmation - ignore this if you're the one driving it.</p>
-        `,
-      }).catch(e => console.warn('⚠️ guest session instant-request email failed:', e?.message));
+        bodyText: `Your AI assistant just sent a new question to ${businessName}, using the confirmation you already gave earlier in this conversation: "${question}". Didn't expect this? This session allows up to 5 requests over 48 hours before requiring a fresh confirmation.`,
+      }).catch(e => console.warn('⚠️ guest session instant-request notice failed:', e?.message));
       return res.json({
         success: true, instant: true, trackingKey: instantTrackingKey, sessionToken,
-        message: `Sent immediately to ${businessName} - no email confirmation needed this time, since you already confirmed earlier in this conversation.`,
+        message: `Sent immediately to ${businessName} - no confirmation needed this time, since you already confirmed earlier in this conversation.`,
       });
     }
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'A valid email is required' });
+    const hasValidEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const hasPhone = phone && String(phone).trim();
+    if (!hasValidEmail && !hasPhone) {
+      return res.status(400).json({ error: 'A valid email or phone number is required' });
     }
     if (!firstName || !String(firstName).trim()) {
       return res.status(400).json({ error: 'A first name is required' });
     }
+    // Phone replaces email, never both - whichever one was actually given
+    // is the one single channel every confirm link and notice for this
+    // request/session goes to from here on.
+    const contactEmail = hasValidEmail ? email : null;
+    const contactPhone = !hasValidEmail && hasPhone ? String(phone).trim() : null;
 
     const token = crypto.randomBytes(24).toString('hex');
-    // See /requestQuote for why this is separate from the email-confirm
-    // token - a durable reference an MCP/AI caller can check status with
-    // later, including in a different conversation, without needing email.
+    // See /requestQuote for why this is separate from the confirm token -
+    // a durable reference an MCP/AI caller can check status with later,
+    // including in a different conversation, without needing the contact
+    // info again.
     const trackingKey = crypto.randomBytes(16).toString('hex');
-    const newSessionToken = await createGuestSession(email, firstName);
+    const newSessionToken = await createGuestSession({ email: contactEmail, phone: contactPhone, firstName });
     await db.collection('PendingModuleQuestions').insertOne({
       slug, businessId: doc._id, businessType: type, businessName,
-      question: String(question).slice(0, 1000), email,
+      question: String(question).slice(0, 1000), email: contactEmail, phone: contactPhone,
       firstName: String(firstName).trim().slice(0, 80),
       token, trackingKey, sessionToken: newSessionToken,
       // Set directly here when an MCP-calling AI states its own preference
@@ -2440,18 +2497,15 @@ app.post('/m/:slug/askBusiness', guestRequestLimiter, guestRequestEmailLimiter, 
     });
 
     const confirmUrl = `${NODE_API}/confirmModuleQuestion/${token}`;
-    await sendEmail({
-      to: email,
+    await sendConfirmationNotice({
+      email: contactEmail, phone: contactPhone,
       subject: `Confirm your question to ${businessName}`,
-      html: `
-        <p>You asked <strong>${businessName}</strong> a question on Needs:</p>
-        <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${question}</p>
-        <p><a href="${confirmUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Confirm and Send Question</a></p>
-        <p style="color:#94A3B8;font-size:.85rem;">If you did not ask this, you can safely ignore this email.</p>
-      `,
+      bodyText: `You asked ${businessName} a question on Needs: "${question}". If you did not ask this, you can safely ignore this - nothing happens unless you confirm.`,
+      linkUrl: confirmUrl,
+      linkLabel: 'Confirm and Send Question',
     });
 
-    res.json({ success: true, message: 'Check your email to confirm before your question is sent.', trackingKey, sessionToken: newSessionToken });
+    res.json({ success: true, message: `Check your ${contactPhone ? 'texts' : 'email'} to confirm before your question is sent.`, trackingKey, sessionToken: newSessionToken });
   } catch (err) {
     console.error('❌ /m/:slug/askBusiness error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -2491,7 +2545,7 @@ app.post('/confirmModuleQuestion/:token', async (req, res) => {
     if (pending.confirmedAt) return res.send(renderConfirmPage(true, 'This question was already confirmed and sent.'));
 
     await finalizeGuestModuleQuestion({
-      email: pending.email, firstName: pending.firstName, question: pending.question,
+      email: pending.email, phone: pending.phone, firstName: pending.firstName, question: pending.question,
       slug: pending.slug, businessId: pending.businessId, businessType: pending.businessType,
       businessName: pending.businessName, trackingKey: pending.trackingKey, aiAccessRequested: pending.aiAccessRequested,
     });
@@ -3072,18 +3126,22 @@ function isAiRequestOpen(resolved) {
   return (resolved.quotes || []).some(q => q.status !== 'appointment_confirmed');
 }
 
-// Looks up email + a display business name for either request type - the
-// shared lookup every email helper below needs.
+// Looks up the contact method (email or phone - whichever this guest
+// actually gave) + a display business name for either request type - the
+// shared lookup every notification helper below needs.
 async function aiAccessEmailContext(resolved) {
-  let email, businessName;
+  let email, phone, businessName;
   if (resolved.requestType === 'quote') {
-    email = (await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1 } }))?.email;
+    const requester = await database.collection('Users').findOne({ _id: resolved.need.userId }, { projection: { email: 1, phoneNumber: 1 } });
+    email = requester?.email;
+    phone = requester?.phoneNumber;
     businessName = (resolved.quotes || []).map(q => q.businessName).filter(Boolean).join(', ') || 'the matched businesses';
   } else {
     email = resolved.notification.askerEmail;
+    phone = resolved.notification.askerPhone;
     businessName = await resolveBusinessName(resolved.notification);
   }
-  return { email, businessName };
+  return { email, phone, businessName };
 }
 
 // Called right after a request is confirmed (see /confirmQuoteRequest,
@@ -3139,32 +3197,30 @@ async function getActiveGuestSession(sessionToken) {
   return session;
 }
 
-async function createGuestSession(email, firstName) {
+async function createGuestSession({ email, phone, firstName }) {
   const sessionToken = crypto.randomBytes(16).toString('hex');
   await database.collection('McpGuestSessions').insertOne({
-    sessionToken, email, firstName: firstName || null,
+    sessionToken, email: email || null, phone: phone || null, firstName: firstName || null,
     confirmed: false, requestCount: 0, expiredNotified: false,
     createdAt: new Date(), expiresAt: new Date(Date.now() + GUEST_SESSION_MS),
   });
   return sessionToken;
 }
 
-// The guest's own email gets a one-click "want 5 more requests over
-// another 48 hours?" link - reuses the exact same sessionToken rather than
-// minting a new one, so whatever the AI already has from earlier in the
-// conversation just starts working again the moment this is clicked,
-// instead of requiring the guest to relay a brand-new token back to it.
+// The guest's own email or phone (whichever they gave) gets a one-click
+// "want 5 more requests over another 48 hours?" notice - reuses the exact
+// same sessionToken rather than minting a new one, so whatever the AI
+// already has from earlier in the conversation just starts working again
+// the moment this is clicked, instead of requiring the guest to relay a
+// brand-new token back to it.
 async function sendGuestSessionExpiredEmail(session) {
-  if (!session.email) return;
-  await sendEmail({
-    to: session.email,
+  if (!session.email && !session.phone) return;
+  await sendConfirmationNotice({
+    email: session.email, phone: session.phone,
     subject: `Continue using your AI assistant with Needs?`,
-    html: `
-      <p>Your AI assistant's session with Needs has ended - either 48 hours have passed, or it reached the 5-request limit for this session.</p>
-      <p>Click below to allow it 5 more requests over another 48 hours, without needing to confirm by email again for each one.</p>
-      <p><a href="${NODE_API}/mcpGuestSession/${session.sessionToken}/extend" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Extend Session</a></p>
-      <p style="color:#94A3B8;font-size:.85rem;">If you don't want this, you can safely ignore this email - nothing happens unless you click the link above.</p>
-    `,
+    bodyText: `Your AI assistant's session with Needs has ended - either 48 hours have passed, or it reached the 5-request limit for this session. Tap below to allow it 5 more requests over another 48 hours, without confirming again for each one.`,
+    linkUrl: `${NODE_API}/mcpGuestSession/${session.sessionToken}/extend`,
+    linkLabel: 'Extend Session',
   });
 }
 
@@ -3176,26 +3232,34 @@ async function activateGuestSession(sessionToken) {
   await database.collection('McpGuestSessions').updateOne({ sessionToken }, { $set: { confirmed: true } });
 }
 
+// Shared by both finalize* helpers below and the module widget's own
+// authed-signup paths that used to inline this - finds or creates the
+// lightweight ghost account tied to whichever contact method the guest
+// actually gave (email or phone, never both - a guest picks one channel up
+// front), so the request flows through the existing matching/quote system
+// unchanged either way.
+async function findOrCreateGuestUser({ email, phone, firstName }) {
+  const lookup = email ? { email } : { phoneNumber: phone };
+  const existing = await database.collection('Users').findOne(lookup);
+  if (existing) return existing._id;
+  const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
+  const result = await database.collection('Users').insertOne({
+    firstName: firstName || null, lastName: null, organization: null,
+    email: email || null, phoneNumber: phone || null,
+    password: hashedPassword, streetAddress: null, zipcode: null,
+    accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
+    cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
+    recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
+  });
+  return result.insertedId;
+}
+
 // Shared by /confirmQuoteRequest/:token (email-click path) and
 // /requestQuote's instant-session path - the actual "create the real
 // request" logic is identical either way, only how permission to run it was
-// obtained differs (an email click vs. an already-confirmed MCP session).
-async function finalizeGuestQuoteRequest({ email, firstName, description, serviceId, trackingKey, aiAccessRequested }) {
-  let user = await database.collection('Users').findOne({ email });
-  let userId;
-  if (user) {
-    userId = user._id;
-  } else {
-    const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
-    const result = await database.collection('Users').insertOne({
-      firstName: firstName || null, lastName: null, organization: null, email,
-      password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
-      accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
-      cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
-      recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
-    });
-    userId = result.insertedId;
-  }
+// obtained differs (an email/text click vs. an already-confirmed MCP session).
+async function finalizeGuestQuoteRequest({ email, phone, firstName, description, serviceId, trackingKey, aiAccessRequested }) {
+  const userId = await findOrCreateGuestUser({ email, phone, firstName });
 
   const needResult = await database.collection('NeedRequests').insertOne({
     searchText: description, urgency: 'ASAP', bidprice: 0,
@@ -3223,22 +3287,8 @@ async function finalizeGuestQuoteRequest({ email, firstName, description, servic
 // Shared by /confirmModuleQuestion/:token (email-click path) and
 // /m/:slug/askBusiness's instant-session path - same relationship as
 // finalizeGuestQuoteRequest above.
-async function finalizeGuestModuleQuestion({ email, firstName, question, slug, businessId, businessType, businessName, trackingKey, aiAccessRequested }) {
-  let user = await database.collection('Users').findOne({ email });
-  let userId;
-  if (user) {
-    userId = user._id;
-  } else {
-    const hashedPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 12);
-    const result = await database.collection('Users').insertOne({
-      firstName: firstName || null, lastName: null, organization: null, email,
-      password: hashedPassword, phoneNumber: null, streetAddress: null, zipcode: null,
-      accountType: 'individual', businessType: null, orgSubType: null, profilePicture: null,
-      cashCredits: 0, helpingCredits: 0, TrustScore: 0, reliability: 0, responsiveness: 0,
-      recommended: 0, experiences: 0, createdViaAgent: true, createdAt: new Date(),
-    });
-    userId = result.insertedId;
-  }
+async function finalizeGuestModuleQuestion({ email, phone, firstName, question, slug, businessId, businessType, businessName, trackingKey, aiAccessRequested }) {
+  const userId = await findOrCreateGuestUser({ email, phone, firstName });
 
   const businessDoc = businessType === 'service'
     ? await database.collection('Services').findOne({ _id: businessId })
@@ -3249,7 +3299,7 @@ async function finalizeGuestModuleQuestion({ email, firstName, question, slug, b
   if (businessDoc?.userId) {
     await database.collection('Notifications').insertOne({
       userId: businessDoc.userId, fromUserId: userId, type: 'module_question',
-      title: '💬 New Question', body: question, question, askerEmail: email, askerName: firstName || null,
+      title: '💬 New Question', body: question, question, askerEmail: email || null, askerPhone: phone || null, askerName: firstName || null,
       businessId, businessType, trackingKey: trackingKey || null,
       messages: [{ from: 'guest', text: question, at: new Date() }],
       needsReply: true, read: false, answered: false, createdAt: new Date(),
@@ -3259,7 +3309,7 @@ async function finalizeGuestModuleQuestion({ email, firstName, question, slug, b
     // the plain record — no Activity-tab surface for them yet.
     await database.collection('ModuleQuestions').insertOne({
       slug: slug || null, businessId, businessName,
-      type: businessType, question, contactEmail: email,
+      type: businessType, question, contactEmail: email || null, contactPhone: phone || null,
       trackingKey: trackingKey || null, createdAt: new Date(),
     });
   }
@@ -3276,16 +3326,14 @@ async function finalizeGuestModuleQuestion({ email, firstName, question, slug, b
 // found to have lapsed - the only way back in now, since there's no key to
 // re-request anymore.
 async function sendAiAccessExpiredEmail(resolved, trackingKey) {
-  const { email, businessName } = await aiAccessEmailContext(resolved);
-  if (!email) return;
-  await sendEmail({
-    to: email,
+  const { email, phone, businessName } = await aiAccessEmailContext(resolved);
+  if (!email && !phone) return;
+  await sendConfirmationNotice({
+    email, phone,
     subject: `Your AI tracking link has expired — ${businessName}`,
-    html: `
-      <p>Your AI assistant's 48-hour access to your request to <strong>${escapeHtml(businessName)}</strong> has expired.</p>
-      <p>Would you like to extend it an additional 24 hours?</p>
-      <p><a href="${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}/extendAiAccess" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Extend AI Access</a></p>
-    `,
+    bodyText: `Your AI assistant's 48-hour access to your request to ${businessName} has expired. Want to extend it an additional 24 hours?`,
+    linkUrl: `${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}/extendAiAccess`,
+    linkLabel: 'Extend AI Access',
   });
 }
 
@@ -3293,15 +3341,14 @@ async function sendAiAccessExpiredEmail(resolved, trackingKey) {
 // link's chat - there's no other access barrier once AI access is enabled,
 // so this is the guest's visibility into everything the AI saw and did.
 async function sendAiActivityEmail(resolved, trackingKey, kind, detail) {
-  const { email, businessName } = await aiAccessEmailContext(resolved);
-  if (!email) return;
-  await sendEmail({
-    to: email,
+  const { email, phone, businessName } = await aiAccessEmailContext(resolved);
+  if (!email && !phone) return;
+  await sendConfirmationNotice({
+    email, phone,
     subject: `${kind === 'read' ? 'Your AI assistant checked' : 'Your AI assistant sent an update on'} your request to ${businessName}`,
-    html: `
-      <p>${escapeHtml(detail)}</p>
-      <p style="color:#94A3B8;font-size:.85rem;">Didn't expect this? <a href="${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}/disableAiAccess">Disable AI access</a> right away.</p>
-    `,
+    bodyText: detail,
+    linkUrl: `${NODE_API}/trackRequest/${encodeURIComponent(trackingKey)}/disableAiAccess`,
+    linkLabel: "Didn't expect this? Disable AI access",
   });
 }
 
@@ -3589,7 +3636,7 @@ app.post('/trackRequest/:trackingKey/actions/:actionType', aiAuthLimiter, async 
     };
     await database.collection('AIPendingActions').insertOne(pendingAction);
 
-    const { email, businessName: emailBusinessName } = await aiAccessEmailContext(resolved);
+    const { email, phone, businessName: emailBusinessName } = await aiAccessEmailContext(resolved);
     const businessName = targetQuote?.businessName || emailBusinessName;
 
     const confirmLabels = {
@@ -3597,20 +3644,18 @@ app.post('/trackRequest/:trackingKey/actions/:actionType', aiAuthLimiter, async 
       confirm_appointment_time: 'Confirm an Appointment Time',
       accept_quote_and_confirm_appointment: `Accept the Quote${targetQuote?.confirmedPrice ? ` ($${targetQuote.confirmedPrice})` : ''} and Confirm ${targetQuote?.proposedDate || ''} at ${targetQuote?.proposedTime || ''}`,
     };
-    if (email) {
-      await sendEmail({
-        to: email,
+    if (email || phone) {
+      await sendConfirmationNotice({
+        email, phone,
         subject: `Confirm: ${confirmLabels[actionType]} — ${businessName}`,
-        html: `
-          <p>Your AI assistant is asking to <strong>${escapeHtml(confirmLabels[actionType])}</strong> with <strong>${escapeHtml(businessName)}</strong>.</p>
-          <p>Nothing happens until you confirm directly with Needs.</p>
-          <p><a href="${NODE_API}/ai/confirmAction/${confirmToken}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review and Confirm</a></p>
-        `,
+        bodyText: `Your AI assistant is asking to ${confirmLabels[actionType]} with ${businessName}. Nothing happens until you confirm directly with Needs.`,
+        linkUrl: `${NODE_API}/ai/confirmAction/${confirmToken}`,
+        linkLabel: 'Review and Confirm',
       });
     }
-    sendAiActivityEmail(resolved, trackingKey, 'write', `Your AI assistant proposed: ${confirmLabels[actionType]}. Check your email for the confirmation link.`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
+    sendAiActivityEmail(resolved, trackingKey, 'write', `Your AI assistant proposed: ${confirmLabels[actionType]}. Check the confirmation link just sent to confirm.`).catch(e => console.warn('⚠️ sendAiActivityEmail (write) failed:', e?.message));
 
-    res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}?pending=${encodeURIComponent('Check your email to confirm before this is finalized.')}`);
+    res.redirect(303, `/trackRequest/${encodeURIComponent(trackingKey)}?pending=${encodeURIComponent('Check your email or texts to confirm before this is finalized.')}`);
   } catch (err) {
     console.error('❌ /trackRequest/:trackingKey/actions error:', err);
     res.status(500).send(renderConfirmPage(false, 'Something went wrong. Please try again.'));
@@ -3822,8 +3867,8 @@ app.post('/mcpRequestConsequentialAction', requireAuthAnyScope, async (req, res)
       return res.status(409).json({ error: `This action isn't available for this quote's current state (status: ${quote.status}).` });
     }
 
-    const user = await database.collection('Users').findOne({ _id: new ObjectId(req.userId) }, { projection: { email: 1 } });
-    if (!user?.email) return res.status(400).json({ error: 'No email on file for this account.' });
+    const user = await database.collection('Users').findOne({ _id: new ObjectId(req.userId) }, { projection: { email: 1, phoneNumber: 1 } });
+    if (!user?.email && !user?.phoneNumber) return res.status(400).json({ error: 'No email or phone on file for this account.' });
 
     const confirmToken = crypto.randomBytes(16).toString('hex');
     await database.collection('AIPendingActions').insertOne({
@@ -3838,17 +3883,15 @@ app.post('/mcpRequestConsequentialAction', requireAuthAnyScope, async (req, res)
       confirm_appointment_time: 'Confirm an Appointment Time',
       cancel_appointment: 'Cancel the Appointment',
     };
-    await sendEmail({
-      to: user.email,
+    await sendConfirmationNotice({
+      email: user.email, phone: user.phoneNumber,
       subject: `Confirm: ${confirmLabels[actionType]} — ${quote.businessName}`,
-      html: `
-        <p>Your AI assistant is asking to <strong>${escapeHtml(confirmLabels[actionType])}</strong> with <strong>${escapeHtml(quote.businessName)}</strong>.</p>
-        <p>Nothing happens until you confirm directly with Needs.</p>
-        <p><a href="${NODE_API}/mcp/confirmAction/${confirmToken}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review and Confirm</a></p>
-      `,
+      bodyText: `Your AI assistant is asking to ${confirmLabels[actionType]} with ${quote.businessName}. Nothing happens until you confirm directly with Needs.`,
+      linkUrl: `${NODE_API}/mcp/confirmAction/${confirmToken}`,
+      linkLabel: 'Review and Confirm',
     });
 
-    res.json({ success: true, message: `Ask the user to check their email (${user.email}) and click the confirmation link before this is finalized.` });
+    res.json({ success: true, message: `Ask the user to check their ${user.phoneNumber ? 'texts' : 'email (' + user.email + ')'} and click the confirmation link before this is finalized.` });
   } catch (err) {
     console.error('❌ /mcpRequestConsequentialAction error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -3870,8 +3913,8 @@ app.post('/mcpRequestReverification', requireAuthAnyScope, async (req, res) => {
     const grant = await database.collection('OAuthGrants').findOne({ userId: req.userId, client_id: clientId });
     if (!grant || grant.revoked || grant.suspended) return res.status(404).json({ error: 'Connection not found.' });
 
-    const user = await database.collection('Users').findOne({ _id: new ObjectId(req.userId) }, { projection: { email: 1 } });
-    if (!user?.email) return res.status(400).json({ error: 'No email on file for this account.' });
+    const user = await database.collection('Users').findOne({ _id: new ObjectId(req.userId) }, { projection: { email: 1, phoneNumber: 1 } });
+    if (!user?.email && !user?.phoneNumber) return res.status(400).json({ error: 'No email or phone on file for this account.' });
 
     const confirmToken = crypto.randomBytes(16).toString('hex');
     await database.collection('AIPendingActions').insertOne({
@@ -3881,17 +3924,15 @@ app.post('/mcpRequestReverification', requireAuthAnyScope, async (req, res) => {
       createdAt: new Date(), expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
 
-    await sendEmail({
-      to: user.email,
+    await sendConfirmationNotice({
+      email: user.email, phone: user.phoneNumber,
       subject: `Re-verify: ${grant.clientName || 'your connected AI'} — Needs`,
-      html: `
-        <p><strong>${escapeHtml(grant.clientName || 'A connected AI')}</strong> is asking to keep its access to your Needs account - this is a routine 30-day check, not a new request.</p>
-        <p>Nothing changes until you confirm directly with Needs.</p>
-        <p><a href="${NODE_API}/mcp/confirmAction/${confirmToken}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Review and Confirm</a></p>
-      `,
+      bodyText: `${grant.clientName || 'A connected AI'} is asking to keep its access to your Needs account - this is a routine 30-day check, not a new request. Nothing changes until you confirm directly with Needs.`,
+      linkUrl: `${NODE_API}/mcp/confirmAction/${confirmToken}`,
+      linkLabel: 'Review and Confirm',
     });
 
-    res.json({ success: true, message: `Ask the user to check their email (${user.email}) and click the link to keep this connection active - until then, reading or acting on private account data isn't available.` });
+    res.json({ success: true, message: `Ask the user to check their ${user.phoneNumber ? 'texts' : 'email (' + user.email + ')'} and click the link to keep this connection active - until then, reading or acting on private account data isn't available.` });
   } catch (err) {
     console.error('❌ /mcpRequestReverification error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -4687,9 +4728,14 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       '</div>' +
       '<div id="guest-form" style="display:none;">' +
         '<input class="contact-field" id="cf-first-name" type="text" placeholder="First name">' +
+        '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
+          '<button type="button" class="method-btn" id="method-email" style="flex:1;padding:8px;border:1.5px solid #1a1a1a;border-radius:8px;background:#1a1a1a;color:#fff;font-size:.78rem;font-weight:600;cursor:pointer;">Email</button>' +
+          '<button type="button" class="method-btn" id="method-text" style="flex:1;padding:8px;border:1.5px solid #1a1a1a;border-radius:8px;background:#fff;color:#1a1a1a;font-size:.78rem;font-weight:600;cursor:pointer;">Text</button>' +
+        '</div>' +
         '<input class="contact-field" id="cf-email" type="email" placeholder="Email address">' +
+        '<input class="contact-field" id="cf-phone" type="tel" placeholder="Phone number" style="display:none;">' +
         '<button class="contact-submit" id="cf-submit">Send</button>' +
-        '<p class="contact-note">We will email you a confirmation link before anything is sent.</p>' +
+        '<p class="contact-note" id="cf-note">We will email you a confirmation link before anything is sent.</p>' +
       '</div>';
     box.appendChild(wrap);
     scrollBottom();
@@ -4697,6 +4743,28 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     document.getElementById('opt-guest').addEventListener('click', function() {
       document.getElementById('guest-form').style.display = 'block';
       scrollBottom();
+    });
+
+    var contactMethod = 'email';
+    document.getElementById('method-email').addEventListener('click', function() {
+      contactMethod = 'email';
+      document.getElementById('cf-email').style.display = '';
+      document.getElementById('cf-phone').style.display = 'none';
+      document.getElementById('method-email').style.background = '#1a1a1a';
+      document.getElementById('method-email').style.color = '#fff';
+      document.getElementById('method-text').style.background = '#fff';
+      document.getElementById('method-text').style.color = '#1a1a1a';
+      document.getElementById('cf-note').textContent = 'We will email you a confirmation link before anything is sent.';
+    });
+    document.getElementById('method-text').addEventListener('click', function() {
+      contactMethod = 'phone';
+      document.getElementById('cf-phone').style.display = '';
+      document.getElementById('cf-email').style.display = 'none';
+      document.getElementById('method-text').style.background = '#1a1a1a';
+      document.getElementById('method-text').style.color = '#fff';
+      document.getElementById('method-email').style.background = '#fff';
+      document.getElementById('method-email').style.color = '#1a1a1a';
+      document.getElementById('cf-note').textContent = 'We will text you a confirmation link before anything is sent.';
     });
 
     document.getElementById('opt-login').addEventListener('click', function() {
@@ -4776,13 +4844,19 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
     document.getElementById('cf-submit').addEventListener('click', function() {
       var firstName = document.getElementById('cf-first-name').value.trim();
       var safeFirstName = firstName.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-      var email = document.getElementById('cf-email').value.trim();
+      var email = contactMethod === 'phone' ? '' : document.getElementById('cf-email').value.trim();
+      var phone = contactMethod === 'phone' ? document.getElementById('cf-phone').value.trim() : '';
       if (!firstName) { alert('Please enter your first name.'); return; }
-      if (!email) { alert('Please enter your email.'); return; }
+      if (contactMethod === 'phone') {
+        if (!phone) { alert('Please enter your phone number.'); return; }
+      } else {
+        if (!email) { alert('Please enter your email.'); return; }
+      }
       this.disabled = true;
       this.textContent = 'Sending…';
-      var body = Object.assign({ firstName: firstName, email: email }, bodyExtra);
-      mlog('POST ' + endpoint + ' (guest)', { firstName: firstName, email: email });
+      var body = Object.assign({ firstName: firstName, email: email, phone: phone }, bodyExtra);
+      mlog('POST ' + endpoint + ' (guest)', { firstName: firstName, email: email, phone: phone });
+      var contactLabel = contactMethod === 'phone' ? 'text' : 'email';
       fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4795,9 +4869,9 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
           wrap.innerHTML = '<p style="color:#e53e3e;">' + (res.data.error || 'Something went wrong.') + '</p>';
           return;
         }
-        var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done, ' + safeFirstName + '! Please Confirm Your Email</p>' +
-          '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your email and click the confirmation link to send your request to ' + businessName + '.</p>' +
-          '<p class="confirm-step" id="confirm-waiting"><strong>Waiting for email confirmation…</strong> This updates automatically once you click the link.</p>';
+        var successHtml = '<p style="color:#4CAF50;font-weight:600;">&#10003; Almost Done, ' + safeFirstName + '! Please Confirm Your ' + (contactMethod === 'phone' ? 'Text' : 'Email') + '</p>' +
+          '<p class="confirm-step"><strong>1. Confirm Your Request</strong>Check your ' + contactLabel + ' and click the confirmation link to send your request to ' + businessName + '.</p>' +
+          '<p class="confirm-step" id="confirm-waiting"><strong>Waiting for confirmation…</strong> This updates automatically once you click the link.</p>';
         wrap.innerHTML = successHtml;
         scrollBottom();
 
@@ -4827,7 +4901,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
                 // "Almost Done, please confirm" header and the "1. Confirm
                 // Your Request" instructions are both stale once confirmed.
                 wrap.innerHTML =
-                  '<p style="color:#4CAF50;font-weight:600;">&#10003; Email confirmed!<br>Your request has been sent to ' + businessName + '.</p>' +
+                  '<p style="color:#4CAF50;font-weight:600;">&#10003; ' + (contactMethod === 'phone' ? 'Text' : 'Email') + ' confirmed!<br>Your request has been sent to ' + businessName + '.</p>' +
                   '<p class="confirm-step"><strong>Stay Updated</strong>You will automatically receive an email when ' + businessName + ' responds.</p>';
                 scrollBottom();
               })
@@ -6795,7 +6869,7 @@ function renderConversationPage(businessName, messages, trackingKey) {
 // POST /requestQuote — body: { businessId, description, email, firstName }
 app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (req, res) => {
   try {
-    const { businessId, description, email, firstName, enableAiAccess, sessionToken } = req.body || {};
+    const { businessId, description, email, phone, firstName, enableAiAccess, sessionToken } = req.body || {};
     if (!businessId || !description) {
       return res.status(400).json({ error: 'businessId and description are required' });
     }
@@ -6811,15 +6885,15 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
     if (!service) return res.status(404).json({ error: 'Business not found' });
 
     // Session-skip path: a prior request in this same MCP conversation
-    // already had its email confirmed, and this one is still within that
+    // already had its confirmation, and this one is still within that
     // session's 48-hour/5-request allowance - send immediately, using the
-    // session's own locked-in identity, never whatever name/email this call
-    // happens to also pass.
+    // session's own locked-in identity, never whatever name/contact this
+    // call happens to also pass.
     const activeSession = await getActiveGuestSession(sessionToken);
     if (activeSession) {
       const instantTrackingKey = crypto.randomBytes(16).toString('hex');
       await finalizeGuestQuoteRequest({
-        email: activeSession.email, firstName: activeSession.firstName,
+        email: activeSession.email, phone: activeSession.phone, firstName: activeSession.firstName,
         description, serviceId: service._id, trackingKey: instantTrackingKey,
         aiAccessRequested: enableAiAccess === true,
       });
@@ -6829,40 +6903,43 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
       // confirmation click (that's the whole point of an active session),
       // so this is the only thing telling the guest it happened at all.
       // Same spirit as sendAiActivityEmail on the tracking link, just sent
-      // directly since the email is already known here.
-      sendEmail({
-        to: activeSession.email,
+      // directly since the contact method is already known here.
+      sendConfirmationNotice({
+        email: activeSession.email, phone: activeSession.phone,
         subject: `Your AI assistant sent a new quote request to ${sentToName}`,
-        html: `
-          <p>Your AI assistant just sent a new quote request to <strong>${escapeHtml(sentToName)}</strong>, using the email confirmation you already gave earlier in this conversation.</p>
-          <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${escapeHtml(description)}</p>
-          <p style="color:#94A3B8;font-size:.85rem;">Didn't expect this? This session allows up to 5 requests over 48 hours before requiring a fresh confirmation - ignore this if you're the one driving it.</p>
-        `,
-      }).catch(e => console.warn('⚠️ guest session instant-request email failed:', e?.message));
+        bodyText: `Your AI assistant just sent a new quote request to ${sentToName}, using the confirmation you already gave earlier in this conversation: "${description}". Didn't expect this? This session allows up to 5 requests over 48 hours before requiring a fresh confirmation.`,
+      }).catch(e => console.warn('⚠️ guest session instant-request notice failed:', e?.message));
       return res.json({
         success: true, instant: true, trackingKey: instantTrackingKey, sessionToken,
-        message: `Sent immediately to ${sentToName} - no email confirmation needed this time, since you already confirmed earlier in this conversation.`,
+        message: `Sent immediately to ${sentToName} - no confirmation needed this time, since you already confirmed earlier in this conversation.`,
       });
     }
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Invalid email address' });
-    if (!firstName) return res.status(400).json({ error: 'businessId, description, email, and firstName are required' });
+    const hasValidEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    const hasPhone = phone && String(phone).trim();
+    if (!hasValidEmail && !hasPhone) return res.status(400).json({ error: 'A valid email or phone number is required' });
+    if (!firstName) return res.status(400).json({ error: 'businessId, description, firstName, and an email or phone are required' });
+    // Phone replaces email, never both - whichever one was actually given
+    // is the one single channel every confirm link and notice for this
+    // request/session goes to from here on.
+    const contactEmail = hasValidEmail ? email : null;
+    const contactPhone = !hasValidEmail && hasPhone ? String(phone).trim() : null;
 
     const token = crypto.randomBytes(24).toString('hex');
-    // Separate from the email-confirm token above: a durable reference an
-    // MCP/AI caller gets back immediately (see mcp.js) so it can check on
-    // this request later - including in a different conversation - without
-    // needing to know the requester's email. Unguessable, so possession of
-    // it is itself proof of having made the original request.
+    // Separate from the confirm token above: a durable reference an MCP/AI
+    // caller gets back immediately (see mcp.js) so it can check on this
+    // request later - including in a different conversation - without
+    // needing the contact info again. Unguessable, so possession of it is
+    // itself proof of having made the original request.
     const trackingKey = crypto.randomBytes(16).toString('hex');
     // A new, not-yet-confirmed guest session - stored on the pending record
     // so the confirm route below can activate it once this first request is
     // actually clicked. Inert until then; see getActiveGuestSession.
-    const newSessionToken = await createGuestSession(email, firstName);
+    const newSessionToken = await createGuestSession({ email: contactEmail, phone: contactPhone, firstName });
     await database.collection('PendingQuoteRequests').insertOne({
       serviceId: new ObjectId(businessId),
       description: String(description).slice(0, 2000),
-      email,
+      email: contactEmail, phone: contactPhone,
       firstName: String(firstName).trim().slice(0, 80),
       token,
       trackingKey,
@@ -6878,23 +6955,20 @@ app.post('/requestQuote', guestRequestLimiter, guestRequestEmailLimiter, async (
 
     const confirmUrl = `${NODE_API}/confirmQuoteRequest/${token}`;
     const businessName = service.businessName || service.providerName || 'this business';
-    const emailResult = await sendEmail({
-      to: email,
+    const noticeResult = await sendConfirmationNotice({
+      email: contactEmail, phone: contactPhone,
       subject: `Confirm your quote request to ${businessName}`,
-      html: `
-        <p>You requested a quote from <strong>${businessName}</strong> on Needs:</p>
-        <p style="background:#F1F5F9;border-radius:8px;padding:12px 16px;color:#334155;">${description}</p>
-        <p><a href="${confirmUrl}" style="background:#2563EB;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">Confirm and Send Request</a></p>
-        <p style="color:#94A3B8;font-size:.85rem;">If you did not request this, you can safely ignore this email — nothing will be sent unless you click the link above.</p>
-      `,
+      bodyText: `You requested a quote from ${businessName} on Needs: "${description}". If you did not request this, you can safely ignore this - nothing will be sent unless you confirm.`,
+      linkUrl: confirmUrl,
+      linkLabel: 'Confirm and Send Request',
     });
 
-    if (emailResult?.error) {
-      return res.status(502).json({ error: 'Could not send confirmation email', detail: emailResult.error });
+    if (noticeResult?.error) {
+      return res.status(502).json({ error: 'Could not send confirmation', detail: noticeResult.error });
     }
     res.json({
-      success: true, skipped: !!emailResult?.skipped,
-      message: 'Check your email to confirm your request before it is sent to the business.',
+      success: true, skipped: !!noticeResult?.skipped,
+      message: `Check your ${contactPhone ? 'texts' : 'email'} to confirm your request before it is sent to the business.`,
       trackingKey, sessionToken: newSessionToken,
     });
   } catch (err) {
@@ -6948,7 +7022,7 @@ app.post('/confirmQuoteRequest/:token', async (req, res) => {
     const service = await database.collection('Services').findOne({ _id: pending.serviceId });
 
     await finalizeGuestQuoteRequest({
-      email: pending.email, firstName: pending.firstName, description: pending.description,
+      email: pending.email, phone: pending.phone, firstName: pending.firstName, description: pending.description,
       serviceId: pending.serviceId, trackingKey: pending.trackingKey, aiAccessRequested: pending.aiAccessRequested,
     });
 

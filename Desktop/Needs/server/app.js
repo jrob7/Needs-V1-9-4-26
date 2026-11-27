@@ -959,6 +959,55 @@ app.get('/privacy-policy', (req, res) => {
 `));
 });
 
+// Standalone, publicly reachable mock-up of the module widget's SMS opt-in
+// step (phone field + consent checkbox + links) - exists purely so this
+// exact moment in the flow can be handed to Twilio's toll-free verification
+// as "opt-in policy proof" (a URL or a screenshot of one), without needing
+// to walk a reviewer through the live chat widget on a real business page.
+app.get('/sms-consent-example', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMS Opt-In Example - Needs</title>
+<style>
+  body { margin:0; background:#F8FAFD; color:#1a1a1a; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+  .wrap { max-width:480px; margin:0 auto; padding:40px 24px 80px; }
+  .brand { font-weight:800; font-size:1.1rem; color:#2563EB; text-decoration:none; }
+  h1 { font-size:1.3rem; margin:20px 0 6px; color:#0F172A; }
+  .sub { font-size:.85rem; color:#64748B; margin-bottom:24px; line-height:1.5; }
+  .mock { border:1px solid #CBD5E1; border-radius:16px; padding:18px; background:#fff; }
+  .mock-label { font-size:.78rem; font-weight:600; color:#1a1a1a; margin-bottom:6px; }
+  .mock-field { width:100%; box-sizing:border-box; border:1.5px solid #e0e0e0; border-radius:8px; padding:10px 12px; font-size:.9rem; margin-bottom:14px; color:#1a1a1a; background:#fff; }
+  label.consent { display:flex; align-items:flex-start; gap:8px; font-size:.78rem; color:#444; cursor:pointer; }
+  label.consent input { margin-top:3px; flex-shrink:0; }
+  .fine { font-size:.7rem; color:#888; margin:6px 0 0 24px; }
+  .links { font-size:.7rem; margin:4px 0 0 24px; }
+  a { color:#2563EB; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="brand" href="/">Needs</a>
+<h1>SMS Opt-In Example</h1>
+<p class="sub">This is the exact phone-number entry step and SMS consent checkbox shown to a guest on a Needs business page when they choose "Text" as their contact method for a quote request or question.</p>
+<div class="mock">
+  <div class="mock-label">Phone number</div>
+  <input class="mock-field" type="tel" placeholder="Phone number" value="(555) 123-4567" readonly>
+  <label class="consent">
+    <input type="checkbox">
+    <span>I agree to receive text messages from Needs LLC for verification, request confirmations, appointment updates, AI authorization, and security notifications.</span>
+  </label>
+  <p class="fine">Message frequency varies based on your activity. Message and data rates may apply. Reply STOP to opt out or HELP for assistance. Consent is not a condition of purchase.</p>
+  <p class="links"><a href="/terms-of-service" target="_blank" rel="noopener">Terms of Service</a> | <a href="/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a></p>
+</div>
+</div>
+</body>
+</html>`);
+});
+
 // ✅ Middleware to log every request
 app.use((req, res, next) => {
     console.log(`🔥 Incoming Request: ${req.method} ${req.originalUrl}`);
@@ -5128,6 +5177,14 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
         '</div>' +
         '<input class="contact-field" id="cf-email" type="email" placeholder="Email address">' +
         '<input class="contact-field" id="cf-phone" type="tel" placeholder="Phone number" style="display:none;">' +
+        '<div id="sms-consent" style="display:none;margin:4px 0 10px;">' +
+          '<label style="display:flex;align-items:flex-start;gap:8px;font-size:.78rem;color:#444;cursor:pointer;">' +
+            '<input type="checkbox" id="cf-sms-consent" style="margin-top:3px;flex-shrink:0;">' +
+            '<span>I agree to receive text messages from Needs LLC for verification, request confirmations, appointment updates, AI authorization, and security notifications.</span>' +
+          '</label>' +
+          '<p style="font-size:.7rem;color:#888;margin:6px 0 0 24px;">Message frequency varies based on your activity. Message and data rates may apply. Reply STOP to opt out or HELP for assistance. Consent is not a condition of purchase.</p>' +
+          '<p style="font-size:.7rem;margin:4px 0 0 24px;"><a href="${MODULE_BASE}/terms-of-service" target="_blank" rel="noopener">Terms of Service</a> | <a href="${MODULE_BASE}/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a></p>' +
+        '</div>' +
         '<button class="contact-submit" id="cf-submit">Send</button>' +
         '<p class="contact-note" id="cf-note">We will email you a confirmation link before anything is sent.</p>' +
       '</div>';
@@ -5144,6 +5201,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       contactMethod = 'email';
       document.getElementById('cf-email').style.display = '';
       document.getElementById('cf-phone').style.display = 'none';
+      document.getElementById('sms-consent').style.display = 'none';
       document.getElementById('method-email').style.background = '#1a1a1a';
       document.getElementById('method-email').style.color = '#fff';
       document.getElementById('method-text').style.background = '#fff';
@@ -5154,6 +5212,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       contactMethod = 'phone';
       document.getElementById('cf-phone').style.display = '';
       document.getElementById('cf-email').style.display = 'none';
+      document.getElementById('sms-consent').style.display = 'block';
       document.getElementById('method-text').style.background = '#1a1a1a';
       document.getElementById('method-text').style.color = '#fff';
       document.getElementById('method-email').style.background = '#fff';
@@ -5243,6 +5302,7 @@ function moduleChatWidget(slug, businessName, placeholder = 'What do you need?',
       if (!firstName) { alert('Please enter your first name.'); return; }
       if (contactMethod === 'phone') {
         if (!phone) { alert('Please enter your phone number.'); return; }
+        if (!document.getElementById('cf-sms-consent').checked) { alert('Please check the box to agree to receive text messages, or switch to Email.'); return; }
       } else {
         if (!email) { alert('Please enter your email.'); return; }
       }

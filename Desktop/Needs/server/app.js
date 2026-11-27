@@ -563,7 +563,401 @@ app.get('/llms.txt', (req, res) => {
 `);
 });
 
+// Shared shell for the two static legal pages below - kept intentionally
+// plain (no app chrome/JS) since these are the URLs handed to Twilio's
+// toll-free verification form and to anyone reading the policies directly.
+function renderLegalPage(title, updated, bodyHtml) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title} - Needs</title>
+<style>
+  body { margin:0; background:#F8FAFD; color:#1a1a1a; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; line-height:1.55; }
+  .wrap { max-width:760px; margin:0 auto; padding:40px 24px 80px; }
+  .brand { font-weight:800; font-size:1.1rem; color:#2563EB; text-decoration:none; }
+  h1 { font-size:1.7rem; margin:28px 0 4px; color:#0F172A; }
+  .updated { color:#64748B; font-size:.85rem; margin-bottom:28px; }
+  h2 { font-size:1.15rem; margin:30px 0 8px; color:#0F172A; border-top:1px solid #E2E8F0; padding-top:20px; }
+  h3 { font-size:1rem; margin:18px 0 6px; color:#0F172A; }
+  p, li { font-size:.92rem; color:#334155; }
+  ul { padding-left:20px; }
+  a { color:#2563EB; }
+  .caps { font-size:.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="brand" href="/">Needs</a>
+<h1>${title}</h1>
+<p class="updated">Last Updated: ${updated}</p>
+${bodyHtml}
+</div>
+</body>
+</html>`;
+}
 
+app.get('/terms-of-service', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.send(renderLegalPage('Terms of Service', 'November 27, 2026', `
+<h2>1. Agreement to Terms</h2>
+<p>These Terms of Service ("Terms") form a binding legal agreement between you ("you" or "User") and Needs LLC, a California limited liability company ("Needs," "we," "us") governing your access to and use of the Needs mobile application, website, and related services (collectively, the "Platform"). By creating an account, accessing, or using the Platform, you agree to be bound by these Terms and by our <a href="/privacy-policy">Privacy Policy</a>, which is incorporated by reference. If you do not agree, you may not use the Platform.</p>
+<p>If you are using the Platform on behalf of a business, nonprofit organization, or other entity, you represent that you have authority to bind that entity, and "you" refers to both you and that entity.</p>
+
+<h2>2. What Needs Is — and What It Is Not</h2>
+<p>Needs is an independent technology platform and information intermediary. The Platform is designed to facilitate communication, information exchange, provider identification, and coordination between:</p>
+<ul>
+<li>individuals and businesses seeking services, goods, or assistance ("Customers" or "Requesters");</li>
+<li>independent businesses, contractors, and service professionals offering services or goods ("Providers");</li>
+<li>nonprofit organizations, community groups, and other organizations using connection and coordination features ("Organizations"); and</li>
+<li>individuals responding to volunteer or community requests ("Volunteers").</li>
+</ul>
+<p>Needs does not itself provide, perform, supervise, direct, or control the underlying services, goods, volunteer activities, or transactions arranged through the Platform. Needs is not a party to any agreement formed between a Customer and a Provider, or between an Organization and a Volunteer, unless the Platform expressly states otherwise for a specific transaction.</p>
+<p>Three principles govern this Platform and these Terms:</p>
+<ol>
+<li>Needs facilitates connections, provider identification, and information exchange between independent Users.</li>
+<li>Independent Users are solely responsible for the services, goods, representations, commitments, scheduling, performance, and payment obligations they exchange with one another.</li>
+<li>Needs is responsible for its own platform operations — including how the Platform presents information, operates its Matching Engine, and processes data — subject to applicable law and the limitations in these Terms.</li>
+</ol>
+<p>Needs is not a staffing agency, employment agency, contractor, broker (as that term is used in regulated industries such as freight, real estate, or insurance), or employer of any Provider, Organization, or Volunteer. Nothing in these Terms or in the operation of the Platform creates an employment, agency, joint venture, or partnership relationship between Needs and any User, or between Users.</p>
+<h3>2.1 Platform participants and modules.</h3>
+<p>Providers include restaurants. Public visitors may browse business modules without an account. Businesses may also act as Requesters, including when seeking services from other independent businesses. A User may participate in multiple capacities. Needs does not guarantee assistance from any Organization.</p>
+
+<h2>3. Eligibility</h2>
+<p>You must be at least 18 years old (or the age of majority in your jurisdiction) and capable of forming a binding contract to create an account. Needs does not knowingly permit use by anyone under 13, and any Organization enabling minors to participate in volunteer or community features through the Platform is solely responsible for obtaining any legally required parental or guardian consent and for supervision.</p>
+
+<h2>4. Accounts</h2>
+<h3>4.1 Registration.</h3>
+<p>You must provide accurate, current, and complete information when creating an account and keep it updated.</p>
+<h3>4.2 Account Security.</h3>
+<p>You are responsible for maintaining the confidentiality of your login credentials and for all activity under your account. Notify us immediately at <a href="mailto:contact@needs-module.com">contact@needs-module.com</a> of any unauthorized use.</p>
+<h3>4.3 Provider and Organization Accounts.</h3>
+<p>If you register as a Provider or Organization, you additionally represent and warrant that:</p>
+<ul>
+<li>you hold all licenses, permits, certifications, and insurance legally required to offer the services or goods you list, in every jurisdiction where you offer them;</li>
+<li>any information you submit about your business, qualifications, pricing, availability, or capacity is accurate and not misleading;</li>
+<li>you will comply with all applicable laws, including tax, labor, consumer protection, and industry-specific licensing laws; and</li>
+<li>you are acting as an independent business, and not as an employee, partner, joint venturer, or agent of Needs.</li>
+</ul>
+<h3>4.4 One Account.</h3>
+<p>Accounts are personal (or, for Organizations, institutional) and non-transferable.</p>
+<h3>4.5 Guest access.</h3>
+<p>Guests may browse public information without registering. Business-facing guest requests require verified contact information as described in Section 6.1–6.3. Users must have authority to supply the information and initiate any request or commitment on another person's behalf. Contact-channel verification is not comprehensive identity or credential verification.</p>
+
+<h2>5. How the Platform Works</h2>
+<h3>5.1 Service Requests.</h3>
+<p>Customers submit requests describing a need (a service, good, volunteer opportunity, etc.), which may include text, photos, video, audio, or location information.</p>
+<h3>5.2 Matching Engine.</h3>
+<p>Needs uses automated tools, including machine-learning models (the "Matching Engine"), to interpret, structure, categorize, and route requests, and to identify Providers, Organizations, or opportunities that may be compatible with a request. The Matching Engine may also generate enhanced descriptions, categorizations, or preliminary, non-binding estimates based on the information submitted.</p>
+<h3>5.3 Quotes and Estimates.</h3>
+<p>Any estimate, quote, or price range displayed through the Platform is either (a) a preliminary, AI-generated estimate produced by the Matching Engine for informational purposes only, or (b) a quote submitted directly by a Provider. Needs clearly distinguishes, or will clearly distinguish in the Platform interface, between the two. An AI-generated estimate is not an offer by Needs or by any Provider and is not binding on any party until a Provider affirmatively confirms it. Final pricing, scope, and terms of service are determined solely between the Customer and the Provider.</p>
+<h3>5.4 Scheduling and Appointments.</h3>
+<p>The Platform may offer scheduling tools, including calendar integration (e.g., Google Calendar), to help coordinate appointments between Users. An appointment proposed, displayed, or synced through the Platform is not confirmed until the Provider or other relevant party has affirmatively accepted it. Needs is not responsible for scheduling conflicts, missed appointments, or failures of third-party calendar integrations.</p>
+<h3>5.5 No Guarantee.</h3>
+<p>Needs does not guarantee that any relevant provider will be identified, that any introduction will result in a completed transaction, or the quality, safety, legality, timeliness, or successful completion of any service, good, or volunteer activity arranged through the Platform.</p>
+<h3>5.6 Discovery and business modules.</h3>
+<p>Needs may identify up to three potentially relevant independent service providers using request category, location, service area, pricing and other business information, and may ask a clarifying question. Public modules may display business profiles, menus, prices, hours, offers and services. Businesses are responsible for accuracy and fulfillment. Business-specific AI chat answers from available profile information and may be inaccurate. When a visitor requests business follow-up, Needs collects and routes the confirmed request and necessary contact information. Messaging may include history, read receipts and appointment reminders; Users may request rescheduling and submit reviews where available.</p>
+<h3>5.7 NeedCoins.</h3>
+<p>Where available, NeedCoins are non-monetary loyalty points earned through restaurant visit codes and used for participating restaurant promotional offers. They cannot be purchased for money, redeemed for cash, or transferred into a bank account. Participating restaurants are responsible for their offers. NeedCoins are not payment for services.</p>
+
+<h2>6. AI-Generated Content</h2>
+<p>The Platform uses AI/ML tools to enhance photos, descriptions, and listings, and to generate preliminary estimates and provider suggestions (collectively, "AI-Generated Content"). AI-Generated Content:</p>
+<ul>
+<li>is provided for convenience and informational purposes only;</li>
+<li>may contain errors, omissions, or inaccuracies;</li>
+<li>does not constitute advice (including professional, legal, financial, or safety advice); and</li>
+<li>is not a representation or warranty by Needs as to accuracy, fitness for a purpose, or outcome.</li>
+</ul>
+<p>You are responsible for independently verifying any AI-Generated Content, including estimates, before relying on it. Needs may use the content of requests, messages, and uploaded media to operate, provide, and improve the Matching Engine, as described in the <a href="/privacy-policy">Privacy Policy</a>.</p>
+<h3>6.1 Guest business-module tracking access.</h3>
+<p>A visitor provides a first name, email address and, if SMS is selected, phone number, and chooses whether an AI may read and reply. An initial business-facing request is held until the visitor confirms through the selected channel. If AI access is authorized, a private tracking page is activated for 48 hours and access details are delivered through the verified channel. The requesting chat may display the inactive link before confirmation and the public MCP connector address. Each tracking link is unique to that particular request, business and time; it cannot access earlier, later or unrelated requests. The page permits reading, replying and photo uploads where available. An active link is a bearer credential: anyone who obtains it may be able to view or modify that conversation within the available controls. Keep it private and share it only with trusted assistants. Quote acceptance and appointment cancellation require a separate email or SMS challenge. A business-proposed appointment may be confirmed with one click in the authorized private guest session. Access ends after 48 hours unless affirmatively extended for an additional 24 hours, or earlier upon revocation. Needs may send an extension invitation at expiry; it does not extend access automatically. Needs logs AI reads and writes and notifies the visitor by email or SMS. Revocation and expiry prevent future access but cannot retrieve copies already obtained.</p>
+<h3>6.2 Guest MCP.</h3>
+<p>The public Model Context Protocol connector allows compatible assistants to search and retrieve public business information and ask general questions without an account. The first business-facing request requires confirmation by email or SMS; a verified session token then permits up to four additional requests using the initially verified first name and email, not replacement identity data supplied by the assistant. The session ends after 48 hours or five total requests, whichever occurs first. Without a valid token, fresh confirmation is required. An invitation to renew may be sent at expiration; renewal requires confirmation. The connector may remain installed independently of the session. Neither public connector access nor the session token alone authorizes private account information or historical conversations. Quote acceptance and appointment confirmation or cancellation each require separate action-specific confirmation. Needs logs Guest MCP activity and sends notices to the verified channel.</p>
+<h3>6.3 Connected AI for registered accounts.</h3>
+<p>Through Account &gt; Connected AI, a User may authenticate on a Needs-hosted authorization page and grant specific OAuth permissions to an external assistant. Needs does not provide the User's password to the assistant. Approved scopes may include searching businesses, submitting questions or quote requests, reading conversations, replying, and initiating scheduling, acceptance or cancellation. Routine authorized requests and replies need not be individually confirmed. Quote acceptance and appointment confirmation or cancellation remain pending until separately confirmed by the account holder through email or SMS. Connections require reverification every 30 days; private access is suspended absent reconfirmation. Unusually high activity triggers automatic suspension and notice. Connected AI activity is logged and displayed in the app. Users may modify permissions or revoke a connection at any time, effective immediately for subsequent access attempts.</p>
+<h3>6.4 Authorization and safeguards.</h3>
+<p>Users must not share confirmation codes with assistants or other persons, bypass verification, exceed authorized permissions, impersonate others or evade security limits. Needs checks authorization validity on access attempts and may restrict or suspend suspected misuse. Users should monitor activity, verify AI outputs, and promptly revoke compromised access or report unexpected activity. External assistants may retain information under their own terms; revoking Needs access does not delete those copies. An AI's initiation of a consequential action is not final acceptance where separate confirmation is required. These workflows do not alter the independent responsibilities in Section 7 or waive rights imposed by law.</p>
+
+<h2>7. Relationship Between Users; Independent Responsibility</h2>
+<h3>7.1 Direct Relationship.</h3>
+<p>Any contract for services, goods, or volunteer activity formed as a result of an introduction is solely between the Customer and the Provider (or the Organization and the Volunteer). Needs is not a party to that contract unless expressly stated.</p>
+<h3>7.2 Payment.</h3>
+<p>Needs does not currently process payment for services or goods exchanged between Users. Unless and until the Platform introduces integrated payment processing, all payment, invoicing, deposits, refunds, and related financial terms are negotiated and settled directly between the Customer and the Provider, outside the Platform, and Needs bears no responsibility for them. If Needs introduces in-platform payment processing in the future, additional terms governing that processing will be presented and will supplement (not replace) this Section.</p>
+<h3>7.3 Performance and Disputes.</h3>
+<p>Scheduling, performance, quality, safety, cancellation, and dispute resolution relating to the underlying service, good, or volunteer activity are the sole responsibility of the Customer and Provider (or Organization and Volunteer) involved. Needs may, in its discretion, offer tools to facilitate communication about a dispute, but has no obligation to mediate, investigate, or resolve disputes between Users, and is not responsible for the outcome of any such dispute.</p>
+<h3>7.4 No Verification Warranty.</h3>
+<p>Except where a specific Platform feature expressly states that Needs has verified a particular credential, Needs does not independently verify the licensing, insurance, background, identity, qualifications, or legal status of any Provider, Organization, Volunteer, or Customer. Any badge, label, or status (e.g., "verified," "background checked") displayed on the Platform describes only the specific, limited check described in the feature's own disclosure at the time it is displayed, and is not a general endorsement or guarantee of safety, quality, or legitimacy.</p>
+<h3>7.5 Your Responsibility.</h3>
+<p>You are solely responsible for exercising judgment and appropriate caution in connection with any transaction, communication, or in-person interaction arranged through the Platform, including verifying credentials, insurance, and licensing to your own satisfaction before engaging a Provider or participating in an activity.</p>
+
+<h2>8. Connections, Organizations, and Community Features</h2>
+<p>The Platform may allow Organizations to distribute requests or opportunities to a network of Users, and allow Users to share requests or respond to volunteer opportunities ("Connections Features"). If you use Connections Features:</p>
+<ul>
+<li>you are responsible for the accuracy of any request, opportunity, or content you post or distribute;</li>
+<li>Organizations are solely responsible for their own vetting, supervision, and management of Volunteers and for compliance with laws applicable to volunteer management, nonprofit solicitation, and donations;</li>
+<li>Needs does not endorse any Organization, opportunity, or Volunteer, and does not supervise volunteer activity; and</li>
+<li>content shared through Connections Features may be visible to other Users as described in the Platform's then-current visibility settings.</li>
+</ul>
+<p>Needs prohibits impersonation, harassment, and misuse of community features as described in Section 10, and reserves the right to remove content or restrict accounts that violate this Section, but is not obligated to monitor all content and is not responsible for content posted by Users.</p>
+<h3>8.1 Nonprofit discovery.</h3>
+<p>Needs may identify an Organization mentioned in a request, facilitate direct routing and display resources or opportunities. Organizations determine their own eligibility criteria, availability and fulfillment. Needs is not an emergency response service.</p>
+
+<h2>9. Fees, Billing, and Subscriptions</h2>
+<h3>9.1 Current State.</h3>
+<p>As of the date of these Terms, Needs does not charge Users a subscription or access fee, and does not process payments for third-party services on the Platform.</p>
+<h3>9.2 Future Subscription Fees.</h3>
+<p>Needs reserves the right to introduce subscription plans, membership tiers, or other fees ("Subscription Fees") for access to the Platform or specific features, at any time, on prospective notice to Users. If introduced, Subscription Fees will be disclosed, along with the billing frequency, cancellation method, and any free-trial conversion terms, before you are charged.</p>
+<h3>9.3 Auto-Renewal.</h3>
+<p>Any Subscription Fee that is structured as an automatically renewing or continuous-service plan will, at the time of purchase, clearly and conspicuously disclose: the length of the trial or initial term, the cost that will be charged upon expiration of any trial or discounted period, that the subscription continues until cancelled, and how to cancel. You may cancel an auto-renewing subscription at any time through the mechanism described in the Platform (consistent with California's Automatic Renewal Law, Cal. Bus. &amp; Prof. Code §§ 17600 et seq., and equivalent laws in other jurisdictions). Cancellation will be effective at the end of the then-current billing period unless otherwise stated, and Needs does not provide prorated refunds for partial billing periods except where required by law or expressly stated at checkout.</p>
+<h3>9.4 Platform Fees Are Separate.</h3>
+<p>Any Subscription Fee or other fee charged by Needs is for access to the Platform and its tools, and is separate and distinct from any price, fee, deposit, or payment owed between a Customer and a Provider for the underlying service or good.</p>
+<h3>9.5 Taxes.</h3>
+<p>Fees are exclusive of applicable taxes, which you are responsible for unless Needs is legally required to collect them.</p>
+
+<h2>10. Prohibited Conduct</h2>
+<p>You agree not to:</p>
+<ul>
+<li>use the Platform for any unlawful, fraudulent, or deceptive purpose;</li>
+<li>impersonate any person or entity, or misrepresent your affiliation, licensing, insurance, or qualifications;</li>
+<li>harass, threaten, stalk, or discriminate against another User;</li>
+<li>post false, misleading, or deceptive requests, listings, quotes, or reviews;</li>
+<li>circumvent, disable, or interfere with the Matching Engine, security features, or fee structures of the Platform;</li>
+<li>scrape, harvest, or misuse data about other Users, including contact information obtained through a service request, for purposes unrelated to that request;</li>
+<li>upload content that infringes intellectual property, privacy, or publicity rights, or that is obscene, defamatory, or unlawful;</li>
+<li>use the Platform to solicit Users for a competing platform or to circumvent Platform fees once applicable; or</li>
+<li>violate any applicable law, including consumer protection, licensing, and nonprofit/charitable-solicitation laws.</li>
+</ul>
+<p>Needs may investigate and take action, including content removal, warnings, suspension, or termination, for violations of this Section, in its reasonable discretion.</p>
+
+<h2>11. User Content and License</h2>
+<h3>11.1 Your Content.</h3>
+<p>"User Content" means any text, photo, video, audio, message, request, quote, review, or other material you submit through the Platform.</p>
+<h3>11.2 License to Needs.</h3>
+<p>You grant Needs a non-exclusive, worldwide, royalty-free, sublicensable license to host, store, reproduce, modify (e.g., to crop, format, or enhance media), display, and distribute your User Content as necessary to operate, provide, and improve the Platform, including to share relevant User Content (such as a service request and associated photos) with relevant Providers, Organizations, or Volunteers, and to evaluate and improve the Matching Engine using de-identified or aggregated data as described in the Privacy Policy. This license does not independently authorize training on identifiable User Content beyond the practices disclosed in that Policy.</p>
+<h3>11.3 Your Responsibility.</h3>
+<p>You represent that you own or have the necessary rights to the User Content you submit, and that it does not violate any law or third-party right.</p>
+<h3>11.4 Provider/Organization Use of Shared Data.</h3>
+<p>A Provider or Organization that receives Customer or Volunteer information through a request routed through Needs may use that information only to respond to and fulfill that specific request or opportunity, and may not use it for unrelated marketing, resale, or any purpose inconsistent with the Privacy Policy, unless the Customer or Volunteer separately and affirmatively consents.</p>
+<h3>11.5 SMS consent limitation.</h3>
+<p>No license or permission in these Terms authorizes sharing, selling, renting or transferring SMS opt-in data or consent to Providers, Organizations, affiliates, external assistants or other third parties. Businesses must not rely on consent given to Needs as permission to send their own texts. Mobile numbers collected for the Needs SMS program are used only for operating that program, not third-party marketing or lead distribution.</p>
+
+<h2>12. Intellectual Property</h2>
+<p>The Platform, including its software, design, trademarks, and the Matching Engine (excluding User Content), is owned by Needs or its licensors and protected by intellectual property laws. Needs grants you a limited, revocable, non-exclusive, non-transferable license to use the Platform for its intended purpose, subject to these Terms.</p>
+
+<h2>13. Third-Party Services</h2>
+<p>The Platform integrates or links to third-party services (for example, calendar providers, mapping/location services, cloud hosting, and push-notification services). Needs is not responsible for the practices, content, or availability of third-party services, which are governed by their own terms and privacy policies.</p>
+
+<h2>14. Disclaimers</h2>
+<p class="caps">TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE PLATFORM, INCLUDING ALL CONTENT, PROVIDER SUGGESTIONS, ESTIMATES, AND AI-GENERATED CONTENT, IS PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED, OR STATUTORY, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, OR ACCURACY. NEEDS DOES NOT WARRANT THAT THE PLATFORM WILL BE UNINTERRUPTED, SECURE, OR ERROR-FREE, OR THAT ANY PROVIDER SUGGESTION, ESTIMATE, PROVIDER, ORGANIZATION, OR VOLUNTEER WILL MEET YOUR EXPECTATIONS OR REQUIREMENTS. NEEDS DOES NOT WARRANT THE QUALITY, SAFETY, LEGALITY, OR OUTCOME OF ANY SERVICE, GOOD, OR VOLUNTEER ACTIVITY ARRANGED THROUGH THE PLATFORM.</p>
+<p>Some jurisdictions do not allow certain warranty disclaimers, so some of the above may not apply to you in full.</p>
+
+<h2>15. Limitation of Liability</h2>
+<p class="caps">TO THE MAXIMUM EXTENT PERMITTED BY LAW, NEEDS AND ITS OFFICERS, DIRECTORS, EMPLOYEES, AND AGENTS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY, OR PUNITIVE DAMAGES, OR FOR LOST PROFITS, LOST DATA, OR LOSS OF GOODWILL, ARISING FROM OR RELATED TO YOUR USE OF THE PLATFORM OR ANY TRANSACTION, SERVICE, GOOD, OR VOLUNTEER ACTIVITY ARRANGED THROUGH IT, EVEN IF NEEDS HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. NEEDS' TOTAL AGGREGATE LIABILITY FOR ANY CLAIM ARISING OUT OF OR RELATING TO THESE TERMS OR THE PLATFORM WILL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID TO NEEDS (AS DISTINCT FROM ANY PROVIDER) IN THE TWELVE (12) MONTHS PRECEDING THE CLAIM, OR (B) ONE HUNDRED DOLLARS ($100).</p>
+<p>This limitation does not apply to liability that cannot be limited under applicable law (for example, liability for Needs' own gross negligence, willful misconduct, or fraud, where such limitation is prohibited).</p>
+
+<h2>16. Indemnification</h2>
+<p>You agree to indemnify, defend, and hold harmless Needs and its officers, directors, employees, and agents from any claim, liability, damage, loss, or expense (including reasonable attorneys' fees) arising out of or related to: (a) your use of the Platform; (b) your User Content; (c) your violation of these Terms or applicable law; (d) any transaction, service, good, or volunteer activity you engage in with another User; or (e) your violation of any third-party right.</p>
+
+<h2>17. Dispute Resolution; Arbitration Agreement</h2>
+<p><strong>PLEASE READ THIS SECTION CAREFULLY. IT AFFECTS YOUR LEGAL RIGHTS, INCLUDING YOUR RIGHT TO FILE A LAWSUIT IN COURT.</strong></p>
+<h3>17.1 Agreement to Arbitrate.</h3>
+<p>Except for claims that qualify for small-claims court, or claims for injunctive relief relating to intellectual property or unauthorized access to the Platform, you and Needs agree to resolve any dispute arising out of or relating to these Terms or the Platform through binding, individual arbitration, rather than in court, administered by the American Arbitration Association (AAA) under its applicable rules, in Orange County, California or another mutually agreed location, or remotely, as permitted by the provider's rules.</p>
+<h3>17.2 Class Action Waiver.</h3>
+<p>You and Needs agree that any arbitration or proceeding will be conducted only on an individual basis and not as a class, collective, or representative action, to the fullest extent permitted by law.</p>
+<h3>17.3 Opt-Out.</h3>
+<p>You may opt out of this arbitration agreement by sending written notice to <a href="mailto:contact@needs-module.com">contact@needs-module.com</a> within thirty (30) days of first accepting these Terms. If you opt out, this Section 17 will not apply to you, but the remainder of these Terms will.</p>
+<h3>17.4 Severability of Arbitration Terms.</h3>
+<p>If the class action waiver in Section 17.2 is found unenforceable as to a particular claim or request for relief, that claim or request will be severed and proceed in court, and the remainder of the arbitration agreement will still apply.</p>
+
+<h2>18. Governing Law and Venue</h2>
+<p>These Terms are governed by the laws of the State of California, without regard to conflict-of-laws principles, except as preempted by the Federal Arbitration Act with respect to Section 17. For any dispute not subject to arbitration, the parties consent to the exclusive jurisdiction of the state and federal courts located in Orange County, California.</p>
+
+<h2>19. Termination</h2>
+<p>You may stop using the Platform and close your account at any time. Needs may suspend or terminate your account or access to the Platform, with or without notice, for violation of these Terms, suspected fraud or illegal activity, risk to other Users, or at its discretion for any lawful reason. Sections that by their nature should survive termination (including Sections 7, 9.3 as to amounts already incurred, 11.2, 14–18, and 20–22) will survive.</p>
+
+<h2>20. Changes to the Platform and Terms</h2>
+<p>Needs may modify the Platform, including adding, changing, or discontinuing features (such as introducing Subscription Fees or payment processing), and may update these Terms from time to time. We will provide notice of material changes (for example, through the app or by email) before they take effect. Continued use of the Platform after changes take effect constitutes acceptance of the updated Terms.</p>
+
+<h2>21. Communications</h2>
+<p>By creating an account, you consent to receive communications from Needs related to your account and the Platform, including push notifications, email, and, if you provide a phone number and opt in, SMS. You may manage notification preferences in the app or device settings, and opt out of non-essential communications as described in the Privacy Policy.</p>
+<h3>21.1 Needs LLC SMS verification and service notifications.</h3>
+<p>Users and guests may separately and affirmatively enroll in Needs' automated transactional SMS program. Messages may include verification codes or links, request and business-response updates, appointment and quote confirmations, AI authorization, expiry or reverification notices, AI activity alerts and security notices. No marketing or promotional texts are included in this program. Message frequency varies according to activity. Message and data rates may apply. Consent is optional and is not a condition of purchase, account creation or request submission; email is an alternative. Providing a phone number, accepting these Terms or granting AI access does not itself constitute SMS consent.</p>
+<h3>21.2 Opt-out and assistance.</h3>
+<p>Reply STOP to end SMS messages. A final opt-out acknowledgment may be sent. Reply HELP for assistance, or contact <a href="mailto:contact@needs-module.com">contact@needs-module.com</a>. After opting out, use email for verification and confirmations; SMS may resume only after renewed affirmative opt-in. Wireless carriers are not liable for delayed or undelivered messages. Keep your mobile number current and notify Needs if it changes. See our <a href="/privacy-policy">Privacy Policy</a> for information about handling SMS data.</p>
+
+<h2>22. General</h2>
+<h3>22.1 Entire Agreement.</h3>
+<p>These Terms, together with the Privacy Policy and any other terms referenced herein, constitute the entire agreement between you and Needs regarding the Platform.</p>
+<h3>22.2 Severability.</h3>
+<p>If any provision of these Terms is found unenforceable, the remaining provisions remain in full force and effect.</p>
+<h3>22.3 No Waiver.</h3>
+<p>Needs' failure to enforce any provision is not a waiver of its right to do so later.</p>
+<h3>22.4 Assignment.</h3>
+<p>You may not assign these Terms without Needs' consent. Needs may assign these Terms in connection with a merger, acquisition, or sale of assets.</p>
+<h3>22.5 Force Majeure.</h3>
+<p>Needs is not liable for delay or failure to perform resulting from causes beyond its reasonable control.</p>
+<h3>22.6 Contact.</h3>
+<p>Questions about these Terms can be sent to <a href="mailto:contact@needs-module.com">contact@needs-module.com</a>.<br>Needs LLC, 124 Cottonwood Lane, Seal Beach, CA 90740<br><a href="https://www.needs-module.com">needs-module.com</a></p>
+`));
+});
+
+app.get('/privacy-policy', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.send(renderLegalPage('Privacy Policy', 'November 27, 2026', `
+<h2>1. Introduction</h2>
+<p>This Privacy Policy explains how Needs LLC, a California limited liability company ("Needs," "we," "us") collects, uses, discloses, and protects information in connection with the Needs mobile application, website, public business modules, guest workflows, external AI connectors and related services (the "Platform"). This Policy is incorporated into, and should be read together with, our <a href="/terms-of-service">Terms of Service</a>.</p>
+<p>This Policy applies to registered users and guests. Where consent is required, we obtain it separately; use of the Platform alone does not constitute consent to SMS, optional AI access or other processing requiring affirmative consent.</p>
+
+<h2>2. Information We Collect</h2>
+<h3>2.1 Information You Provide</h3>
+<ul>
+<li>Account information: name, email address, phone number, password, and (for Providers/Organizations) business name, category, and related profile details.</li>
+<li>Service requests and listings: descriptions of needs, goods, or opportunities; category; preferred timing; and any text you submit.</li>
+<li>Photos, video, and audio: images or recordings you capture or upload (via your device camera or photo library) to illustrate a request, listing, or appointment follow-up.</li>
+<li>Messages: communications you send to other Users or to Needs through in-app messaging.</li>
+<li>Quotes and estimates: pricing and scope information submitted by Providers in response to requests.</li>
+<li>Connections/community content: opportunities, posts, or responses submitted through Organization or volunteer-coordination features.</li>
+<li>Support communications: information you provide when contacting us for help.</li>
+<li>Guest and public-module information: first name, email, phone number if SMS is selected, question or quote request, conversation content, photos and appointment details. Public business profiles may contain business contact details, services, menus, prices, licensing information, hours and offers.</li>
+<li>Connections and loyalty information: connection requests and preferences, restaurant visit-code redemption, NeedCoins balances and promotional offer usage where available.</li>
+<li>Consent and verification information: selected channel, SMS consent and withdrawal records, authorization choices, confirmation results and relevant timestamps.</li>
+</ul>
+<h3>2.2 Information Collected Automatically</h3>
+<ul>
+<li>Location data: with your permission, we collect precise or approximate location (via your device's location services) to identify nearby relevant requests, Providers, or opportunities, and to support location-based features. You can disable location access in your device settings, though some features may not work without it.</li>
+<li>Device and usage data: device type, operating system, app version, log data, crash reports, and in-app activity (e.g., which screens you use).</li>
+<li>Push notification tokens: a device identifier used to deliver push notifications; you can disable push notifications in your device settings.</li>
+<li>AI access and security records: request and session identifiers, tracking-link and token records, connection identifiers, approved permissions, access timestamps, AI read/write activity, security events, confirmation delivery status and revocation records. These records support access controls, auditing and fraud prevention.</li>
+</ul>
+<h3>2.3 Information From Third-Party Integrations</h3>
+<ul>
+<li>Calendar data: if you connect a third-party calendar (e.g., Google Calendar) to use scheduling features, we access and sync the calendar data necessary to display, create, or update appointments related to the Platform, as permitted by your account connection and that provider's terms.</li>
+<li>Sign-in providers: if you register or log in using a third-party identity provider, we receive the profile information that provider shares with us based on your permissions.</li>
+</ul>
+<h3>2.4 Information From Other Users</h3>
+<p>If you are connected with a Provider, Organization, or Volunteer, the counterparty's relevant request/response information (e.g., a Customer's request details, or a Provider's quote) is shared with you as described in Section 5.</p>
+
+<h2>3. AI and Automated Processing</h2>
+<h3>3.1 Matching Engine.</h3>
+<p>Needs uses automated tools, including machine-learning language models (the "Matching Engine"), to:</p>
+<ul>
+<li>interpret and categorize service requests;</li>
+<li>identify relevant Providers, Organizations, or opportunities;</li>
+<li>generate preliminary, non-binding estimates and suggested follow-up questions; and</li>
+<li>enhance or auto-generate descriptions, tags, or edits for photos and listings you submit.</li>
+</ul>
+<h3>3.2 How the Matching Engine Processes Your Request.</h3>
+<p>To perform the functions above, the Matching Engine combines two sources of information: (a) the content you submit — request text, photos, and location — and (b) business and service information already in our database (such as a Provider's listed pricing, service category, and service area). It analyzes your request together with relevant business/service records to generate a more accurate preliminary estimate and to decide what clarifying question, if any, to ask you next.</p>
+<h3>3.3 Where Your Request Is Processed.</h3>
+<p>Depending on system configuration and load, the content of your request may be processed in one of the following ways:</p>
+<ul>
+<li>Third-party AI API: sent to Mistral AI's hosted language-model API for processing. In this mode, Mistral AI (as an independent company) receives and processes the text of your request as our service provider/processor.</li>
+<li>Rented cloud GPU infrastructure: sent to a language model instance running on third-party rented cloud GPU infrastructure (e.g., RunPod). In this mode, the infrastructure provider's servers process your request as our service provider/processor, though the model itself is one we operate.</li>
+<li>Needs-operated infrastructure: processed entirely on hardware Needs owns or directly controls, with no third party involved.</li>
+</ul>
+<p>The Platform may use any of these modes, including automatic fallback from the third-party API to rented GPU infrastructure if the API is unavailable. Third-party AI and infrastructure providers process information to support these functions, subject to applicable contractual terms and privacy practices.</p>
+<h3>3.4 Model Improvement.</h3>
+<p>The base Matching Engine was initially trained using synthetically generated example data, not real User Content. We may use de-identified or aggregated data derived from Platform activity to evaluate and improve the Matching Engine's accuracy going forward.</p>
+<h3>3.5 No Automated Legal/Significant Decisions.</h3>
+<p>The Matching Engine does not make final decisions that produce legal or similarly significant effects about you (for example, it does not finalize a binding contract or price on your behalf); it produces suggestions, relevant provider information, and preliminary estimates, which Users may act on or disregard.</p>
+<h3>3.6 Public modules and external AI.</h3>
+<p>Needs may use business profiles to answer public questions, interpret requests, identify Organizations, and identify up to three relevant service providers. Registered and guest Users may authorize external AI assistants through request-specific links, public MCP sessions or scoped OAuth connections. These external assistants are distinct from the infrastructure used by Needs to process its own AI requests. They may receive request or account information within the access actually granted and process it under their own terms. Needs does not send the account password to the external assistant in the OAuth flow. Public connector access alone does not authorize private records.</p>
+<h3>3.7 Authorization limits and notifications.</h3>
+<p>Guest tracking pages activate after confirmation, are specific to one request and business, expire after 48 hours unless extended by affirmative approval for another 24 hours, and can be revoked immediately. Active links function as bearer credentials: disclosure may permit another holder to read or reply and attach photos. Guest MCP sessions require initial confirmation and allow a maximum of five total requests over 48 hours using the verified identity; renewal requires fresh confirmation. Account connections are scoped, require reverification every 30 days, and are automatically suspended for unusual activity. Needs logs AI activity and provides guest notices by email or SMS and account activity logs in the app. Quote acceptance and appointment cancellation require separate confirmation; MCP/account appointment confirmation also requires separate confirmation, while the authorized private guest page may permit one-click confirmation of a business-proposed time. See Terms Section 6 for full controls.</p>
+
+<h2>4. How We Use Information</h2>
+<p>We use the information described above to:</p>
+<ul>
+<li>operate, provide, and personalize the Platform, including provider identification, scheduling, and messaging features;</li>
+<li>communicate with you about your account, requests, relevant providers, and appointments (including push notifications and, if you opt in, SMS/email);</li>
+<li>maintain the safety, security, and integrity of the Platform, including fraud and abuse prevention;</li>
+<li>provide customer support;</li>
+<li>analyze and improve the Platform and the Matching Engine;</li>
+<li>comply with legal obligations and enforce our Terms of Service; and</li>
+<li>with your consent, for any other purpose disclosed to you at the time of collection.</li>
+</ul>
+<p>We also use information to verify contact channels, hold requests pending confirmation, manage tokens and permissions, deliver authorization and expiry notices, record AI activity, detect misuse, and administer loyalty points and organizational connections. SMS delivery is limited to the expressly authorized transactional purposes described in Section 4.1.</p>
+<h3>4.1 SMS communications</h3>
+<p>Needs LLC uses Twilio to deliver verification codes or links, request and response updates, appointment and quote confirmations, AI authorization and reverification notices, AI activity alerts and security notices. SMS is optional and requires a separate affirmative opt-in; email remains an alternative. We record consent, the number provided, the consent wording/version, timestamps, delivery records and withdrawals as necessary to administer the program. Message frequency varies. Message and data rates may apply. Reply STOP to end messages or HELP for assistance; contact <a href="mailto:contact@needs-module.com">contact@needs-module.com</a> for help. No marketing or promotional messages are sent under this program.</p>
+
+<h2>5. How We Share Information</h2>
+<h3>5.1 With Relevant Users.</h3>
+<p>When you submit a request or respond to one, we share the relevant information (e.g., request details, photos, location/proximity, quotes, and contact information necessary to coordinate) with the relevant Provider, Customer, Organization, or Volunteer, so they can respond to or fulfill that request.</p>
+<p><strong>Use restriction on recipients:</strong> A Provider or Organization that receives your information through a request may use it only to respond to and fulfill that specific request or opportunity. They may not use it for unrelated marketing, resale, or data brokering, and may not combine it with other data to re-identify or profile you beyond that purpose, except with your separate, affirmative consent. Needs requires this restriction by contract (see Terms of Service, Section 11.4) but is not responsible for a Provider's or Organization's independent misuse of information after it is shared, except as required by law.</p>
+<h3>5.2 Service Providers.</h3>
+<p>We share information with vendors that perform services on our behalf, under contractual obligations to protect your information and use it only to provide services to us, including:</p>
+<ul>
+<li>Mistral AI and/or rented cloud GPU infrastructure providers (e.g., RunPod) — to process the text of your request through the Matching Engine, as described in Section 3.3;</li>
+<li>cloud hosting and database providers — to store Platform data;</li>
+<li>push-notification delivery (e.g., Expo's push service) — to deliver notifications to your device;</li>
+<li>calendar integration (e.g., Google Calendar, only for accounts that connect it) — to sync appointments; and</li>
+<li>location/geocoding services (e.g., OpenStreetMap's Nominatim) — to convert coordinates you share into a city, state, or zip code for provider identification purposes.</li>
+<li>SMS delivery providers (Twilio and telecommunications carriers): receive the destination number and necessary message and delivery information solely to deliver and operate Needs' messaging service, not to obtain independent permission to contact Users.</li>
+</ul>
+<h3>5.2.1 External AI assistants.</h3>
+<p>At your direction, a connected assistant or holder of an authorized guest link may access information within the available permissions. Such assistants may copy or retain data under their own privacy practices. Needs does not provide SMS consent records to these assistants or participating businesses.</p>
+<h3>5.3 Legal and Safety.</h3>
+<p>We may disclose information if required by law, subpoena, or legal process, or if we believe in good faith it is necessary to protect the rights, property, or safety of Needs, our Users, or the public, or to investigate fraud or security issues.</p>
+<h3>5.4 Business Transfers.</h3>
+<p>If Needs is involved in a merger, acquisition, financing, or sale of assets, information may be transferred as part of that transaction, subject to this Policy or a policy providing comparable protections.</p>
+<h3>5.5 Aggregated/De-identified Data.</h3>
+<p>We may share aggregated or de-identified information that cannot reasonably be used to identify you.</p>
+<h3>5.6 No Sale of Children's Data; No Ad-Tracking Sale (current state).</h3>
+<p>As of this Policy's date, Needs does not sell your personal information to third parties for monetary consideration, and does not use your information for cross-context behavioral advertising.</p>
+<h3>5.7 Mobile information and SMS consent.</h3>
+<p>Mobile information collected for the Needs SMS program is not disclosed to third parties or affiliates for advertising, marketing or promotional purposes. SMS consent is specific to Needs and is not sold, rented, transferred or made available to other businesses for their own messaging. Necessary delivery information is provided to messaging infrastructure solely to operate Needs' program. Phone numbers separately provided for coordinating an underlying service are distinct from SMS enrollment data and may be used for the specific coordination purpose disclosed at collection; they do not convey consent to third-party texting. The restrictions on SMS opt-in data apply notwithstanding the general disclosures in this Section, including business transfers.</p>
+<p>All the above categories exclude text messaging originator opt-in data and consent; this information won't be shared with any third parties.</p>
+
+<h2>6. Data Retention</h2>
+<p>We retain information for as long as needed to provide the Platform, comply with legal obligations, resolve disputes, and enforce our agreements. Retention periods vary by data type (for example, messages and request history may be retained longer to support dispute resolution; device tokens are deleted or invalidated when you uninstall the app or disable notifications). You may request deletion of your account and associated personal information as described in Section 8.</p>
+<p>Expiration or revocation of AI access ends future authorization but does not automatically erase conversation history, consent records, activity logs or copies held by external assistants. We retain verification, consent, opt-out and security records as needed for compliance, fraud prevention, dispute resolution and honoring suppression requests. Retention is limited to the period reasonably necessary for those purposes, subject to applicable law.</p>
+
+<h2>7. Your Choices</h2>
+<ul>
+<li>Location: disable in device settings at any time (may limit discovery features).</li>
+<li>Camera/Photos: disable in device settings; you can also decline to attach media to a request.</li>
+<li>Push notifications: manage in-app or in device settings.</li>
+<li>Calendar sync: disconnect a connected calendar account at any time in the app's connection settings.</li>
+<li>Marketing communications: opt out via the unsubscribe link or in-app preference center (does not apply to essential service/account communications).</li>
+<li>AI connections: decline guest AI access, revoke a guest tracking link, decline renewal, or modify/revoke account AI scopes in Connected AI. A guest MCP session expires at its defined limit; the public connector can be removed in the external assistant's settings.</li>
+<li>SMS: decline enrollment or reply STOP to withdraw consent. Use email for necessary verification after opting out; SMS resumes only with affirmative renewed consent. Reply HELP or contact <a href="mailto:contact@needs-module.com">contact@needs-module.com</a> for assistance.</li>
+</ul>
+
+<h2>8. Your Privacy Rights (California and Other U.S. States)</h2>
+<p>If you are a California resident, the California Consumer Privacy Act, as amended by the California Privacy Rights Act (CCPA/CPRA), and if you reside in certain other states, similar state privacy laws, give you the following rights with respect to your personal information, subject to certain exceptions:</p>
+<ul>
+<li>Right to know/access the categories and specific pieces of personal information we have collected about you, the sources, the purposes of collection, and the categories of third parties with whom we share it.</li>
+<li>Right to delete personal information we have collected from you, subject to certain exceptions (e.g., information needed to complete a transaction, detect security incidents, or comply with legal obligations).</li>
+<li>Right to correct inaccurate personal information.</li>
+<li>Right to opt out of sale or sharing of personal information (as noted in Section 5.6, we do not currently sell or share personal information as those terms are defined by CCPA/CPRA; this right will apply in practice if that changes).</li>
+<li>Right to limit use of sensitive personal information (e.g., precise geolocation), where applicable.</li>
+<li>Right to non-discrimination for exercising any of these rights.</li>
+</ul>
+<p>Categories of personal information collected in the preceding 12 months (CCPA Cal. Civ. Code § 1798.140 categories): identifiers (name, email, phone); customer records information; geolocation data; audio/visual information (photos, video, audio you submit); commercial information (requests, quotes); internet/app activity; and, for Providers/Organizations, professional information; authentication and authorization records, including sensitive credentials where applicable; and loyalty and consent records. Sources: directly from you, automatically from your device, other Users and authorized integrations. Business/commercial purposes: as described in Section 4. Disclosed for a business purpose to: service providers and relevant Users as described in Section 5. Sold or shared: none, as of this Policy's date (see Section 5.6).</p>
+<p>To exercise your rights, contact us at <a href="mailto:contact@needs-module.com">contact@needs-module.com</a>. We will verify your identity before fulfilling your request, consistent with legal requirements. You may designate an authorized agent to make a request on your behalf as permitted by law. We will respond within the time required by applicable law.</p>
+
+<h2>9. Children's Privacy</h2>
+<p>The Platform is not directed to children under 13, and we do not knowingly collect personal information from children under 13. If we learn we have collected such information, we will delete it. Organizations that involve minors in volunteer or community activities through the Platform are solely responsible for obtaining any legally required consent and for supervision, as described in the Terms of Service.</p>
+
+<h2>10. Data Security</h2>
+<p>We use reasonable administrative, technical, and physical safeguards designed to protect your information. No method of transmission or storage is completely secure, and we cannot guarantee absolute security.</p>
+<p>Needs uses request-specific and scoped authorization, expiration, revocation, activity logging and access validity checks as described in Section 3.7. Account AI connections are rate-limited and may be suspended for anomalous activity. Guest access is subject to action-specific limits. Keep tracking links, session tokens and verification credentials confidential. Report suspicious access to <a href="mailto:contact@needs-module.com">contact@needs-module.com</a>. These safeguards reduce risk but cannot guarantee that an authorized or unauthorized link holder will not copy information.</p>
+
+<h2>11. Third-Party Links and Services</h2>
+<p>The Platform may link to or integrate with third-party services (e.g., calendar providers, mapping services and external AI assistants). This Policy does not apply to those third parties' practices, which are governed by their own privacy policies.</p>
+
+<h2>12. International Users</h2>
+<p>The Platform is intended for use within the United States. If you access the Platform from outside the United States, your information will be transferred to and processed in the United States, which may have different data protection laws than your jurisdiction.</p>
+
+<h2>13. Changes to This Policy</h2>
+<p>We may update this Policy from time to time. We will post the updated Policy with a new "Last Updated" date and, for material changes, provide additional notice (such as an in-app notification or email) before the changes take effect.</p>
+
+<h2>14. Contact Us</h2>
+<p>Questions about this Policy or requests regarding your personal information can be sent to:</p>
+<p>Needs LLC, 124 Cottonwood Lane, Seal Beach, CA 90740<br><a href="mailto:contact@needs-module.com">contact@needs-module.com</a><br><a href="https://www.needs-module.com">needs-module.com</a></p>
+`));
+});
 
 // ✅ Middleware to log every request
 app.use((req, res, next) => {
